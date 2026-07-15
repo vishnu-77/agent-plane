@@ -1,0 +1,14 @@
+# Optional price book for usage metering. Metering runs without this; pricing
+# only adds an estimated cost to GET /v1/usage. (Metering, not billing.)
+pricing:
+  currency: USD
+  models:                      # priced per 1,000 tokens (units)
+    gpt-4.1: { per_1k_units: 0.010 }
+    gpt-4o-mini: { per_1k_units: 0.001 }
+    claude-sonnet: { per_1k_units: 0.008 }
+  tools:                       # priced per call
+    search_kb: { per_call: 0.0 }
+    wire_transfer: { per_call: 0.50 }
+  default:
+    model_per_1k_units: 0.0
+    tool_per_call: 0.0

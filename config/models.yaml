@@ -1,0 +1,24 @@
+# Model catalog (config-driven). Onboard models/providers here — no code change.
+# tags carry the provider AND a sensitivity class (external/internal) that
+# policies match on via `model_provider`.
+models:
+  - id: gpt-4.1
+    provider: openai
+    upstream_model: gpt-4.1
+    tags: [openai, external]
+    fallback: [gpt-4o-mini]
+
+  - id: gpt-4o-mini
+    provider: openai
+    upstream_model: gpt-4o-mini
+    tags: [openai, external]
+
+  - id: claude-sonnet
+    provider: anthropic
+    upstream_model: claude-sonnet-4-6
+    tags: [anthropic, external]
+
+  - id: azure-private-gpt4
+    provider: azure
+    upstream_model: gpt-4            # Azure deployment name
+    tags: [azure, azure_openai_private, external]

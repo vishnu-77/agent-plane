@@ -1,0 +1,18 @@
+# Tool catalog (config-driven). Default-deny: only tools listed here can be
+# invoked through the broker. The broker executes them with its own credential
+# (secret_env), so the agent never holds it. "mock" tools echo for dev/offline.
+tools:
+  - name: search_kb
+    type: mock
+    # description: search the internal knowledge base (read-only)
+
+  - name: echo
+    type: mock
+
+  # High-impact tools — also gated to approval by sensitive-tool-approval.yaml.
+  - name: send_external_email
+    type: mock           # swap to type: http with url + secret_env in production
+  - name: wire_transfer
+    type: mock
+  - name: delete_records
+    type: mock

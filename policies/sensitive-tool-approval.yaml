@@ -1,0 +1,17 @@
+policy:
+  name: sensitive-tool-approval
+  version: "2026-06-20"
+
+  # Matches only when the request declares one of these high-impact tools.
+  match:
+    tools:
+      - wire_transfer
+      - delete_records
+      - send_external_email
+
+  decision:
+    action: approval_required
+    reason: "High-impact tool requires human approval"
+    obligations:
+      - log_metadata
+      - record_policy_version

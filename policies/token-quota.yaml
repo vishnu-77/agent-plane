@@ -1,0 +1,13 @@
+policy:
+  name: token-quota
+  version: "2026-06-19"
+
+  match:
+    request_type: chat_completion
+
+  decision:
+    action: allow
+    max_tokens: 2000
+    obligations:
+      - emit_token_metric
+      - enforce_token_quota

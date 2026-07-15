@@ -1,0 +1,16 @@
+.git/
+.github/
+docs/
+tests/
+.venv/
+venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.egg-info/
+keys/
+audit.db
+*.sqlite
+.pytest_cache/
+.env
