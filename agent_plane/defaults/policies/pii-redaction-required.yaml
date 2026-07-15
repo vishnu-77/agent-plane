@@ -1,0 +1,19 @@
+policy:
+  name: pii-redaction-required
+  version: "2026-06-19"
+
+  match:
+    request_type: chat_completion
+
+  decision:
+    action: allow
+    redact:
+      - email
+      - credit_card
+      - phone
+      - api_key
+    log_level: metadata_only
+    obligations:
+      - redact_pii
+      - log_metadata
+      - record_policy_version

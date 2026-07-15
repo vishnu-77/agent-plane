@@ -1,0 +1,31 @@
+# Knowledge sources for the RAG authorization edge. Each document carries access
+# metadata; retrieval scores by relevance, then drops anything the caller isn't
+# authorized for BEFORE returning. Absence on a dimension = unrestricted there.
+sources:
+  - name: kb
+    type: local
+    documents:
+      - id: support-reset
+        text: "To reset a password, open Settings then Security and click Reset."
+        departments: [support]
+        classification: internal
+
+      - id: general-hours
+        text: "Our support hours are 9am to 5pm, Monday to Friday."
+        classification: public
+
+      - id: hr-severance
+        text: "Senior staff severance policy: twelve weeks plus accrued leave."
+        departments: [hr]
+        classification: confidential
+        allow_groups: [hr-admins]
+
+      - id: finance-forecast
+        text: "Q3 revenue forecast and earnings guidance for the board."
+        departments: [finance]
+        classification: confidential
+
+      - id: tenant-acme-note
+        text: "Acme account: renewal due, escalate to the named CSM."
+        tenant: acme
+        classification: internal

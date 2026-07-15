@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────
+# Open-source repo: track ONLY the runnable reference implementation.
+# Everything else — Medium series drafts (docs/), internal notes, build
+# artifacts — is ignored. Whitelist style: ignore all, then re-include code.
+# ─────────────────────────────────────────────────────────────────────────
+
+# 1) Ignore everything at the repo root by default.
+/*
+
+# 2) Re-include the implementation (and the files needed to run/build it).
+!/agent_plane/
+!/policies/
+!/config/
+!/tests/
+!/pyproject.toml
+!/README.md
+!/LICENSE
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/CHANGELOG.md
+!/Dockerfile
+!/docker-compose.yml
+!/.dockerignore
+!/.env.example
+!/.gitignore
+!/.github/
+
+# 3) Strip build/runtime artifacts that live *inside* the re-included dirs.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.env
+audit.db
+*.sqlite

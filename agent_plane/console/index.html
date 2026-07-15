@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-plane · control plane</title>
+<style>
+  :root{
+    --bg:#0a0d14; --bg2:#0e131d; --surface:#121826; --surface2:#161d2e;
+    --line:#222c40; --line2:#2c3850; --fg:#e9eef7; --mut:#8a97ad; --mut2:#5d6b82;
+    --accent:#67e8f9; --accent2:#22d3ee; --glow:#22d3ee55;
+    --allow:#4ade80; --deny:#f87171; --approval:#fbbf24; --plane:#7dd3fc;
+    --r:14px; --shadow:0 1px 0 #ffffff08, 0 12px 30px -12px #00000080;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:
+      radial-gradient(1100px 520px at 78% -8%, #11324022, transparent 60%),
+      radial-gradient(900px 500px at 10% 110%, #15203a30, transparent 55%),
+      var(--bg);
+    color:var(--fg);
+    font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial;
+    -webkit-font-smoothing:antialiased;
+  }
+  header{
+    position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:14px;
+    padding:14px 24px; flex-wrap:wrap;
+    background:linear-gradient(180deg,#0b0f18ee,#0b0f18b0); backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{display:flex; align-items:center; gap:11px}
+  .logo{width:30px;height:30px;border-radius:9px;background:
+    conic-gradient(from 200deg, var(--accent), #4f46e5, var(--accent));
+    box-shadow:0 0 22px var(--glow); position:relative}
+  .logo::after{content:"";position:absolute;inset:6px;border-radius:5px;background:var(--bg2)}
+  .brand b{font-size:16px;letter-spacing:.2px}
+  .brand span{color:var(--mut);font-size:12.5px}
+  .grow{flex:1}
+  header input{
+    background:#0b1019; border:1px solid var(--line); color:var(--fg);
+    border-radius:9px; padding:8px 11px; width:184px; outline:none; transition:border-color .15s;
+  }
+  header input:focus{border-color:var(--accent2)}
+  .btn{background:#18324a; color:#cfeff7; border:1px solid #235c70; border-radius:9px;
+    padding:8px 13px; cursor:pointer; font-weight:600; transition:.15s}
+  .btn:hover{border-color:var(--accent); box-shadow:0 0 0 3px #22d3ee22}
+  .toggle{display:flex;align-items:center;gap:7px;color:var(--mut);font-size:12.5px;cursor:pointer;user-select:none}
+  .toggle input{accent-color:var(--accent2)}
+
+  main{max-width:1180px; margin:0 auto; padding:24px; display:grid; gap:20px}
+  .panel{background:linear-gradient(180deg,var(--surface),var(--surface2));
+    border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow)}
+  .panel h2{margin:0;padding:14px 18px;font-size:12px;text-transform:uppercase;letter-spacing:.9px;
+    color:var(--mut); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px}
+  .panel h2 .sp{flex:1}
+  .pbody{padding:16px 18px}
+
+  /* stat strip */
+  .stats{display:grid; grid-template-columns:repeat(6,1fr); gap:14px}
+  .stat{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 16px}
+  .stat .k{color:var(--mut); font-size:11.5px; text-transform:uppercase; letter-spacing:.6px}
+  .stat .v{font-size:26px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums}
+  .v.allow{color:var(--allow)} .v.deny{color:var(--deny)} .v.appr{color:var(--approval)}
+  .v.small{font-size:15px; font-weight:600}
+
+  /* topology */
+  .topowrap{padding:8px}
+  svg .nodebox{fill:url(#gNode); stroke:var(--line2)}
+  svg .hub{fill:url(#gHub); stroke:#2b6f86}
+  svg .lbl{fill:var(--fg); font:600 13px ui-sans-serif,system-ui}
+  svg .sub{fill:var(--mut); font:11px ui-sans-serif,system-ui}
+  svg .count{fill:var(--accent); font:700 17px ui-sans-serif,system-ui; text-anchor:end}
+  svg .hubt{fill:#bff0fb; font:700 13px ui-sans-serif,system-ui; letter-spacing:.5px}
+  svg .hubp{fill:#cbd5e1; font:11.5px ui-sans-serif,system-ui}
+  svg .link{stroke:var(--line2); stroke-width:2; fill:none}
+  svg .link.active{stroke:var(--accent2); stroke-width:2.4; filter:drop-shadow(0 0 4px var(--glow));
+    stroke-dasharray:7 8; animation:flow 1.1s linear infinite}
+  svg .planned .nodebox{stroke-dasharray:4 4; opacity:.5}
+  svg .planned .lbl, svg .planned .sub{opacity:.6}
+  @keyframes flow{to{stroke-dashoffset:-30}}
+  .edge-on{filter:drop-shadow(0 0 8px var(--glow))}
+
+  /* feed */
+  .feed{max-height:420px; overflow:auto}
+  .ev{display:grid; grid-template-columns:64px 1fr auto; gap:12px; align-items:center;
+    padding:10px 8px; border-bottom:1px solid var(--line); animation:fade .35s ease}
+  .ev:last-child{border-bottom:0}
+  @keyframes fade{from{opacity:0;transform:translateY(-4px)}}
+  .ev .t{color:var(--mut2); font-size:12px; font-variant-numeric:tabular-nums}
+  .ev .who{font-size:12.5px}
+  .ev .who code{background:#0c1320;border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+  .ev .who .small{color:var(--mut); font-size:11.5px}
+  .badge{padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid}
+  .badge.allow{color:var(--allow);border-color:#4ade8040;background:#4ade8012}
+  .badge.deny{color:var(--deny);border-color:#f8717140;background:#f8717112}
+  .badge.approval_required{color:var(--approval);border-color:#fbbf2440;background:#fbbf2412}
+  .tag{display:inline-block;font-size:10.5px;color:var(--mut);border:1px solid var(--line);
+    border-radius:6px;padding:1px 6px;margin-left:6px}
+
+  .two{display:grid; grid-template-columns:1.5fr 1fr; gap:20px}
+  .rule{display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px dashed #ffffff0d; font-size:13px}
+  .rule:last-child{border-bottom:0}
+  .mut{color:var(--mut)} .err{color:var(--deny)} .dimhint{color:var(--mut2);font-size:12px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--mut2);box-shadow:0 0 0 0 transparent}
+  .dot.ok{background:var(--allow);box-shadow:0 0 10px #4ade8088}
+  .dot.bad{background:var(--deny)}
+  a{color:var(--accent)}
+  @media(max-width:860px){.stats{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><div class="logo"></div><div><b>agent-plane</b><br><span>control plane console</span></div></div>
+  <span class="dot" id="hdot" title="health"></span>
+  <span class="grow"></span>
+  <input id="bearer" placeholder="Bearer token  (usage)">
+  <input id="admin" placeholder="X-Admin-Token  (audit · policies)">
+  <label class="toggle"><input type="checkbox" id="auto" checked> live</label>
+  <button class="btn" onclick="refreshAll()">Refresh</button>
+</header>
+
+<main>
+  <!-- stat strip -->
+  <section class="stats" id="stats"></section>
+
+  <!-- try it -->
+  <section class="panel">
+    <h2>Try it <span class="sp"></span><span class="dimhint">fire a governed request with your Bearer token — watch it appear below</span></h2>
+    <div class="pbody" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="btn" onclick="tryEdge('/v1/tools/invoke',{tool:'search_kb',arguments:{q:'hello'}},'tool · search_kb')">▶ Tool call</button>
+      <button class="btn" onclick="tryEdge('/v1/retrieve',{source:'kb',query:'password reset'},'retrieve · kb')">▶ Retrieve</button>
+      <button class="btn" onclick="tryEdge('/v1/chat/completions',{model:'gpt-4.1',messages:[{role:'user',content:'hi'}]},'model · gpt-4.1')">▶ Model call</button>
+      <button class="btn" onclick="tryEdge('/v1/tools/invoke',{tool:'wire_transfer',arguments:{amount:100}},'tool · wire_transfer')">▶ Wire transfer (needs approval)</button>
+      <span id="trystatus" class="dimhint" style="margin-left:auto"></span>
+    </div>
+  </section>
+
+  <!-- topology -->
+  <section class="panel">
+    <h2>Topology <span class="sp"></span><span class="dimhint" id="topohint">decisions across edges (from the signed audit chain)</span></h2>
+    <div class="pbody topowrap">
+      <svg id="topo" viewBox="0 0 960 430" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">
+        <defs>
+          <linearGradient id="gHub" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#123243"/><stop offset="1" stop-color="#0e2330"/>
+          </linearGradient>
+          <linearGradient id="gNode" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#141b2b"/><stop offset="1" stop-color="#101626"/>
+          </linearGradient>
+        </defs>
+
+        <!-- caller -->
+        <g>
+          <rect class="nodebox" x="34" y="178" width="150" height="74" rx="12"/>
+          <text class="lbl" x="109" y="208" text-anchor="middle">Agent / User</text>
+          <text class="sub" x="109" y="226" text-anchor="middle">caller</text>
+        </g>
+        <path class="link active" d="M184 215 H300"/>
+
+        <!-- hub -->
+        <g>
+          <rect class="hub" x="300" y="138" width="270" height="154" rx="16"/>
+          <text class="hubt" x="435" y="170" text-anchor="middle">CONTROL PLANE</text>
+          <text class="hubp" x="435" y="198" text-anchor="middle">⬡  Policy engine — deterministic</text>
+          <text class="hubp" x="435" y="220" text-anchor="middle">⬡  Identity — verified delegation</text>
+          <text class="hubp" x="435" y="242" text-anchor="middle">⬡  Audit — one signed chain</text>
+          <text class="sub" x="435" y="270" text-anchor="middle" id="hub-pv">policy —</text>
+        </g>
+
+        <!-- links (hub right edge x=570,y=215 -> edge node left x=700) -->
+        <path class="link" id="l-model" d="M570 200 C 640 120, 660 70, 700 70"/>
+        <path class="link" id="l-tool"  d="M570 208 C 645 165, 660 145, 700 145"/>
+        <path class="link" id="l-rag"   d="M570 215 H700"/>
+        <path class="link" id="l-a2a"   d="M570 222 C 645 265, 660 285, 700 285"/>
+        <path class="link" id="l-egress" d="M570 230 C 640 320, 660 360, 700 360"/>
+
+        <!-- edge nodes -->
+        <g id="n-model"><rect class="nodebox" x="700" y="44" width="226" height="54" rx="12"/>
+          <text class="lbl" x="716" y="70">Model</text><text class="sub" x="716" y="88">/v1/chat/completions · LLMs</text>
+          <text class="count" id="c-model" x="910" y="78">—</text></g>
+        <g id="n-tool"><rect class="nodebox" x="700" y="118" width="226" height="54" rx="12"/>
+          <text class="lbl" x="716" y="144">Tool / MCP</text><text class="sub" x="716" y="162">/v1/tools/invoke · APIs</text>
+          <text class="count" id="c-tool" x="910" y="152">—</text></g>
+        <g id="n-rag"><rect class="nodebox" x="700" y="192" width="226" height="54" rx="12"/>
+          <text class="lbl" x="716" y="218">Knowledge / RAG</text><text class="sub" x="716" y="236">/v1/retrieve · identity-aware</text>
+          <text class="count" id="c-rag" x="910" y="226">—</text></g>
+        <g id="n-a2a"><rect class="nodebox" x="700" y="266" width="226" height="54" rx="12"/>
+          <text class="lbl" x="716" y="292">Agent → Agent</text><text class="sub" x="716" y="310">/v1/agents/delegate · scoped</text>
+          <text class="count" id="c-a2a" x="910" y="300">—</text></g>
+        <g id="n-egress" class="planned"><rect class="nodebox" x="700" y="340" width="226" height="54" rx="12"/>
+          <text class="lbl" x="716" y="366">Egress / Data</text><text class="sub" x="716" y="384">planned</text></g>
+      </svg>
+    </div>
+  </section>
+
+  <!-- feed + side -->
+  <section class="two">
+    <div class="panel">
+      <h2>Decision feed <span class="sp"></span><span class="dimhint" id="feedcount"></span></h2>
+      <div class="pbody feed" id="feed"><span class="mut">enter an admin token to stream the signed audit chain</span></div>
+    </div>
+    <div>
+      <div class="panel" style="margin-bottom:20px">
+        <h2>Policies</h2>
+        <div class="pbody" id="policies"><span class="mut">needs admin token</span></div>
+      </div>
+      <div class="panel">
+        <h2>Your usage</h2>
+        <div class="pbody" id="usage"><span class="mut">needs bearer token</span></div>
+      </div>
+    </div>
+  </section>
+
+  <p class="dimhint" style="text-align:center">API: <a href="/docs" target="_blank">/docs</a> · <a href="/redoc" target="_blank">/redoc</a> — every decision here is deterministic, and the audit chain is hash-linked &amp; signed (🔒).</p>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const bearer=()=>$("bearer").value.trim(), admin=()=>$("admin").value.trim();
+for(const k of ["bearer","admin"]){ $(k).value=localStorage.getItem("ap_"+k)||"";
+  $(k).addEventListener("input",()=>{localStorage.setItem("ap_"+k,$(k).value); refreshAll();}); }
+const esc=s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+async function jget(p,h={}){ try{const r=await fetch(p,{headers:h}); return {ok:r.ok,status:r.status,body:await r.json().catch(()=>({}))};}catch(e){return {ok:false,status:0,body:{}};} }
+const EDGES=["model","tool","rag","a2a"];
+const edgeKey=mr=> mr?.startsWith("tool:")?"tool" : mr?.startsWith("rag:")?"rag" : mr?.startsWith("a2a:")?"a2a" : "model";
+
+function setStats(o){
+  const cards=[
+    ["decisions",o.total,""],["allowed",o.allow,"allow"],["denied",o.deny,"deny"],
+    ["approval",o.appr,"appr"],["tenants",o.tenants,""],["policy bundle",o.pv,"small"]
+  ];
+  $("stats").innerHTML=cards.map(([k,v,c])=>`<div class="stat"><div class="k">${k}</div><div class="v ${c}">${esc(v??"—")}</div></div>`).join("");
+}
+
+function paintTopo(counts){
+  for(const e of EDGES){
+    const c=counts[e]||0;
+    $("c-"+e).textContent=c;
+    const link=$("l-"+e), node=$("n-"+e);
+    link.classList.toggle("active",c>0);
+    node.classList.toggle("edge-on",c>0);
+  }
+}
+
+function renderFeed(events){
+  $("feedcount").textContent = events.length ? events.length+" recent" : "";
+  if(!events.length){ $("feed").innerHTML='<span class="mut">no decisions yet — call an edge and watch it appear</span>'; return; }
+  $("feed").innerHTML=events.map(e=>{
+    const ek=edgeKey(e.model_requested);
+    const who=`${esc(e.user_id)}${e.agent_id?'<span class="small"> / '+esc(e.agent_id)+'</span>':''}`;
+    return `<div class="ev">
+      <div class="t">${esc((e.created_at||'').slice(11,19))}</div>
+      <div class="who">${who} <span class="tag">${ek}</span> <code>${esc(e.model_requested)}</code>
+        ${e.reason?`<div class="small">${esc(e.reason)}</div>`:''}</div>
+      <div><span class="badge ${esc(e.decision)}">${esc(e.decision)}</span> ${e.signature?'<span title="signed" style="margin-left:6px">🔒</span>':''}</div>
+    </div>`;
+  }).join("");
+}
+
+async function refreshAll(){
+  const h=await jget("/healthz");
+  $("hdot").className="dot "+(h.ok?"ok":"bad");
+  $("hub-pv").textContent="policy "+(h.body.policy_version||"—");
+
+  // policies
+  if(admin()){
+    const p=await jget("/admin/policies",{"X-Admin-Token":admin()});
+    $("policies").innerHTML = p.ok
+      ? `<div class="rule"><span class="mut">version</span><code>${esc(p.body.policy_version)}</code></div>`+
+        p.body.rules.map(n=>`<div class="rule"><span>${esc(n)}</span><span class="mut">rule</span></div>`).join("")
+      : `<span class="err">${p.status} — check token</span>`;
+  }
+
+  // usage (caller tenant)
+  if(bearer()){
+    const u=await jget("/v1/usage",{"Authorization":"Bearer "+bearer()});
+    if(u.ok){ const it=u.body.items||[];
+      $("usage").innerHTML = it.length
+        ? it.map(i=>`<div class="rule"><span>${esc(i.edge)} · <span class="mut">${esc(i.resource)}</span></span><span>${i.calls} calls</span></div>`).join("")+
+          `<div class="dimhint" style="margin-top:8px">tenant ${esc(u.body.tenant)}</div>`
+        : '<span class="mut">no usage for this tenant yet</span>';
+    } else $("usage").innerHTML=`<span class="err">${u.status}</span>`;
+  }
+
+  // audit -> stats + topo + feed (global, admin-only)
+  let counts={}, total=0, allow=0, deny=0, appr=0; const tenants=new Set();
+  let events=[];
+  if(admin()){
+    const a=await jget("/v1/audit?limit=50",{"X-Admin-Token":admin()});
+    if(a.ok){
+      events=a.body.events||[];
+      for(const e of events){
+        total++; tenants.add(e.tenant);
+        if(e.decision==="allow")allow++; else if(e.decision==="deny")deny++; else if(e.decision==="approval_required")appr++;
+        const k=edgeKey(e.model_requested); counts[k]=(counts[k]||0)+1;
+      }
+      $("topohint").textContent="decisions across edges (last "+events.length+", from the signed audit chain)";
+    } else { $("topohint").textContent="audit is admin-only — enter the token"; }
+  }
+  setStats({total:admin()?total:"—",allow:admin()?allow:"—",deny:admin()?deny:"—",appr:admin()?appr:"—",
+            tenants:admin()?tenants.size:"—", pv:h.body.policy_version||"—"});
+  paintTopo(counts);
+  renderFeed(events);
+}
+
+async function tryEdge(path, body, label){
+  if(!bearer()){ $("trystatus").innerHTML='<span class="err">paste a Bearer token in the header first</span>'; return; }
+  $("trystatus").textContent="sending "+label+"…";
+  let r, j={};
+  try{ r=await fetch(path,{method:"POST",headers:{"Authorization":"Bearer "+bearer(),"Content-Type":"application/json"},body:JSON.stringify(body)});
+       j=await r.json().catch(()=>({})); }catch(e){ $("trystatus").innerHTML='<span class="err">network error</span>'; return; }
+  const cp=j.x_control_plane||{}, det=j.detail||{};
+  const cls = r.ok?"allow":(r.status===202?"approval_required":"deny");
+  const extra = cp.filtered_by_authorization!==undefined ? ` · filtered ${cp.filtered_by_authorization}`
+              : det.error ? ` · ${esc(det.error)}` : "";
+  $("trystatus").innerHTML=`<b>${esc(label)}</b> → <span class="badge ${cls}">${r.status}</span>${extra}`;
+  refreshAll();
+}
+
+let timer=null;
+function tick(){ if($("auto").checked) refreshAll(); }
+$("auto").addEventListener("change",()=>{ if($("auto").checked && !timer) timer=setInterval(tick,4000); });
+timer=setInterval(tick,4000);
+refreshAll();
+</script>
+</body>
+</html>

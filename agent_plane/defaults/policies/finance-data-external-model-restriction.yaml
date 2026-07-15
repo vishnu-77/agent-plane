@@ -1,0 +1,25 @@
+policy:
+  name: finance-data-external-model-restriction
+  version: "2026-06-19"
+  scope:
+    tenants: ["enterprise", "default"]
+    departments: ["finance", "legal"]
+
+  match:
+    data_classification:
+      - confidential
+      - regulated
+    model_provider:
+      - external
+
+  decision:
+    action: deny
+    reason: "Confidential finance/legal data cannot be sent to external models"
+
+  exceptions:
+    - model_provider: azure_openai_private
+      action: allow
+      obligations:
+        - redact_pii
+        - log_metadata
+        - retain_audit_90_days
