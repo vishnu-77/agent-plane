@@ -1,6 +1,6 @@
 [project]
 name = "agent-plane"
-version = "0.1.0"
+version = "0.2.0"
 description = "Enterprise Agentic AI Control Plane - a deterministic, drop-in policy decision point for AI agents"
 readme = "README.md"
 license = { text = "MIT" }

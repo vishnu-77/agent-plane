@@ -58,6 +58,6 @@ class AuditEvent(Base):
 
     # Tamper-evidence: hash chain + HMAC signature over the decision record.
     prev_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Unique: each chain link is distinct — a duplicate/replayed append is rejected.
+    # Unique: each chain link is distinct - a duplicate/replayed append is rejected.
     event_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     signature: Mapped[str | None] = mapped_column(String(128), nullable=True)

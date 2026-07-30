@@ -3,7 +3,7 @@
 Reuses the same control plane as the model and tool edges: identity (verified
 delegation + revocation), the deterministic engine for *source-level* decisions,
 and the one signed audit chain. The RAG-specific part is the *document-level*
-authorization filter — relevance is not permission, enforced before generation.
+authorization filter - relevance is not permission, enforced before generation.
 """
 from __future__ import annotations
 

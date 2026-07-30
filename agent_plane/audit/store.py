@@ -24,7 +24,7 @@ def _normalized(event: dict[str, Any]) -> dict[str, Any]:
     """Fill the full signed column set with model defaults.
 
     Signing hashes this normalized payload and it is also what gets persisted, so
-    verification (which reads the stored row, defaults and all) always matches —
+    verification (which reads the stored row, defaults and all) always matches -
     regardless of which optional fields a caller omitted.
     """
     payload: dict[str, Any] = {

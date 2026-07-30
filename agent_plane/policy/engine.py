@@ -144,7 +144,7 @@ class YamlPolicyEngine:
 
         # Least-privilege tool enforcement (identity-scoped). When the actor
         # carries an explicit ``allowed_tools`` grant, any requested tool outside
-        # it is a hard deny — this can only tighten the decision above. An empty
+        # it is a hard deny - this can only tighten the decision above. An empty
         # grant means "not scoped at the identity layer"; restrict such cases via
         # policy (e.g. a match.tools rule) instead.
         if request.tools_requested and request.actor.allowed_tools:

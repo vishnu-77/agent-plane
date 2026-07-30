@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately — do **not** open a public issue.
+Please report security issues privately - do **not** open a public issue.
 
 - Email: **team@togro.co** (subject: `agent-plane security`)
 - Or use GitHub's private "Report a vulnerability" advisory flow.
@@ -21,20 +21,20 @@ start with default secrets). Before exposing it:
 - [ ] Set a strong `ADMIN_TOKEN` (or leave the admin API disabled).
 - [ ] Put the service behind TLS and your own network controls.
 - [ ] Restrict `CORS_ORIGINS` to known front-ends.
-- [ ] Review `policies/*.yaml` — an empty policy dir means allow-all (the app
+- [ ] Review `policies/*.yaml` - an empty policy dir means allow-all (the app
       warns, and falls back to bundled defaults).
 - [ ] Treat the audit log as evidence: ship it to durable, append-only storage.
 
 ## Built-in abuse protection
 
-- **Request-size cap** — bodies larger than `MAX_REQUEST_BYTES` (default 1 MB) are
+- **Request-size cap** - bodies larger than `MAX_REQUEST_BYTES` (default 1 MB) are
   rejected with 413 (Content-Length check).
-- **Rate limiting** — `RATE_LIMIT_PER_MINUTE` per client (default 600; 0 disables),
+- **Rate limiting** - `RATE_LIMIT_PER_MINUTE` per client (default 600; 0 disables),
   keyed by IP. Behind a proxy, set `TRUST_FORWARDED_FOR=true` only if the proxy is
   trusted, so `X-Forwarded-For` is honored.
-- **Audit endpoint** — `GET /v1/audit` is operator-only (admin token); disabled
+- **Audit endpoint** - `GET /v1/audit` is operator-only (admin token); disabled
   entirely unless `ADMIN_TOKEN` is set.
-- **Audit chain integrity** — chain appends are serialized (an in-process lock plus
+- **Audit chain integrity** - chain appends are serialized (an in-process lock plus
   a Postgres transaction-scoped advisory lock), and `event_hash` is unique, so the
   hash chain cannot fork or accept a duplicate link even under concurrent writers.
 

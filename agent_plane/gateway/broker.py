@@ -4,7 +4,7 @@ A second enforcement point that reuses the *same* control plane as the model
 edge: identity (verified delegation + revocation), the deterministic policy
 engine (least-privilege ``allowed_tools`` + per-tool approval), and the one
 hash-chained, signed audit log. The agent requests an action; the broker decides,
-executes with its own credential, and records the decision — never the agent.
+executes with its own credential, and records the decision - never the agent.
 """
 from __future__ import annotations
 

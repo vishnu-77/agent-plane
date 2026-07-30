@@ -2,7 +2,7 @@
 
 One metered row per billable action (a model call or a tool call), keyed by
 tenant. This is the foundation for usage-based billing: the data needed to charge
-later is captured now. Pricing/invoicing is intentionally *not* here — only the
+later is captured now. Pricing/invoicing is intentionally *not* here - only the
 meter. Shares the audit database (SQLite by default, Postgres when configured).
 """
 from __future__ import annotations

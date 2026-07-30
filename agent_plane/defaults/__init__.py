@@ -1,6 +1,6 @@
 """Bundled default policies and config.
 
-Used when the working directory has none — so ``pip install agent-plane`` then
+Used when the working directory has none - so ``pip install agent-plane`` then
 ``agentplane serve`` works out of the box with sane, *non* allow-all defaults.
 ``agentplane init`` copies these into the current directory for customization.
 """

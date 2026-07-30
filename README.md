@@ -1,9 +1,9 @@
-# agent-plane — Enterprise Agentic AI Control Plane
+# agent-plane - Enterprise Agentic AI Control Plane
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 An open-source (MIT), **deterministic control plane for AI agents**: an
-OpenAI-compatible gateway that turns every AI request — *and every tool call* — into a
+OpenAI-compatible gateway that turns every AI request - *and every tool call* - into a
 **governed flow** instead of a raw `prompt → model → response`. Identity, configurable
 policy, tool least-privilege, guardrails, routing, **usage metering**, and a
 tamper-evident audit log are all applied at runtime. Drop-in (`base_url`),
@@ -38,7 +38,7 @@ POST /v1/chat/completions
   improvised tool call is stripped from the response. Policies can also target
   specific tools (`match.tools`) to require approval.
 - **Classification is derived, not trusted.** The caller's `data_classification`
-  can only be *escalated* by a content scan, never lowered — labelling a payload
+  can only be *escalated* by a content scan, never lowered - labelling a payload
   with secrets/finance content `public` won't bypass policy.
 - **Tamper-evident audit.** Each audit event is hash-chained to its predecessor
   and HMAC-signed, so a record can't be silently altered after the fact
@@ -53,7 +53,7 @@ cp .env.example .env                                # set at least one provider 
 agentplane serve --reload
 ```
 
-**Footprint.** The core install is minimal — the zero-setup path (SQLite + in-memory
+**Footprint.** The core install is minimal - the zero-setup path (SQLite + in-memory
 + `jwt_claims`) needs no native-heavy packages. Add only what you use:
 
 | Extra | Pulls in | For |
@@ -124,22 +124,22 @@ curl http://localhost:8000/v1/audit
 
 `agentplane serve`, then open:
 
-- **`/console`** — operator dashboard: live status + policy version, all edges/routes, loaded
+- **`/console`** - operator dashboard: live status + policy version, all edges/routes, loaded
   policies, per-tenant usage, and the signed audit chain (decisions, who, rules, 🔒). Paste a
   bearer token (for usage) and an `X-Admin-Token` (for audit/policies) into the header fields.
-- **`/docs`** — Swagger UI to call every endpoint interactively; **`/redoc`** — reference docs.
+- **`/docs`** - Swagger UI to call every endpoint interactively; **`/redoc`** - reference docs.
 
-The console is a single static page served by the control plane — no build step, no JS deps.
+The console is a single static page served by the control plane - no build step, no JS deps.
 
 ## Policies
 
 Four shipped rules in `policies/`:
 
-- `finance-data-external-model-restriction.yaml` — deny confidential/regulated
+- `finance-data-external-model-restriction.yaml` - deny confidential/regulated
   finance & legal data to external models; exception for `azure_openai_private`.
-- `pii-redaction-required.yaml` — redact email / credit_card / phone / api_key.
-- `token-quota.yaml` — cap `max_tokens`, enforce per-user rolling token quota.
-- `sensitive-tool-approval.yaml` — require human approval for high-impact tools
+- `pii-redaction-required.yaml` - redact email / credit_card / phone / api_key.
+- `token-quota.yaml` - cap `max_tokens`, enforce per-user rolling token quota.
+- `sensitive-tool-approval.yaml` - require human approval for high-impact tools
   (`wire_transfer`, `delete_records`, `send_external_email`).
 
 Edit/add YAML and restart; the bundle version changes and is stamped on every
@@ -147,13 +147,13 @@ new audit event.
 
 ## Identity modes (plug-and-play)
 
-Switch identity verification with one env var — no code change.
+Switch identity verification with one env var - no code change.
 
 - **Dev** (`IDENTITY_MODE=jwt_claims`, default): an HS256 token's claims are trusted,
   including `agent_id` and `allowed_tools`. Simple, but the agent asserts its own scope.
 - **Production** (`IDENTITY_MODE=delegation`): the gateway verifies an **Ed25519-signed
   delegation** issued by a trusted authority. The agent can no longer assert its own
-  identity or tools — `sub`, `app`, `agent`, and `scope.{tools,clearance}` come from the
+  identity or tools - `sub`, `app`, `agent`, and `scope.{tools,clearance}` come from the
   *verified* grant, with expiry and a revocation kill-switch.
 
 ```bash
@@ -172,12 +172,12 @@ agentplane identity issue --key keys/delegation_private.pem \
 
 The control plane only needs the **public** key; the private key stays with the issuer.
 Revoke a credential instantly by adding its `jti` to `REVOKED_JTIS` or `REVOCATION_FILE`.
-All knobs live in `.env.example` — drop in your policies (`policies/*.yaml`), set provider
+All knobs live in `.env.example` - drop in your policies (`policies/*.yaml`), set provider
 keys, choose backends, and run. That's the plug-and-play surface.
 
 ## Models (config-driven)
 
-The model/provider catalog is YAML — onboard models without touching code. Edit
+The model/provider catalog is YAML - onboard models without touching code. Edit
 `config/models.yaml` (or point `MODELS_FILE` elsewhere); if neither is present the
 built-in defaults in `agent_plane/routing/registry.py` apply. Shipped: `gpt-4.1`,
 `gpt-4o-mini` (OpenAI), `claude-sonnet` (Anthropic), `azure-private-gpt4` (Azure),
@@ -194,7 +194,7 @@ models:
 
 ## Architecture: one control plane, many edges
 
-Like a unified API/AI gateway, but built on the core ideas of this project — a
+Like a unified API/AI gateway, but built on the core ideas of this project - a
 **deterministic** decision, verified identity, and one tamper-evident audit chain,
 with **no classifier in the trust path**. The control plane (policy engine +
 identity + signed audit) is shared; enforcement is replicated per edge:
@@ -207,12 +207,12 @@ identity + signed audit) is shared; enforcement is replicated per edge:
 | Agent → agent (A2A) | `POST /v1/agents/delegate` | ✅ |
 | Agent → data / egress | (egress broker) | planned |
 
-Every edge runs the same flow — *identity → deterministic policy decision →
+Every edge runs the same flow - *identity → deterministic policy decision →
 least-privilege → execute with the broker's credential → one signed audit chain*.
 
 ## Tool Broker edge (agent → tool / MCP / API)
 
-Agents don't call sensitive tools directly — they ask the broker, which decides and
+Agents don't call sensitive tools directly - they ask the broker, which decides and
 executes with **its own** credential (the agent never holds it). Tools are
 config-driven (`config/tools.yaml` or `TOOLS_FILE`), **default-deny**.
 
@@ -230,7 +230,7 @@ hash-chained, signed audit log (as `tool:<name>`).
 ## RAG Authorization edge (agent → knowledge)
 
 **Relevance is not permission.** Retrieval scores candidates, then drops every document
-the caller isn't authorized for **before returning** — so the model never sees data the
+the caller isn't authorized for **before returning** - so the model never sees data the
 principal can't access. Sources are config-driven (`config/knowledge.yaml` or
 `KNOWLEDGE_FILE`); each document carries access metadata (tenant, departments,
 classification, user/group ACL). Authorization is deterministic ABAC/ACL against the
@@ -250,8 +250,8 @@ is metered (`edge=retrieve`).
 ## Agent-to-agent (A2A) edge
 
 A hand-off must not inherit full authority. An authenticated agent asks the control
-plane to mint a **child** credential; the plane enforces **attenuation** — the child's
-scope must be a subset of the parent's verified scope (escalation → 403) — then issues a
+plane to mint a **child** credential; the plane enforces **attenuation** - the child's
+scope must be a subset of the parent's verified scope (escalation → 403) - then issues a
 short-lived Ed25519 delegation and audits it. Requires `IDENTITY_MODE=delegation` and a
 `DELEGATION_SIGNING_KEY` (the matching private key for `DELEGATION_PUBLIC_KEY`); disabled otherwise.
 
@@ -285,7 +285,7 @@ curl -X POST localhost:8000/admin/policies/reload -H "X-Admin-Token: $ADMIN_TOKE
 
 ## Usage metering (bill on usage later)
 
-Every model call and tool call is metered per tenant — the data a billing system would
+Every model call and tool call is metered per tenant - the data a billing system would
 charge on. Metering is on by default (`USAGE_METERING=true`); pricing is optional.
 
 ```bash
@@ -294,7 +294,7 @@ curl http://localhost:8000/v1/usage -H "Authorization: Bearer $TOKEN"
 ```
 
 `GET /v1/usage?hours=24` scopes to a window. If `config/pricing.yaml` (or `PRICING_FILE`)
-is present, an `estimated_cost` is attached — **metering, not billing**; no payment is
+is present, an `estimated_cost` is attached - **metering, not billing**; no payment is
 taken. This is the hook for usage-based billing later, while staying OSS now.
 
 ## Run with Docker
@@ -307,7 +307,7 @@ docker run -p 8000:8000 --env-file .env agent-plane   # runs `agentplane serve`,
 ## Production
 
 Secure-by-default: with `ENVIRONMENT=production` the server **refuses to start**
-on default secrets. A fresh install is **governed, not allow-all** — bundled
+on default secrets. A fresh install is **governed, not allow-all** - bundled
 default policies load when the working dir has none (scaffold your own with
 `agentplane init`).
 
@@ -323,7 +323,7 @@ CORS_ORIGINS=https://app.example.com
 ```
 
 Ops endpoints: `GET /healthz` (liveness + policy version), `GET /readyz`
-(readiness — checks the audit store). Every response carries an `X-Request-ID`;
+(readiness - checks the audit store). Every response carries an `X-Request-ID`;
 requests are logged with method, path, status, latency, and id.
 
 ## Postgres + Redis (opt-in)
@@ -352,4 +352,4 @@ a billing integration on top of usage metering, multi-region, SIEM export, and a
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Open source now; contributions welcome.
+MIT - see [LICENSE](LICENSE). Open source now; contributions welcome.

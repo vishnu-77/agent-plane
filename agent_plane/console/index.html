@@ -126,7 +126,7 @@
 
   <!-- try it -->
   <section class="panel">
-    <h2>Try it <span class="sp"></span><span class="dimhint">fire a governed request with your Bearer token — watch it appear below</span></h2>
+    <h2>Try it <span class="sp"></span><span class="dimhint">fire a governed request with your Bearer token - watch it appear below</span></h2>
     <div class="pbody" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <button class="btn" onclick="tryEdge('/v1/tools/invoke',{tool:'search_kb',arguments:{q:'hello'}},'tool · search_kb')">▶ Tool call</button>
       <button class="btn" onclick="tryEdge('/v1/retrieve',{source:'kb',query:'password reset'},'retrieve · kb')">▶ Retrieve</button>
@@ -162,10 +162,10 @@
         <g>
           <rect class="hub" x="300" y="138" width="270" height="154" rx="16"/>
           <text class="hubt" x="435" y="170" text-anchor="middle">CONTROL PLANE</text>
-          <text class="hubp" x="435" y="198" text-anchor="middle">⬡  Policy engine — deterministic</text>
-          <text class="hubp" x="435" y="220" text-anchor="middle">⬡  Identity — verified delegation</text>
-          <text class="hubp" x="435" y="242" text-anchor="middle">⬡  Audit — one signed chain</text>
-          <text class="sub" x="435" y="270" text-anchor="middle" id="hub-pv">policy —</text>
+          <text class="hubp" x="435" y="198" text-anchor="middle">⬡  Policy engine - deterministic</text>
+          <text class="hubp" x="435" y="220" text-anchor="middle">⬡  Identity - verified delegation</text>
+          <text class="hubp" x="435" y="242" text-anchor="middle">⬡  Audit - one signed chain</text>
+          <text class="sub" x="435" y="270" text-anchor="middle" id="hub-pv">policy -</text>
         </g>
 
         <!-- links (hub right edge x=570,y=215 -> edge node left x=700) -->
@@ -178,16 +178,16 @@
         <!-- edge nodes -->
         <g id="n-model"><rect class="nodebox" x="700" y="44" width="226" height="54" rx="12"/>
           <text class="lbl" x="716" y="70">Model</text><text class="sub" x="716" y="88">/v1/chat/completions · LLMs</text>
-          <text class="count" id="c-model" x="910" y="78">—</text></g>
+          <text class="count" id="c-model" x="910" y="78">-</text></g>
         <g id="n-tool"><rect class="nodebox" x="700" y="118" width="226" height="54" rx="12"/>
           <text class="lbl" x="716" y="144">Tool / MCP</text><text class="sub" x="716" y="162">/v1/tools/invoke · APIs</text>
-          <text class="count" id="c-tool" x="910" y="152">—</text></g>
+          <text class="count" id="c-tool" x="910" y="152">-</text></g>
         <g id="n-rag"><rect class="nodebox" x="700" y="192" width="226" height="54" rx="12"/>
           <text class="lbl" x="716" y="218">Knowledge / RAG</text><text class="sub" x="716" y="236">/v1/retrieve · identity-aware</text>
-          <text class="count" id="c-rag" x="910" y="226">—</text></g>
+          <text class="count" id="c-rag" x="910" y="226">-</text></g>
         <g id="n-a2a"><rect class="nodebox" x="700" y="266" width="226" height="54" rx="12"/>
           <text class="lbl" x="716" y="292">Agent → Agent</text><text class="sub" x="716" y="310">/v1/agents/delegate · scoped</text>
-          <text class="count" id="c-a2a" x="910" y="300">—</text></g>
+          <text class="count" id="c-a2a" x="910" y="300">-</text></g>
         <g id="n-egress" class="planned"><rect class="nodebox" x="700" y="340" width="226" height="54" rx="12"/>
           <text class="lbl" x="716" y="366">Egress / Data</text><text class="sub" x="716" y="384">planned</text></g>
       </svg>
@@ -212,7 +212,7 @@
     </div>
   </section>
 
-  <p class="dimhint" style="text-align:center">API: <a href="/docs" target="_blank">/docs</a> · <a href="/redoc" target="_blank">/redoc</a> — every decision here is deterministic, and the audit chain is hash-linked &amp; signed (🔒).</p>
+  <p class="dimhint" style="text-align:center">API: <a href="/docs" target="_blank">/docs</a> · <a href="/redoc" target="_blank">/redoc</a> - every decision here is deterministic, and the audit chain is hash-linked &amp; signed (🔒).</p>
 </main>
 
 <script>
@@ -230,7 +230,7 @@ function setStats(o){
     ["decisions",o.total,""],["allowed",o.allow,"allow"],["denied",o.deny,"deny"],
     ["approval",o.appr,"appr"],["tenants",o.tenants,""],["policy bundle",o.pv,"small"]
   ];
-  $("stats").innerHTML=cards.map(([k,v,c])=>`<div class="stat"><div class="k">${k}</div><div class="v ${c}">${esc(v??"—")}</div></div>`).join("");
+  $("stats").innerHTML=cards.map(([k,v,c])=>`<div class="stat"><div class="k">${k}</div><div class="v ${c}">${esc(v??"-")}</div></div>`).join("");
 }
 
 function paintTopo(counts){
@@ -245,7 +245,7 @@ function paintTopo(counts){
 
 function renderFeed(events){
   $("feedcount").textContent = events.length ? events.length+" recent" : "";
-  if(!events.length){ $("feed").innerHTML='<span class="mut">no decisions yet — call an edge and watch it appear</span>'; return; }
+  if(!events.length){ $("feed").innerHTML='<span class="mut">no decisions yet - call an edge and watch it appear</span>'; return; }
   $("feed").innerHTML=events.map(e=>{
     const ek=edgeKey(e.model_requested);
     const who=`${esc(e.user_id)}${e.agent_id?'<span class="small"> / '+esc(e.agent_id)+'</span>':''}`;
@@ -261,7 +261,7 @@ function renderFeed(events){
 async function refreshAll(){
   const h=await jget("/healthz");
   $("hdot").className="dot "+(h.ok?"ok":"bad");
-  $("hub-pv").textContent="policy "+(h.body.policy_version||"—");
+  $("hub-pv").textContent="policy "+(h.body.policy_version||"-");
 
   // policies
   if(admin()){
@@ -269,7 +269,7 @@ async function refreshAll(){
     $("policies").innerHTML = p.ok
       ? `<div class="rule"><span class="mut">version</span><code>${esc(p.body.policy_version)}</code></div>`+
         p.body.rules.map(n=>`<div class="rule"><span>${esc(n)}</span><span class="mut">rule</span></div>`).join("")
-      : `<span class="err">${p.status} — check token</span>`;
+      : `<span class="err">${p.status} - check token</span>`;
   }
 
   // usage (caller tenant)
@@ -296,10 +296,10 @@ async function refreshAll(){
         const k=edgeKey(e.model_requested); counts[k]=(counts[k]||0)+1;
       }
       $("topohint").textContent="decisions across edges (last "+events.length+", from the signed audit chain)";
-    } else { $("topohint").textContent="audit is admin-only — enter the token"; }
+    } else { $("topohint").textContent="audit is admin-only - enter the token"; }
   }
-  setStats({total:admin()?total:"—",allow:admin()?allow:"—",deny:admin()?deny:"—",appr:admin()?appr:"—",
-            tenants:admin()?tenants.size:"—", pv:h.body.policy_version||"—"});
+  setStats({total:admin()?total:"-",allow:admin()?allow:"-",deny:admin()?deny:"-",appr:admin()?appr:"-",
+            tenants:admin()?tenants.size:"-", pv:h.body.policy_version||"-"});
   paintTopo(counts);
   renderFeed(events);
 }
