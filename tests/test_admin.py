@@ -63,7 +63,7 @@ def test_revoke_requires_jti(client):
 
 
 def test_audit_endpoint_is_admin_only(client):
-    # Audit is operator evidence — must not be readable without the admin token.
+    # Audit is operator evidence - must not be readable without the admin token.
     assert client.get("/v1/audit").status_code == 401
     assert client.get("/v1/audit", headers=H).status_code == 200
 

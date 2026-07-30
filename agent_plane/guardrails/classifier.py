@@ -1,13 +1,13 @@
 """Derive a data classification *floor* from request content.
 
 The caller may declare a ``data_classification``, but the caller is exactly the
-party the control plane governs — a compromised or prompt-injected agent will
+party the control plane governs - a compromised or prompt-injected agent will
 happily label its exfiltration ``public``. So we never trust that label to
 *lower* sensitivity: we derive an escalation floor from the content and take the
 more sensitive of (declared, derived). The floor only ever escalates.
 
 This is deliberately coarse (keyword + secret signals), not information-flow
-control — see the series' Part 5 for why true IFC remains an open problem.
+control - see the series' Part 5 for why true IFC remains an open problem.
 """
 from __future__ import annotations
 

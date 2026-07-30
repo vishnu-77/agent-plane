@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
 
     if not bundle.policies:
         logger.warning(
-            "No policies loaded — running ALLOW-ALL. Run `agentplane init` or set POLICY_DIR."
+            "No policies loaded - running ALLOW-ALL. Run `agentplane init` or set POLICY_DIR."
         )
     if settings.environment == "production" and settings.identity_mode == "jwt_claims":
         logger.warning(
@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="agent-plane — Enterprise Agentic AI Control Plane",
+        title="agent-plane - Enterprise Agentic AI Control Plane",
         version="0.1.0",
         lifespan=lifespan,
     )

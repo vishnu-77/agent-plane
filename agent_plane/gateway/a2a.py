@@ -2,8 +2,8 @@
 
 When one agent hands off to another, the child must NOT inherit the parent's full
 authority. An authenticated principal asks the control plane to mint a *child*
-credential; the control plane enforces **attenuation** — the requested child scope
-must be a subset of the parent's verified scope (no privilege escalation) — then
+credential; the control plane enforces **attenuation** - the requested child scope
+must be a subset of the parent's verified scope (no privilege escalation) - then
 mints a short-lived Ed25519 delegation and records it in the signed audit chain.
 The child then acts on every other edge governed by its narrower, verified scope.
 
@@ -129,7 +129,7 @@ async def delegate(
             "error": "approval_required", "reason": decision.reason,
             "decision_id": decision.decision_id})
 
-    # 3. Attenuation — the child may never get more than the parent holds.
+    # 3. Attenuation - the child may never get more than the parent holds.
     errors = attenuation_errors(parent, tools, clearance, groups)
     if errors:
         record(reason="privilege escalation refused: " + "; ".join(errors))

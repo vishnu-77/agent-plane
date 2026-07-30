@@ -1,4 +1,4 @@
-"""Tool registry + executor — the agent->tool broker's data plane.
+"""Tool registry + executor - the agent->tool broker's data plane.
 
 Config-driven (YAML), default-deny: only catalogued tools can be invoked, and the
 broker executes them with *its own* credential (from an env var), so the agent

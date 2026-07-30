@@ -37,4 +37,4 @@ tests/              pytest suite
 
 ## Reporting security issues
 
-Please follow [SECURITY.md](SECURITY.md) — do not open public issues for vulnerabilities.
+Please follow [SECURITY.md](SECURITY.md) - do not open public issues for vulnerabilities.

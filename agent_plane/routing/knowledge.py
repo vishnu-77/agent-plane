@@ -1,8 +1,8 @@
-"""Knowledge sources + identity-aware retrieval — the RAG authorization edge.
+"""Knowledge sources + identity-aware retrieval - the RAG authorization edge.
 
 The core principle: **relevance is not permission.** Retrieval scores candidates,
 then an ABAC/ACL filter drops every document the acting ``Actor`` is not authorized
-for *before* anything is returned — so the model never sees data the principal
+for *before* anything is returned - so the model never sees data the principal
 couldn't access. Config-driven (YAML), default-deny on unknown sources.
 
 A ``local`` source carries inline documents (offline/dev); ``http`` (calling an
@@ -48,7 +48,7 @@ class RetrievalSource:
 
 
 def authorized(actor: Actor, doc: Document) -> bool:
-    """Deterministic ABAC/ACL check — absence on a dimension = unrestricted there."""
+    """Deterministic ABAC/ACL check - absence on a dimension = unrestricted there."""
     # Hard tenant isolation.
     if doc.tenant and doc.tenant != actor.tenant:
         return False
@@ -91,7 +91,7 @@ class KnowledgeStore:
         """Return ``(authorized_docs, retrieved_n, filtered_n)``.
 
         Candidates are scored, then the authorization filter is applied *before*
-        returning — a highly-relevant but unauthorized document is dropped.
+        returning - a highly-relevant but unauthorized document is dropped.
         """
         spec = self._sources[source]  # caller guarantees existence (404 upstream)
         scored = [

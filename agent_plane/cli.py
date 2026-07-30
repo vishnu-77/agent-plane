@@ -1,4 +1,4 @@
-"""``agentplane`` — the packaged entrypoint.
+"""``agentplane`` - the packaged entrypoint.
 
 After ``pip install agent-plane`` (or ``pip install .``):
 

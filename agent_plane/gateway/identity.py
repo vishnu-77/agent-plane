@@ -3,9 +3,9 @@
 Two pluggable modes, selected by ``settings.identity_mode`` (no code change to
 switch):
 
-- ``jwt_claims`` — decode an HS256 token and trust its claims. Fine for dev and
+- ``jwt_claims`` - decode an HS256 token and trust its claims. Fine for dev and
   simple integrations.
-- ``delegation`` — verify an **Ed25519-signed delegation** issued by a trusted
+- ``delegation`` - verify an **Ed25519-signed delegation** issued by a trusted
   authority. The agent can no longer assert its own ``agent_id`` or
   ``allowed_tools``: identity, scope, expiry, and revocation are *verified*, not
   declared. This is the production answer to the confused-deputy problem.
@@ -110,7 +110,7 @@ def _resolve_delegation(
     if not user_id:
         raise IdentityError("Delegation missing subject (sub)")
 
-    # The verified scope — not the agent's say-so — decides tools and clearance.
+    # The verified scope - not the agent's say-so - decides tools and clearance.
     scope = claims.get("scope") or {}
     return Actor(
         user_id=str(user_id),

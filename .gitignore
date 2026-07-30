@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────
 # Open-source repo: track ONLY the runnable reference implementation.
-# Everything else — Medium series drafts (docs/), internal notes, build
-# artifacts — is ignored. Whitelist style: ignore all, then re-include code.
+# Everything else - Medium series drafts (docs/), internal notes, build
+# artifacts - is ignored. Whitelist style: ignore all, then re-include code.
 # ─────────────────────────────────────────────────────────────────────────
 
 # 1) Ignore everything at the repo root by default.

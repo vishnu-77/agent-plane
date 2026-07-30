@@ -26,7 +26,7 @@ def _classification(value: str | None) -> DataClassification:
 def normalize(req: ChatCompletionRequest, actor: Actor) -> CanonicalAIRequest:
     messages = [m.model_dump() for m in req.messages]
     # The caller's declared classification can only be *escalated* by what the
-    # content actually contains — never trusted to lower it.
+    # content actually contains - never trusted to lower it.
     declared = _classification(req.data_classification)
     effective = max_classification(declared, derive_classification(messages))
     return CanonicalAIRequest(

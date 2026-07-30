@@ -1,4 +1,4 @@
-# Model catalog (config-driven). Onboard models/providers here — no code change.
+# Model catalog (config-driven). Onboard models/providers here - no code change.
 # tags carry the provider AND a sensitivity class (external/internal) that
 # policies match on via `model_provider`.
 models:

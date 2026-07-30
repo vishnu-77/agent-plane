@@ -1,7 +1,7 @@
-"""Usage reporting endpoint — the data a billing system would meter on.
+"""Usage reporting endpoint - the data a billing system would meter on.
 
 ``GET /v1/usage`` returns the caller's tenant usage (calls + units per resource).
-If a price book is configured, an estimated cost is attached — but this is
+If a price book is configured, an estimated cost is attached - but this is
 metering, not billing: no payment is taken here.
 """
 from __future__ import annotations
