@@ -1,0 +1,14 @@
+version: "1"
+agent: agent-plane-demo
+models:
+  - mock-model
+tools:
+  - search_kb
+  - echo
+  - send_external_email
+  - wire_transfer
+  - delete_records
+external_effects:
+  - external_communication
+  - financial
+  - destructive
