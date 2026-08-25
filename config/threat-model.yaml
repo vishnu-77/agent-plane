@@ -1,0 +1,7 @@
+title: Agent Plane AI-TM PoC
+capability_manifest_version: "1"
+review_status: current
+invariants:
+  - Capability expansion requires threat-model review.
+  - Tool possession does not imply task authority.
+  - Runtime actions must match task, environment, resource, and consequence limits.
