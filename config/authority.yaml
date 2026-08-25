@@ -1,0 +1,24 @@
+# PoC: runtime task authority manifest.
+# A capability/credential answers whether an agent can reach a tool. These rules
+# answer whether this concrete invocation is authorised for the current task.
+version: "1"
+rules:
+  - agent_id: "ops-*"
+    task: "cleanup_staging"
+    tool: delete_records
+    environments: [staging]
+    resources: ["staging/*"]
+
+  - agent_id: "finance-*"
+    task: "refund_customer"
+    tool: wire_transfer
+    environments: [production]
+    resources: ["refund/*"]
+    max_amount: 100.0
+    require_approval: true
+
+  - agent_id: "support-*"
+    task: "customer_support"
+    tool: search_kb
+    environments: [production, staging]
+    resources: ["kb/*"]
