@@ -1,0 +1,30 @@
+name: AI-TM Enforcement
+
+on:
+  pull_request:
+    paths:
+      - "config/capability-manifest.yaml"
+      - "config/threat-model.yaml"
+      - "agent_plane/authority/**"
+      - ".github/workflows/ai-tm-enforcement.yml"
+  push:
+    branches: [main]
+    paths:
+      - "config/capability-manifest.yaml"
+      - "config/threat-model.yaml"
+      - "agent_plane/authority/**"
+
+jobs:
+  threat-model-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pyyaml pydantic
+      - name: Enforce capability/threat-model version invariant
+        run: >-
+          python -m agent_plane.authority
+          --capabilities config/capability-manifest.yaml
+          --threat-model config/threat-model.yaml
