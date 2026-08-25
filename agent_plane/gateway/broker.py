@@ -116,12 +116,6 @@ async def invoke_tool(
             args_text=args_text, latency_ms=elapsed(),
         )
         event["data_classification"] = action.data_classification.value
-        if authority_decision is not None:
-            event["authority_manifest_version"] = authority_decision.manifest_version
-            event["authority_rule_index"] = authority_decision.rule_index
-            event["task"] = authority_context.task
-            event["environment"] = authority_context.environment
-            event["resource"] = authority_context.resource
         audit.record(event)
 
     if decision.decision == DecisionAction.DENY:
