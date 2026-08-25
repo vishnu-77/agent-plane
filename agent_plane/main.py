@@ -8,6 +8,7 @@ and the cache/audit stores are initialized per the configured backend. In
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -18,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from agent_plane.audit.store import build_audit_store
+from agent_plane.authority.loader import build_authority_engine
 from agent_plane.cache.store import build_cache_store
 from agent_plane.config import Settings, get_settings
 from agent_plane.gateway.a2a import a2a_router
@@ -49,7 +51,6 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     _configure_logging(settings)
 
-    # Fail closed in production: never run with default secrets.
     errors = settings.production_errors()
     if errors:
         raise RuntimeError(
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
     registry = ModelRegistry(settings)
     bundle = load_bundle(settings.policy_dir)
     engine = YamlPolicyEngine(bundle, provider_resolver=registry.provider_tags)
+    authority = build_authority_engine(os.environ.get("AUTHORITY_FILE"))
 
     if not bundle.policies:
         logger.warning(
@@ -74,18 +76,21 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.registry = registry
     app.state.engine = engine
+    app.state.authority = authority
     app.state.tools = build_tool_registry(settings)
     app.state.knowledge = build_knowledge_store(settings)
     app.state.cache = build_cache_store(settings)
     app.state.audit = build_audit_store(settings)
     app.state.usage = build_usage_store(settings)
-    # Runtime revocation set, mutated live by the admin API.
     app.state.revocations = set()
 
     logger.info(
-        "agent-plane ready: env=%s identity=%s backend=%s policy_version=%s",
-        settings.environment, settings.identity_mode, settings.storage_backend,
+        "agent-plane ready: env=%s identity=%s backend=%s policy_version=%s authority=%s",
+        settings.environment,
+        settings.identity_mode,
+        settings.storage_backend,
         bundle.version,
+        authority.manifest.version if authority else "disabled",
     )
     yield
 
@@ -111,7 +116,6 @@ def create_app() -> FastAPI:
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         rid_headers = {"X-Request-ID": request_id}
 
-        # Reject oversized bodies (cheap Content-Length check).
         if settings.max_request_bytes > 0:
             cl = request.headers.get("content-length")
             if cl and cl.isdigit() and int(cl) > settings.max_request_bytes:
@@ -121,9 +125,8 @@ def create_app() -> FastAPI:
                     headers=rid_headers,
                 )
 
-        # Per-client rate limit (reuses the cache/quota counter).
         if settings.rate_limit_per_minute > 0:
-            client_ip = (request.client.host if request.client else "unknown")
+            client_ip = request.client.host if request.client else "unknown"
             if settings.trust_forwarded_for:
                 fwd = request.headers.get("x-forwarded-for")
                 if fwd:
@@ -139,7 +142,7 @@ def create_app() -> FastAPI:
         started = time.perf_counter()
         try:
             response = await call_next(request)
-        except Exception:  # noqa: BLE001 - last-resort guard, logged below
+        except Exception:
             logger.exception("unhandled error req_id=%s path=%s", request_id, request.url.path)
             return JSONResponse(
                 status_code=500,
@@ -150,7 +153,11 @@ def create_app() -> FastAPI:
         response.headers["X-Request-ID"] = request_id
         logger.info(
             "%s %s -> %s %dms req_id=%s",
-            request.method, request.url.path, response.status_code, took, request_id,
+            request.method,
+            request.url.path,
+            response.status_code,
+            took,
+            request_id,
         )
         return response
 
@@ -165,11 +172,10 @@ def create_app() -> FastAPI:
 
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
-        # Ready only if the audit store is reachable (DB connectivity).
         try:
             app.state.audit.recent(limit=1)
             return JSONResponse({"status": "ready"})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("readiness check failed")
             return JSONResponse({"status": "not_ready", "error": str(exc)}, status_code=503)
 
