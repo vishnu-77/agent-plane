@@ -1,11 +1,4 @@
-"""The agent->tool broker edge.
-
-A second enforcement point that reuses the *same* control plane as the model
-edge: identity (verified delegation + revocation), the deterministic policy
-engine (least-privilege ``allowed_tools`` + per-tool approval), and the one
-hash-chained, signed audit log. The agent requests an action; the broker decides,
-executes with its own credential, and records the decision - never the agent.
-"""
+"""The agent->tool broker edge with optional AI-TM task-authority enforcement."""
 from __future__ import annotations
 
 import hashlib
@@ -14,17 +7,13 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
+from agent_plane.authority.schema import AuthorityContext
 from agent_plane.config import Settings
 from agent_plane.gateway.identity import IdentityError, resolve_identity
 from agent_plane.guardrails.classifier import derive_classification
 from agent_plane.policy.engine import YamlPolicyEngine
 from agent_plane.routing.tools import ToolExecutionError, ToolRegistry
-from agent_plane.schemas.canonical import (
-    Actor,
-    CanonicalAIRequest,
-    Decision,
-    DecisionAction,
-)
+from agent_plane.schemas.canonical import Actor, CanonicalAIRequest, Decision, DecisionAction
 
 broker_router = APIRouter()
 
@@ -44,7 +33,7 @@ def _audit_event(actor: Actor, tool: str, decision: Decision, *, executed: bool,
         "agent_id": actor.agent_id,
         "model_requested": f"tool:{tool}",
         "model_used": tool if executed else None,
-        "data_classification": "",  # set by the caller (record) from the action
+        "data_classification": "",
         "decision": decision.decision.value,
         "reason": decision.reason,
         "policy_version": decision.policy_version,
@@ -67,27 +56,25 @@ async def invoke_tool(
 ) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     engine: YamlPolicyEngine = request.app.state.engine
+    authority = request.app.state.authority
     tools: ToolRegistry = request.app.state.tools
     audit = request.app.state.audit
 
     started = time.perf_counter()
     tool = (body or {}).get("tool")
     arguments = (body or {}).get("arguments") or {}
+    authority_context = AuthorityContext.model_validate((body or {}).get("authority") or {})
     if not tool:
         raise HTTPException(status_code=400, detail="missing 'tool'")
 
-    # Default-deny: unknown tools are never executed.
     if tools.get(tool) is None:
         raise HTTPException(status_code=404, detail={"error": "unknown_tool", "tool": tool})
 
-    # 1. Identity (verified delegation + live revocation), same as the model edge.
     try:
         actor = resolve_identity(authorization, settings, request.app.state.revocations)
     except IdentityError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    # 2. Decision: same deterministic engine. Classification derived from args,
-    #    never trusted from the caller.
     args_text = _args_text(arguments)
     classification = derive_classification([{"content": args_text}])
     action = CanonicalAIRequest(
@@ -99,6 +86,27 @@ async def invoke_tool(
     )
     decision = engine.evaluate(action)
 
+    # AI-TM runtime authority is an additional narrowing step. A valid identity,
+    # tool grant and policy allow do not imply that this concrete action is
+    # authorised for the current task/resource/environment.
+    authority_decision = None
+    if authority is not None and decision.decision == DecisionAction.ALLOW:
+        authority_decision = authority.evaluate(
+            agent_id=actor.agent_id,
+            tool=tool,
+            context=authority_context,
+        )
+        decision.rules_matched.append("ai-tm-task-authority")
+        decision.obligations.append(
+            f"authority_manifest:{authority_decision.manifest_version}"
+        )
+        decision.reason = authority_decision.reason
+        if authority_decision.decision == "deny":
+            decision.decision = DecisionAction.DENY
+        elif authority_decision.decision == "approval_required":
+            decision.decision = DecisionAction.APPROVAL_REQUIRED
+            decision.requires_human_approval = True
+
     def elapsed() -> int:
         return int((time.perf_counter() - started) * 1000)
 
@@ -108,9 +116,14 @@ async def invoke_tool(
             args_text=args_text, latency_ms=elapsed(),
         )
         event["data_classification"] = action.data_classification.value
+        if authority_decision is not None:
+            event["authority_manifest_version"] = authority_decision.manifest_version
+            event["authority_rule_index"] = authority_decision.rule_index
+            event["task"] = authority_context.task
+            event["environment"] = authority_context.environment
+            event["resource"] = authority_context.resource
         audit.record(event)
 
-    # 3. Enforce.
     if decision.decision == DecisionAction.DENY:
         record(executed=False)
         raise HTTPException(
@@ -120,6 +133,9 @@ async def invoke_tool(
                 "reason": decision.reason,
                 "decision_id": decision.decision_id,
                 "denied_tools": decision.denied_tools,
+                "authority_manifest_version": (
+                    authority_decision.manifest_version if authority_decision else None
+                ),
             },
         )
     if decision.decision == DecisionAction.APPROVAL_REQUIRED:
@@ -130,10 +146,12 @@ async def invoke_tool(
                 "error": "approval_required",
                 "reason": decision.reason,
                 "decision_id": decision.decision_id,
+                "authority_manifest_version": (
+                    authority_decision.manifest_version if authority_decision else None
+                ),
             },
         )
 
-    # 4. Execute with the broker's own credential (the agent never holds it).
     try:
         result = await tools.execute(tool, arguments)
     except (ToolExecutionError, KeyError) as exc:
@@ -160,5 +178,8 @@ async def invoke_tool(
             "rules_matched": decision.rules_matched,
             "obligations_applied": decision.obligations,
             "tool": tool,
+            "authority_manifest_version": (
+                authority_decision.manifest_version if authority_decision else None
+            ),
         },
     }
