@@ -1,17 +1,14 @@
 name: AI-TM freshness
 
+# No path filter: this is a required status check (see the "branch protect"
+# ruleset). A path-filtered required check that doesn't run on a given PR
+# reports nothing at all - GitHub then blocks the merge forever waiting for a
+# status that will never arrive, instead of treating it as satisfied. The
+# job itself is two small YAML reads, so running it unconditionally is cheap.
 on:
   pull_request:
-    paths:
-      - "config/capability-manifest.yaml"
-      - "config/threat-model.yaml"
-      - "agent_plane/authority/freshness.py"
   push:
     branches: [main]
-    paths:
-      - "config/capability-manifest.yaml"
-      - "config/threat-model.yaml"
-      - "agent_plane/authority/freshness.py"
 
 jobs:
   threat-model-freshness:
