@@ -1,0 +1,45 @@
+# Authority Lease catalog (config-driven; the task-authority edge). A lease
+# grants one agent, for one task, a narrow slice of resources/actions - always
+# a subset of whatever it's technically capable of (Actor.allowed_tools).
+# Issue more at runtime via POST /v1/leases (admin-token gated).
+leases:
+  # The devops-agent demo (see examples/devops-agent/): the agent holds real
+  # `deployment.*` capability, but this task only authorises staging.
+  - apiVersion: agent-plane/v1alpha1
+    kind: AuthorityLease
+    metadata:
+      id: lease-fix-staging
+      task: fix-staging-checkout
+    subject:
+      agent: devops-agent
+    authority:
+      resources: ["staging/*"]
+      actions: ["deployment.read", "deployment.restart"]
+    constraints:
+      protected_resources: ["production/*"]
+      expires_at: "2027-01-01T00:00:00Z"
+    consequence:
+      maximum_impact: reversible
+    delegation:
+      child_authority: subset_only
+
+  # The README quick-start example: a scoped branch cleanup with a use limit.
+  - apiVersion: agent-plane/v1alpha1
+    kind: AuthorityLease
+    metadata:
+      id: lease-clean-branches
+      task: remediate-stale-branches
+    subject:
+      agent: repo-agent
+    authority:
+      resources: ["github://acme/agent-plane-demo", "github://acme/agent-plane-demo/*"]
+      actions: ["repository.read", "branch.list", "branch.delete"]
+    constraints:
+      protected_resources: ["github://acme/agent-plane-demo/branches/main"]
+      max_uses:
+        branch.delete: 5
+      expires_at: "2027-01-01T00:00:00Z"
+    consequence:
+      maximum_impact: reversible
+    delegation:
+      child_authority: subset_only
