@@ -16,6 +16,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from agent_plane.config import Settings
 from agent_plane.gateway.identity import IdentityError, resolve_identity
+from agent_plane.guardrails import scanner
 from agent_plane.guardrails.classifier import derive_classification
 from agent_plane.policy.engine import YamlPolicyEngine
 from agent_plane.routing.tools import ToolExecutionError, ToolRegistry
@@ -34,7 +35,7 @@ def _args_text(arguments: dict[str, Any]) -> str:
 
 
 def _audit_event(actor: Actor, tool: str, decision: Decision, *, executed: bool,
-                 args_text: str, latency_ms: int) -> dict[str, Any]:
+                 args_text: str, latency_ms: int, redactions: list[str]) -> dict[str, Any]:
     return {
         "decision_id": decision.decision_id,
         "user_id": actor.user_id,
@@ -50,7 +51,7 @@ def _audit_event(actor: Actor, tool: str, decision: Decision, *, executed: bool,
         "policy_version": decision.policy_version,
         "rules_matched": decision.rules_matched,
         "obligations_applied": decision.obligations,
-        "redactions_applied": [],
+        "redactions_applied": redactions,
         "log_level": decision.log_level.value,
         "estimated_tokens": 0,
         "total_tokens": 0,
@@ -102,10 +103,11 @@ async def invoke_tool(
     def elapsed() -> int:
         return int((time.perf_counter() - started) * 1000)
 
-    def record(executed: bool) -> None:
+    def record(executed: bool, redactions: list[str] | None = None) -> None:
         event = _audit_event(
             actor, tool, decision, executed=executed,
             args_text=args_text, latency_ms=elapsed(),
+            redactions=redactions or [],
         )
         event["data_classification"] = action.data_classification.value
         audit.record(event)
@@ -133,14 +135,27 @@ async def invoke_tool(
             },
         )
 
+    # 3b. Redaction obligation (same guarantee as the model edge): scrub PII/secrets
+    # from arguments before they leave the plane, and from the tool's result before
+    # it reaches the caller.
+    redactions: list[str] = []
+    exec_arguments = arguments
+    if decision.redact:
+        exec_arguments, arg_hits = scanner.redact_json(arguments, decision.redact)
+        redactions.extend(h for h in arg_hits if h not in redactions)
+
     # 4. Execute with the broker's own credential (the agent never holds it).
     try:
-        result = await tools.execute(tool, arguments)
+        result = await tools.execute(tool, exec_arguments)
     except (ToolExecutionError, KeyError) as exc:
-        record(executed=False)
+        record(executed=False, redactions=redactions)
         raise HTTPException(status_code=502, detail=f"tool_execution_error: {exc}") from exc
 
-    record(executed=True)
+    if decision.redact:
+        result, result_hits = scanner.redact_json(result, decision.redact)
+        redactions.extend(h for h in result_hits if h not in redactions)
+
+    record(executed=True, redactions=redactions)
     request.app.state.usage.record(
         {
             "tenant": actor.tenant,
@@ -159,6 +174,7 @@ async def invoke_tool(
             "policy_version": decision.policy_version,
             "rules_matched": decision.rules_matched,
             "obligations_applied": decision.obligations,
+            "redactions_applied": redactions,
             "tool": tool,
         },
     }

@@ -74,3 +74,21 @@ def test_policy_hot_reload(client):
     r = client.post("/admin/policies/reload", headers=H)
     assert r.status_code == 200 and r.json()["reloaded"] is True
     assert any("pii-redaction" in name for name in r.json()["rules"])
+
+
+def test_admin_mutations_are_audited(client):
+    # Revoking, un-revoking, and reloading policy are security-sensitive - they
+    # must land in the same signed audit chain as every other edge, not be a
+    # blind spot for an attacker holding the admin token.
+    client.post("/admin/revocations", headers=H, json={"jti": "tok-audit"})
+    client.delete("/admin/revocations/tok-audit", headers=H)
+    client.post("/admin/policies/reload", headers=H)
+
+    audit = client.get("/v1/audit", headers=H).json()["events"]
+    kinds = {e["model_requested"] for e in audit}
+    assert "admin:revoke_add" in kinds
+    assert "admin:revoke_remove" in kinds
+    assert "admin:policy_reload" in kinds
+    add_event = next(e for e in audit if e["model_requested"] == "admin:revoke_add")
+    assert "tok-audit" in add_event["reason"]
+    assert add_event["signature"]  # same tamper-evident chain as every other edge

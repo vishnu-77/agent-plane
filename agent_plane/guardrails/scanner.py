@@ -54,6 +54,30 @@ def redact(text: str, fields: list[str]) -> tuple[str, list[str]]:
     return text, hit
 
 
+def redact_json(value: object, fields: list[str]) -> tuple[object, list[str]]:
+    """Recursively redact string leaves in a JSON-like value (dict/list/str).
+
+    Used where content isn't flat chat messages - tool arguments/results and
+    RAG document text can nest arbitrarily.
+    """
+    hits: list[str] = []
+
+    def go(v: object) -> object:
+        if isinstance(v, str):
+            redacted, h = redact(v, fields)
+            for f in h:
+                if f not in hits:
+                    hits.append(f)
+            return redacted
+        if isinstance(v, dict):
+            return {k: go(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [go(x) for x in v]
+        return v
+
+    return go(value), hits
+
+
 def redact_messages(
     messages: list[dict], fields: list[str]
 ) -> tuple[list[dict], list[str]]:
