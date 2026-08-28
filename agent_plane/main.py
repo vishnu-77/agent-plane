@@ -18,10 +18,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from agent_plane.audit.store import build_audit_store
+from agent_plane.authority.store import build_lease_store
 from agent_plane.cache.store import build_cache_store
 from agent_plane.config import Settings, get_settings
 from agent_plane.gateway.a2a import a2a_router
 from agent_plane.gateway.admin import admin_router
+from agent_plane.gateway.authority import authority_router
 from agent_plane.gateway.broker import broker_router
 from agent_plane.gateway.retrieval import retrieval_router
 from agent_plane.gateway.router import router
@@ -76,6 +78,7 @@ async def lifespan(app: FastAPI):
     app.state.engine = engine
     app.state.tools = build_tool_registry(settings)
     app.state.knowledge = build_knowledge_store(settings)
+    app.state.leases = build_lease_store(settings)
     app.state.cache = build_cache_store(settings)
     app.state.audit = build_audit_store(settings)
     app.state.usage = build_usage_store(settings)
@@ -177,6 +180,7 @@ def create_app() -> FastAPI:
     app.include_router(broker_router)
     app.include_router(retrieval_router)
     app.include_router(a2a_router)
+    app.include_router(authority_router)
     app.include_router(usage_router)
     app.include_router(admin_router)
     return app

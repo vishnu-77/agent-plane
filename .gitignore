@@ -12,8 +12,13 @@
 !/policies/
 !/config/
 !/tests/
+!/spec/
+!/sdk/
+!/examples/
 !/pyproject.toml
 !/README.md
+!/ROADMAP.md
+!/INTEGRATION.md
 !/LICENSE
 !/CONTRIBUTING.md
 !/SECURITY.md

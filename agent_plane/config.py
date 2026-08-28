@@ -121,6 +121,11 @@ class Settings(BaseSettings):
     # Unset -> config/knowledge.yaml if present, else no sources (default-deny).
     knowledge_file: str | None = None
 
+    # --- Authority leases (config-driven; the task-authority edge) ---
+    # YAML catalog of task-bound AuthorityLease grants. Unset -> config/leases.yaml
+    # if present, else no leases (default-deny: no lease means no authority).
+    leases_file: str | None = None
+
     # --- Admin API (live revocation + policy hot-reload) ---
     # Unset = admin API disabled. Set a strong token to enable; callers pass it
     # in the X-Admin-Token header.
