@@ -10,7 +10,7 @@ plane around it - not the whole architecture at once.
 | **v0.3** | Lease delegation + child authority (attenuated sub-leases, mirroring the A2A identity edge) | planned |
 | **v0.4** | Dynamic authority shrinking/revocation for active leases | planned |
 | **v0.5** | Consequence-aware decisions (`maximum_impact` actually gates, not just informational) | planned |
-| **v0.6** | Observed-vs-declared capability drift detection | planned |
+| **v0.6** | Observed-vs-declared capability drift detection | 🟡 started: `agentplane authority check-freshness` fails CI when `config/threat-model.yaml` drifts from `config/capability-manifest.yaml`'s version. Declared-vs-declared only so far, not declared-vs-*observed* runtime behavior. |
 | **v0.7** | Reconciliation / rollback hooks | planned |
 | **v1.0** | Full authority lifecycle + attestations | planned |
 

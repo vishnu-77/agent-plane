@@ -1,0 +1,29 @@
+# Threat model metadata, per OWASP AI Threat Modeling
+# (https://owasp.org/www-project-threat-modeling/resources/ai-tm): a model
+# goes stale not just on architecture changes, but when a capability changes
+# underneath it via config/instructions. `capability_manifest_version` pins
+# which version of config/capability-manifest.yaml this review covers -
+# `agentplane authority check-freshness` fails CI if they drift apart.
+capability_manifest_version: "1"
+
+last_reviewed: "2026-08-28"
+
+# AI-TM's refresh triggers this review considered (see the OWASP page): tool
+# and action capabilities, identity/authorization changes, instruction/policy
+# modifications, model version updates, memory/context sources, human
+# oversight, multi-agent orchestration, output consequences, detection and
+# recovery. Freeform notes per trigger that's actually relevant to this plane:
+notes:
+  tool_and_action_capabilities: >
+    Tools are config-driven (config/tools.yaml) and default-deny; the broker
+    executes with its own credential. AuthorityLease adds a second, narrower
+    gate per task on top.
+  identity_and_authorization: >
+    IDENTITY_MODE=delegation verifies scope cryptographically in production;
+    jwt_claims (dev) trusts caller-asserted claims - do not run that mode in
+    production (config.py fails closed if IDENTITY_MODE=delegation lacks a key,
+    but does not block jwt_claims itself).
+  multi_agent_orchestration: >
+    A2A delegation enforces attenuation (child scope subset of parent);
+    AuthorityLease delegation (child_authority) is parsed but not yet enforced
+    - see ROADMAP.md v0.3.
