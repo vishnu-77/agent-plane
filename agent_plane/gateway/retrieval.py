@@ -15,6 +15,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from agent_plane.config import Settings
 from agent_plane.gateway.identity import IdentityError, resolve_identity
+from agent_plane.guardrails import scanner
 from agent_plane.policy.engine import YamlPolicyEngine
 from agent_plane.routing.knowledge import KnowledgeStore
 from agent_plane.schemas.canonical import (
@@ -29,7 +30,7 @@ retrieval_router = APIRouter()
 
 
 def _audit_event(actor: Actor, source: str, decision: Decision, *, query: str,
-                 latency_ms: int) -> dict[str, Any]:
+                 latency_ms: int, redactions: list[str]) -> dict[str, Any]:
     return {
         "decision_id": decision.decision_id,
         "user_id": actor.user_id,
@@ -44,6 +45,8 @@ def _audit_event(actor: Actor, source: str, decision: Decision, *, query: str,
         "reason": decision.reason,
         "policy_version": decision.policy_version,
         "rules_matched": decision.rules_matched,
+        "obligations_applied": decision.obligations,
+        "redactions_applied": redactions,
         "latency_ms": latency_ms,
         "prompt_hash": hashlib.sha256(query.encode()).hexdigest(),
     }
@@ -91,8 +94,11 @@ async def retrieve(
     def elapsed() -> int:
         return int((time.perf_counter() - started) * 1000)
 
-    def record() -> None:
-        audit.record(_audit_event(actor, source, decision, query=query, latency_ms=elapsed()))
+    def record(redactions: list[str] | None = None) -> None:
+        audit.record(_audit_event(
+            actor, source, decision, query=query, latency_ms=elapsed(),
+            redactions=redactions or [],
+        ))
 
     if decision.decision == DecisionAction.DENY:
         record()
@@ -112,7 +118,13 @@ async def retrieve(
     # 3. Retrieve + authorize at the document level (relevance is not permission).
     results, retrieved_n, filtered_n = knowledge.retrieve(source, query, actor, top_k)
 
-    record()
+    # 3b. Redaction obligation: a matching policy can require PII/secrets scrubbed
+    # from document text before it reaches the caller, same as the model edge.
+    redactions: list[str] = []
+    if decision.redact:
+        results, redactions = scanner.redact_json(results, decision.redact)
+
+    record(redactions)
     request.app.state.usage.record(
         {
             "tenant": actor.tenant,
@@ -132,6 +144,7 @@ async def retrieve(
             "source": source,
             "retrieved": retrieved_n,
             "returned": len(results),
+            "redactions_applied": redactions,
             "filtered_by_authorization": filtered_n,
         },
     }

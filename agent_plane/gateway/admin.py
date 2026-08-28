@@ -6,6 +6,7 @@ credential or reload policies without restarting the control plane.
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -16,6 +17,24 @@ from agent_plane.policy.engine import YamlPolicyEngine
 from agent_plane.policy.loader import load_bundle
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _audit_admin(request: Request, action: str, detail: str, policy_version: str | None) -> None:
+    """Admin mutations are security-sensitive (they can silently un-revoke a
+    credential or swap the policy bundle) - they get the same signed audit chain
+    as every other edge, not a free pass because the caller holds ADMIN_TOKEN."""
+    request.app.state.audit.record({
+        "decision_id": f"admin_{uuid.uuid4().hex[:12]}",
+        "user_id": "admin",
+        "tenant": "*",
+        "model_requested": f"admin:{action}",
+        "model_used": action,
+        "data_classification": "",
+        "decision": "admin_action",
+        "reason": detail,
+        "policy_version": policy_version,
+        "rules_matched": [],
+    })
 
 
 @admin_router.get("/revocations")
@@ -37,6 +56,8 @@ async def add_revocation(
     if not jti:
         raise HTTPException(status_code=400, detail="missing 'jti'")
     request.app.state.revocations.add(jti)
+    _audit_admin(request, "revoke_add", f"revoked jti={jti}",
+                 request.app.state.engine.bundle.version)
     return {"revoked": sorted(request.app.state.revocations)}
 
 
@@ -46,6 +67,8 @@ async def remove_revocation(
 ) -> dict[str, Any]:
     _require_admin(request, x_admin_token)
     request.app.state.revocations.discard(jti)
+    _audit_admin(request, "revoke_remove", f"un-revoked jti={jti}",
+                 request.app.state.engine.bundle.version)
     return {"revoked": sorted(request.app.state.revocations)}
 
 
@@ -72,6 +95,8 @@ async def reload_policies(
     request.app.state.engine = YamlPolicyEngine(
         bundle, provider_resolver=request.app.state.registry.provider_tags
     )
+    _audit_admin(request, "policy_reload", f"policy bundle reloaded -> {bundle.version}",
+                 bundle.version)
     return {
         "reloaded": True,
         "policy_version": bundle.version,

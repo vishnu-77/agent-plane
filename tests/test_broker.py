@@ -86,3 +86,43 @@ def test_tool_outside_allowlist_denied(client):
     )
     assert r.status_code == 403
     assert "echo" in r.json()["detail"]["denied_tools"]
+
+
+def test_redaction_obligation_applies_to_tool_args_and_result(tmp_path, monkeypatch):
+    # A redact obligation on tool_call must scrub both what's sent to the tool
+    # and what comes back, same guarantee as the model edge.
+    pol_dir = tmp_path / "pol"
+    pol_dir.mkdir()
+    (pol_dir / "redact-tools.yaml").write_text(
+        "policy:\n"
+        "  name: redact-tool-pii\n"
+        "  version: t\n"
+        "  match: { request_type: tool_call }\n"
+        "  decision: { action: allow, redact: [email], obligations: [redact_pii] }\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("JWT_SECRET", JWT_SECRET)
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "a.db"))
+    monkeypatch.setenv("POLICY_DIR", str(pol_dir))
+    monkeypatch.setenv("ADMIN_TOKEN", "test-admin")
+    from agent_plane.config import get_settings
+
+    get_settings.cache_clear()
+    from agent_plane.main import create_app
+
+    with TestClient(create_app()) as c:
+        r = c.post(
+            "/v1/tools/invoke",
+            headers=_auth(_token()),
+            json={"tool": "echo", "arguments": {"note": "contact alice@example.com"}},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["result"]["echo"]["note"] == "contact [REDACTED_EMAIL]"
+        assert data["x_control_plane"]["redactions_applied"] == ["email"]
+
+        audit = c.get("/v1/audit", headers={"X-Admin-Token": "test-admin"}).json()["events"]
+        tool_events = [e for e in audit if e["model_requested"] == "tool:echo"]
+        assert tool_events and tool_events[0]["redactions_applied"] == ["email"]
+    get_settings.cache_clear()

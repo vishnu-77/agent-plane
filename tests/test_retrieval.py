@@ -121,3 +121,46 @@ def test_source_level_policy_can_deny(tmp_path, monkeypatch):
         assert r.status_code == 403
         assert r.json()["detail"]["error"] == "denied_by_policy"
     get_settings.cache_clear()
+
+
+def test_redaction_obligation_applies_to_rag_results(tmp_path, monkeypatch):
+    # A redact obligation on retrieval must scrub PII out of returned document
+    # text before it reaches the caller - relevance/authorization alone don't.
+    kb_file = tmp_path / "knowledge.yaml"
+    kb_file.write_text(
+        "sources:\n"
+        "  - name: kb\n"
+        "    type: local\n"
+        "    documents:\n"
+        "      - id: doc1\n"
+        '        text: "Contact support at alice@example.com for a reset."\n'
+        "        classification: public\n",
+        encoding="utf-8",
+    )
+    pol_dir = tmp_path / "pol"
+    pol_dir.mkdir()
+    (pol_dir / "redact-rag.yaml").write_text(
+        "policy:\n"
+        "  name: redact-rag-pii\n"
+        "  version: t\n"
+        "  match: { request_type: retrieval }\n"
+        "  decision: { action: allow, redact: [email], obligations: [redact_pii] }\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("JWT_SECRET", JWT_SECRET)
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "a.db"))
+    monkeypatch.setenv("POLICY_DIR", str(pol_dir))
+    monkeypatch.setenv("KNOWLEDGE_FILE", str(kb_file))
+    from agent_plane.config import get_settings
+
+    get_settings.cache_clear()
+    from agent_plane.main import create_app
+
+    with TestClient(create_app()) as c:
+        r = _retrieve(c, _auth(), "reset")
+        assert r.status_code == 200
+        body = r.json()
+        assert "[REDACTED_EMAIL]" in body["results"][0]["text"]
+        assert body["x_control_plane"]["redactions_applied"] == ["email"]
+    get_settings.cache_clear()
