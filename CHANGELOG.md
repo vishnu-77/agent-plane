@@ -5,6 +5,32 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Task-authority edge** (`POST /v1/authorize`): decides whether a specific
+  proposed action on a specific resource is authorised for the agent's current
+  *task* - distinct from what it's generically capable of (`Actor.allowed_tools`).
+  New `AuthorityLease` object (`agent_plane/authority/`, config-driven via
+  `config/leases.yaml`, issuable at runtime via `POST /v1/leases`): resource
+  scope, protected-resource carve-outs, per-action use limits, expiry, and
+  approval gating. Same identity layer and signed audit chain as every other
+  edge. See `spec/authority-lease.md`.
+- **Python SDK** (`sdk/python/agentplane`): minimal HTTP client for
+  `authorize()`.
+- **`examples/devops-agent/demo.py`** and **`examples/verify_deployment.py`**:
+  a runnable capability-vs-authority demo and a live-deployment smoke test
+  covering every edge.
+- **`INTEGRATION.md`** and **`ROADMAP.md`**: a plug-and-play integration guide
+  (with an honest accounting of what is and isn't zero-code today) and the
+  staged v0.1-v1.0 plan.
+
+### Fixed
+- The tool broker (`POST /v1/tools/invoke`) and RAG edge (`POST /v1/retrieve`)
+  now apply the `redact` obligation to tool arguments/results and retrieved
+  document text - previously only the model-completion edge redacted.
+- Admin mutations (revoke, un-revoke, policy hot-reload) are now recorded in
+  the same signed audit chain as every other decision, instead of being a
+  blind spot for a caller holding `ADMIN_TOKEN`.
+
 ## [0.2.0] - 2026-07-30
 
 ### Added
