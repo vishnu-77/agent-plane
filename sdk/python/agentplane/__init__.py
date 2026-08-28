@@ -60,7 +60,7 @@ class AgentPlane:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "AgentPlane":
+    def __enter__(self) -> AgentPlane:
         return self
 
     def __exit__(self, *exc: object) -> None:

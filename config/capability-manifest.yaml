@@ -1,0 +1,21 @@
+# Capability manifest: what this deployment's agents can technically do -
+# the union of tools, edges, and policy-governed actions. Bump `version` any
+# time a capability changes (a new tool in config/tools.yaml, a new edge, a
+# new AuthorityLease action) - config/threat-model.yaml must be updated to
+# match, or `agentplane authority check-freshness` fails CI.
+#
+# This is deliberately separate from any one agent's AuthorityLease: a lease
+# grants task-scoped authority *within* what's declared possible here.
+version: "1"
+
+capabilities:
+  - edge: model
+    description: OpenAI-compatible chat completions, routed/redacted/audited (POST /v1/chat/completions)
+  - edge: tool
+    description: broker-executed tool calls, least-privilege + approval-gated (POST /v1/tools/invoke)
+  - edge: retrieval
+    description: identity-aware RAG retrieval, document-level ABAC/ACL (POST /v1/retrieve)
+  - edge: delegation
+    description: attenuated agent-to-agent identity hand-off (POST /v1/agents/delegate)
+  - edge: authority
+    description: task-scoped action authorization against an AuthorityLease (POST /v1/authorize)

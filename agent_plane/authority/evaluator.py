@@ -81,7 +81,7 @@ def evaluate_authority(
         )
 
     now = datetime.now(UTC)
-    active = [l for l in leases if l.expires_at is None or l.expires_at > now]
+    active = [lease for lease in leases if lease.expires_at is None or lease.expires_at > now]
     if not active:
         return AuthorityDecision(
             decision=DecisionAction.DENY, reason=AuthorityReason.LEASE_EXPIRED,

@@ -1,0 +1,29 @@
+name: AI-TM freshness
+
+on:
+  pull_request:
+    paths:
+      - "config/capability-manifest.yaml"
+      - "config/threat-model.yaml"
+      - "agent_plane/authority/freshness.py"
+  push:
+    branches: [main]
+    paths:
+      - "config/capability-manifest.yaml"
+      - "config/threat-model.yaml"
+      - "agent_plane/authority/freshness.py"
+
+jobs:
+  threat-model-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: Fail if the threat model has drifted from the capability manifest
+        run: >-
+          python -m agent_plane.authority_cli check-freshness
+          --capabilities config/capability-manifest.yaml
+          --threat-model config/threat-model.yaml
