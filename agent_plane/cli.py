@@ -54,6 +54,9 @@ def main(argv: list[str] | None = None) -> None:
     ident = sub.add_parser("identity", help="manage delegation credentials")
     ident.add_argument("args", nargs=argparse.REMAINDER)
 
+    authority = sub.add_parser("authority", help="task-authority tooling (e.g. threat-model freshness)")
+    authority.add_argument("args", nargs=argparse.REMAINDER)
+
     args = parser.parse_args(argv)
 
     if args.cmd == "init":
@@ -79,6 +82,10 @@ def main(argv: list[str] | None = None) -> None:
         from agent_plane import identity_cli
 
         identity_cli.main(args.args)
+    elif args.cmd == "authority":
+        from agent_plane import authority_cli
+
+        authority_cli.main(args.args)
 
 
 if __name__ == "__main__":
