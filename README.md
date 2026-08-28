@@ -9,6 +9,13 @@ policy, tool least-privilege, guardrails, routing, **usage metering**, and a
 tamper-evident audit log are all applied at runtime. Drop-in (`base_url`),
 config-driven, and packaged: `pip install agent-plane` → `agentplane serve`.
 
+> **Capability ≠ Authority.** An agent may hold a real `github.delete_repository`
+> credential (its *capability*) - the task at hand might only authorise
+> `branch:list`/`branch:delete` on one repo (its *authority*). `POST /v1/authorize`
+> decides that, per action, before it reaches the real system - see
+> [Task-authority edge](#task-authority-edge-agent--action) and
+> [`spec/authority-lease.md`](spec/authority-lease.md).
+
 ```
 POST /v1/chat/completions
   → Identity (JWT → Actor)
@@ -114,6 +121,9 @@ curl http://localhost:8000/v1/audit
 | POST   | `/v1/tools/invoke`      | Governed tool/MCP call (broker edge)     |
 | POST   | `/v1/retrieve`          | Identity-aware RAG retrieval (auth edge) |
 | POST   | `/v1/agents/delegate`   | Scoped agent-to-agent delegation (A2A)   |
+| POST   | `/v1/authorize`         | Task-authority decision (capability ≠ authority) |
+| POST   | `/v1/leases`            | Issue an `AuthorityLease` (**admin token only**) |
+| GET    | `/v1/leases/{id}`       | Inspect a lease (**admin token only**)   |
 | GET    | `/v1/usage`             | Per-tenant usage metering                |
 | GET    | `/v1/models`            | Registered logical models                |
 | GET    | `/v1/audit?limit=50`    | Recent audit events (**admin token only**) |
@@ -247,6 +257,38 @@ A YAML policy with `match: { request_type: retrieval }` can also gate a whole so
 (deny/approval). The retrieval lands in the same signed audit chain (`rag:<source>`) and
 is metered (`edge=retrieve`).
 
+## Task-authority edge (agent → action)
+
+The other edges decide *is this actor allowed to call this model/tool/source at
+all*. This one decides something narrower and newer: **is this specific
+action, on this specific resource, authorised for the task the agent is
+currently doing** - independent of what it's generically capable of.
+
+An `AuthorityLease` (`config/leases.yaml`, or issued at runtime via
+`POST /v1/leases`) grants one agent, for one task, a resource-scoped,
+expiring slice of actions - always a subset of its capability manifest
+(`Actor.allowed_tools`), never a superset. Full shape and evaluation order in
+[`spec/authority-lease.md`](spec/authority-lease.md); runnable end-to-end demo
+in [`examples/devops-agent/`](examples/devops-agent/demo.py).
+
+```bash
+# devops-agent's lease for `fix-staging-checkout` covers staging/*, not production/*
+curl http://localhost:8000/v1/authorize -H "Authorization: Bearer $TOKEN" -d '{
+  "task": "fix-staging-checkout", "action": "deployment.restart", "resource": "staging/checkout"
+}'
+# -> 200 { decision: allow, reason: ACTION_WITHIN_TASK_AUTHORITY, lease: lease-fix-staging, evidence_id: az_... }
+
+curl http://localhost:8000/v1/authorize -H "Authorization: Bearer $TOKEN" -d '{
+  "task": "fix-staging-checkout", "action": "deployment.delete", "resource": "production/checkout"
+}'
+# -> 403 { decision: deny, reason: RESOURCE_OUTSIDE_DELEGATED_SCOPE, lease: null, evidence_id: az_... }
+```
+
+Same identity layer, same signed audit chain as every other edge - this adds a
+decision point, not a new trust boundary. It's a pure decision, not an
+execution broker: the caller (SDK, gateway, or your own code) still calls the
+real tool itself once `decision.allowed` is true.
+
 ## Agent-to-agent (A2A) edge
 
 A hand-off must not inherit full authority. An authenticated agent asks the control
@@ -345,10 +387,12 @@ keys.
 
 ## Roadmap (not yet built)
 
-Egress/data edge and agent-to-agent edge (the planned brokers in
-`docs/architecture/edges.md`), a full MCP traffic gateway, the human-approval
-*workflow* (`approval_required` is surfaced as HTTP 202 but not yet queued/resumed),
-a billing integration on top of usage metering, multi-region, SIEM export, and an admin UI.
+Egress/data edge (the planned broker in `docs/architecture/edges.md`), a full MCP
+traffic gateway, the human-approval *workflow* (`approval_required` is surfaced as
+HTTP 202 but not yet queued/resumed), lease delegation (`child_authority` is parsed
+but not enforced - see [`spec/authority-lease.md`](spec/authority-lease.md)), a
+TypeScript SDK, a billing integration on top of usage metering, multi-region, SIEM
+export, and an admin UI. Full staged plan: [`ROADMAP.md`](ROADMAP.md).
 
 ## License
 
