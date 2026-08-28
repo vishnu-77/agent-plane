@@ -53,8 +53,6 @@ def test_current_repo_manifest_and_threat_model_are_in_sync():
 
 
 def test_cli_exit_code(tmp_path, capsys):
-    import sys
-
     from agent_plane import authority_cli
 
     cap = _write(tmp_path, "cap.yaml", 'version: "1"\n')
