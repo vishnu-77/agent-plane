@@ -111,6 +111,24 @@ curl http://localhost:8000/v1/authorize -H "Authorization: Bearer $TOKEN" -d '{
 # -> 403 { decision: deny, reason: RESOURCE_OUTSIDE_DELEGATED_SCOPE, lease: null, evidence_id: az_... }
 ```
 
+The lease holder can delegate a narrower **child lease** to a sub-agent
+(self-service, like the A2A identity edge - child scope must be a subset of
+the parent's), and an operator can **shrink or revoke** an active lease
+mid-task, effective immediately:
+
+```bash
+# devops-agent delegates a read-only slice of its own lease to a sub-agent
+curl -X POST http://localhost:8000/v1/leases/lease-fix-staging/delegate \
+  -H "Authorization: Bearer $TOKEN" -d '{"agent": "staging-subagent", "actions": ["deployment.read"]}'
+
+# an operator narrows the lease in place - only ever a subset of what it already grants
+curl -X PATCH http://localhost:8000/v1/leases/lease-fix-staging -H "X-Admin-Token: $ADMIN" \
+  -d '{"actions": ["deployment.read"]}'
+
+# or pulls it outright
+curl -X DELETE http://localhost:8000/v1/leases/lease-fix-staging -H "X-Admin-Token: $ADMIN"
+```
+
 Same identity layer, same signed audit chain as every other edge - this adds a
 decision point, not a new trust boundary. It's a pure decision, not an
 execution broker: the caller (SDK, gateway, or your own code) still calls the

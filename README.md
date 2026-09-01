@@ -73,6 +73,9 @@ examples per edge, including a policy-denial demo: [EDGES.md](EDGES.md).
 | POST   | `/v1/authorize`         | Task-authority decision (capability ≠ authority) |
 | POST   | `/v1/leases`            | Issue an `AuthorityLease` (**admin token only**) |
 | GET    | `/v1/leases/{id}`       | Inspect a lease (**admin token only**)   |
+| POST   | `/v1/leases/{id}/delegate` | Mint an attenuated child lease (lease holder only) |
+| PATCH  | `/v1/leases/{id}`       | Narrow an active lease in place (**admin token only**) |
+| DELETE | `/v1/leases/{id}`       | Revoke a lease immediately (**admin token only**) |
 | GET    | `/v1/usage`             | Per-tenant usage metering                |
 | GET    | `/v1/models`            | Registered logical models                |
 | GET    | `/v1/audit?limit=50`    | Recent audit events (**admin token only**) |
