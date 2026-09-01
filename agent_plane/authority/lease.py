@@ -34,6 +34,7 @@ class AuthorityLease(BaseModel):
     expires_at: datetime | None = None
     maximum_impact: str = "reversible"        # reversible | irreversible
     child_authority: str = "subset_only"       # "subset_only" | "none"
+    revoked: bool = False
 
 
 def resource_matches(patterns: list[str], resource: str) -> bool:
@@ -48,7 +49,9 @@ def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> l
     """Return reasons ``child`` exceeds what ``parent`` may delegate (empty = OK).
 
     Mirrors ``agent_plane.gateway.a2a.attenuation_errors`` - a child lease must
-    never grant more than its parent holds.
+    never grant more than its parent holds. Also used to validate an in-place
+    lease *shrink* (``parent`` = the lease's current values, ``child`` = the
+    requested narrower values) - the same "never grants more" rule applies.
     """
     errors: list[str] = []
     extra_actions = [a for a in child.actions if a not in parent.actions]
@@ -70,6 +73,15 @@ def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> l
         child.expires_at is None or child.expires_at > parent.expires_at
     ):
         errors.append("expires_at exceeds parent lease expiry")
+    # A narrower lease may not quietly drop safeguards the parent already had.
+    unapproved = [
+        a for a in child.actions if a in parent.require_approval and a not in child.require_approval
+    ]
+    if unapproved:
+        errors.append(f"drops required-approval on actions: {unapproved}")
+    unprotected = [p for p in parent.protected_resources if p not in child.protected_resources]
+    if unprotected:
+        errors.append(f"removes protected resources: {unprotected}")
     return errors
 
 

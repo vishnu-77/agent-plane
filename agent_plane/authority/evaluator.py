@@ -31,6 +31,7 @@ class AuthorityReason(str, Enum):
     ACTION_OUTSIDE_CAPABILITY_MANIFEST = "ACTION_OUTSIDE_CAPABILITY_MANIFEST"
     NO_ACTIVE_LEASE = "NO_ACTIVE_LEASE"
     LEASE_EXPIRED = "LEASE_EXPIRED"
+    LEASE_REVOKED = "LEASE_REVOKED"
     RESOURCE_OUTSIDE_DELEGATED_SCOPE = "RESOURCE_OUTSIDE_DELEGATED_SCOPE"
     RESOURCE_PROTECTED = "RESOURCE_PROTECTED"
     ACTION_NOT_AUTHORIZED = "ACTION_NOT_AUTHORIZED"
@@ -80,8 +81,15 @@ def evaluate_authority(
             decision_id=decision_id,
         )
 
+    non_revoked = [lease for lease in leases if not lease.revoked]
+    if not non_revoked:
+        return AuthorityDecision(
+            decision=DecisionAction.DENY, reason=AuthorityReason.LEASE_REVOKED,
+            decision_id=decision_id,
+        )
+
     now = datetime.now(UTC)
-    active = [lease for lease in leases if lease.expires_at is None or lease.expires_at > now]
+    active = [lease for lease in non_revoked if lease.expires_at is None or lease.expires_at > now]
     if not active:
         return AuthorityDecision(
             decision=DecisionAction.DENY, reason=AuthorityReason.LEASE_EXPIRED,

@@ -6,7 +6,7 @@
 #
 # This is deliberately separate from any one agent's AuthorityLease: a lease
 # grants task-scoped authority *within* what's declared possible here.
-version: "2"
+version: "3"
 
 capabilities:
   - edge: model
@@ -23,3 +23,7 @@ capabilities:
     description: >-
       lease holder mints an attenuated child AuthorityLease (POST /v1/leases/{id}/delegate);
       child scope subset of parent, gated by the parent lease's child_authority field
+  - edge: lease-revocation
+    description: >-
+      admin revokes (DELETE) or narrows in place (PATCH) an active AuthorityLease
+      (/v1/leases/{id}); effective immediately, shrink can only narrow - never widen
