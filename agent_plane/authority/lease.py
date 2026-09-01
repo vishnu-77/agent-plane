@@ -44,7 +44,7 @@ def resource_matches(patterns: list[str], resource: str) -> bool:
 _IMPACT_RANK = {"reversible": 0, "irreversible": 1}
 
 
-def lease_attenuation_errors(parent: "AuthorityLease", child: "AuthorityLease") -> list[str]:
+def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> list[str]:
     """Return reasons ``child`` exceeds what ``parent`` may delegate (empty = OK).
 
     Mirrors ``agent_plane.gateway.a2a.attenuation_errors`` - a child lease must
