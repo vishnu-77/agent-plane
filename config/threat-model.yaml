@@ -4,9 +4,9 @@
 # underneath it via config/instructions. `capability_manifest_version` pins
 # which version of config/capability-manifest.yaml this review covers -
 # `agentplane authority check-freshness` fails CI if they drift apart.
-capability_manifest_version: "1"
+capability_manifest_version: "2"
 
-last_reviewed: "2026-08-28"
+last_reviewed: "2026-09-01"
 
 # AI-TM's refresh triggers this review considered (see the OWASP page): tool
 # and action capabilities, identity/authorization changes, instruction/policy
@@ -24,6 +24,9 @@ notes:
     production (config.py fails closed if IDENTITY_MODE=delegation lacks a key,
     but does not block jwt_claims itself).
   multi_agent_orchestration: >
-    A2A delegation enforces attenuation (child scope subset of parent);
-    AuthorityLease delegation (child_authority) is parsed but not yet enforced
-    - see ROADMAP.md v0.3.
+    A2A delegation enforces attenuation (child scope subset of parent).
+    AuthorityLease delegation (POST /v1/leases/{id}/delegate, v0.3) mirrors it:
+    only the lease holder may delegate, only when the parent's child_authority
+    != "none", and only a subset of the parent's resources/actions/max_uses/
+    maximum_impact/expiry - a fresh child lease defaults to child_authority
+    "none" so re-delegation doesn't chain unbounded unless explicitly granted.
