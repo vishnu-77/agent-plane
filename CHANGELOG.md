@@ -6,6 +6,12 @@ All notable changes to this project are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Lease delegation** (`POST /v1/leases/{id}/delegate`, v0.3): the lease
+  holder mints an attenuated child `AuthorityLease` - self-service, mirroring
+  the A2A identity edge's attenuation (child scope must be a subset of the
+  parent's resources/actions/max_uses/impact/expiry), gated by the parent
+  lease's `child_authority` field (a child defaults to `child_authority: none`
+  so re-delegation doesn't chain unbounded unless explicitly granted).
 - **Task-authority edge** (`POST /v1/authorize`): decides whether a specific
   proposed action on a specific resource is authorised for the agent's current
   *task* - distinct from what it's generically capable of (`Actor.allowed_tools`).
