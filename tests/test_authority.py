@@ -178,3 +178,74 @@ def test_admin_can_issue_and_read_back_a_lease(client):
 def test_lease_issuance_requires_admin_token(client):
     r = client.post("/v1/leases", json={"id": "x", "task": "t", "agent": "a"})
     assert r.status_code in (401, 404)
+
+
+# --- lease delegation (v0.3: attenuated child leases) ---------------------
+
+
+def test_lease_holder_can_delegate_a_subset_and_it_is_enforceable(client):
+    token = _token(agent_id="devops-agent")
+    r = client.post(
+        "/v1/leases/lease-fix-staging/delegate",
+        headers=_auth(token),
+        json={"agent": "staging-subagent", "actions": ["deployment.read"]},
+    )
+    assert r.status_code == 200, r.json()
+    child = r.json()["lease"]
+    assert child["subject"] == "staging-subagent"
+    assert child["actions"] == ["deployment.read"]
+    assert child["resources"] == ["staging/*"]  # inherited from parent
+    assert child["child_authority"] == "none"  # cannot re-delegate by default
+
+    # Immediately enforceable for the child agent, same task.
+    r = _authorize(
+        client, _token(agent_id="staging-subagent"),
+        "fix-staging-checkout", "deployment.read", "staging/checkout",
+    )
+    assert r.status_code == 200
+
+    # But not an action the child wasn't granted, even though the parent has it.
+    r = _authorize(
+        client, _token(agent_id="staging-subagent"),
+        "fix-staging-checkout", "deployment.restart", "staging/checkout",
+    )
+    assert r.status_code == 403
+
+
+def test_lease_delegation_refuses_privilege_escalation(client):
+    token = _token(agent_id="devops-agent")
+    r = client.post(
+        "/v1/leases/lease-fix-staging/delegate",
+        headers=_auth(token),
+        json={"agent": "staging-subagent", "resources": ["production/*"]},
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"] == "privilege_escalation"
+
+
+def test_lease_delegation_requires_being_the_lease_holder(client):
+    token = _token(agent_id="repo-agent")  # holds a different lease, not this one
+    r = client.post(
+        "/v1/leases/lease-fix-staging/delegate",
+        headers=_auth(token),
+        json={"agent": "staging-subagent"},
+    )
+    assert r.status_code == 403
+
+
+def test_lease_delegation_blocked_when_parent_forbids_it(client):
+    client.post(
+        "/v1/leases",
+        headers={"X-Admin-Token": "test-admin"},
+        json={
+            "id": "lease-no-delegate", "task": "t1", "agent": "a1",
+            "resources": ["res/*"], "actions": ["read"], "child_authority": "none",
+        },
+    )
+    r = client.post(
+        "/v1/leases/lease-no-delegate/delegate",
+        headers=_auth(_token(agent_id="a1")),
+        json={"agent": "a2"},
+    )
+    assert r.status_code == 403
+    assert "child_authority" in r.json()["detail"]

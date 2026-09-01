@@ -7,7 +7,7 @@ plane around it - not the whole architecture at once.
 | -------- | ---------------------------------------- | ------ |
 | **v0.1** | Runtime task-authority enforcement (`AuthorityLease`, `POST /v1/authorize`, capability-manifest gate, tamper-evident evidence) | ✅ shipped |
 | **v0.2** | TypeScript SDK, MCP adapter, gateway/proxy mode | planned |
-| **v0.3** | Lease delegation + child authority (attenuated sub-leases, mirroring the A2A identity edge) | planned |
+| **v0.3** | Lease delegation + child authority (attenuated sub-leases, mirroring the A2A identity edge) | ✅ shipped |
 | **v0.4** | Dynamic authority shrinking/revocation for active leases | planned |
 | **v0.5** | Consequence-aware decisions (`maximum_impact` actually gates, not just informational) | planned |
 | **v0.6** | Observed-vs-declared capability drift detection | 🟡 started: `agentplane authority check-freshness` fails CI when `config/threat-model.yaml` drifts from `config/capability-manifest.yaml`'s version. Declared-vs-declared only so far, not declared-vs-*observed* runtime behavior. |

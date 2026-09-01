@@ -41,6 +41,38 @@ def resource_matches(patterns: list[str], resource: str) -> bool:
     return any(fnmatch.fnmatchcase(resource, p) for p in patterns)
 
 
+_IMPACT_RANK = {"reversible": 0, "irreversible": 1}
+
+
+def lease_attenuation_errors(parent: "AuthorityLease", child: "AuthorityLease") -> list[str]:
+    """Return reasons ``child`` exceeds what ``parent`` may delegate (empty = OK).
+
+    Mirrors ``agent_plane.gateway.a2a.attenuation_errors`` - a child lease must
+    never grant more than its parent holds.
+    """
+    errors: list[str] = []
+    extra_actions = [a for a in child.actions if a not in parent.actions]
+    if extra_actions:
+        errors.append(f"actions not held by parent lease: {extra_actions}")
+    extra_resources = [r for r in child.resources if not resource_matches(parent.resources, r)]
+    if extra_resources:
+        errors.append(f"resources outside parent lease scope: {extra_resources}")
+    for action, limit in child.max_uses.items():
+        parent_limit = parent.max_uses.get(action)
+        if parent_limit is not None and limit > parent_limit:
+            errors.append(f"max_uses[{action}]={limit} exceeds parent limit {parent_limit}")
+    # Unknown impact values rank as irreversible (fail closed).
+    if _IMPACT_RANK.get(child.maximum_impact, 1) > _IMPACT_RANK.get(parent.maximum_impact, 1):
+        errors.append(
+            f"maximum_impact exceeds parent ({child.maximum_impact} > {parent.maximum_impact})"
+        )
+    if parent.expires_at is not None and (
+        child.expires_at is None or child.expires_at > parent.expires_at
+    ):
+        errors.append("expires_at exceeds parent lease expiry")
+    return errors
+
+
 def _parse_dt(value: Any) -> datetime | None:
     if value is None or isinstance(value, datetime):
         return value

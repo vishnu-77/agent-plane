@@ -6,7 +6,7 @@
 #
 # This is deliberately separate from any one agent's AuthorityLease: a lease
 # grants task-scoped authority *within* what's declared possible here.
-version: "1"
+version: "2"
 
 capabilities:
   - edge: model
@@ -19,3 +19,7 @@ capabilities:
     description: attenuated agent-to-agent identity hand-off (POST /v1/agents/delegate)
   - edge: authority
     description: task-scoped action authorization against an AuthorityLease (POST /v1/authorize)
+  - edge: lease-delegation
+    description: >-
+      lease holder mints an attenuated child AuthorityLease (POST /v1/leases/{id}/delegate);
+      child scope subset of parent, gated by the parent lease's child_authority field
