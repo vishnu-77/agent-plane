@@ -211,3 +211,75 @@ async def get_lease(
     if lease is None:
         raise HTTPException(status_code=404, detail="lease not found")
     return lease.model_dump(mode="json")
+
+
+@authority_router.delete("/v1/leases/{lease_id}")
+async def revoke_lease(
+    request: Request,
+    lease_id: str,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Revoke a lease outright, effective immediately (v0.4). Kept in the
+    store, not deleted, so `GET /v1/leases/{id}` still shows it for audit."""
+    require_admin(request, x_admin_token)
+    if not request.app.state.leases.revoke(lease_id):
+        raise HTTPException(status_code=404, detail="lease not found")
+    _audit_admin(request, decision="deny", reason="LEASE_REVOKED", lease_id=lease_id)
+    return {"revoked": True, "lease": lease_id}
+
+
+@authority_router.patch("/v1/leases/{lease_id}")
+async def shrink_lease(
+    request: Request,
+    lease_id: str,
+    body: dict[str, Any],
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Narrow an active lease's authority in place (v0.4). Only a subset of
+    the lease's current resources/actions/max_uses/maximum_impact/expiry -
+    same "never grants more" rule as delegation; widening is refused."""
+    require_admin(request, x_admin_token)
+    store = request.app.state.leases
+    current = store.get(lease_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="lease not found")
+
+    body = body or {}
+    shrunk = current.model_copy(update={
+        k: body[k] for k in (
+            "resources", "actions", "protected_resources", "max_uses",
+            "require_approval", "expires_at", "maximum_impact",
+        ) if k in body
+    })
+
+    errors = lease_attenuation_errors(current, shrunk)
+    if errors:
+        _audit_admin(
+            request, decision="deny",
+            reason="privilege escalation refused: " + "; ".join(errors), lease_id=lease_id,
+        )
+        raise HTTPException(status_code=403, detail={
+            "error": "privilege_escalation", "violations": errors})
+
+    store.add(shrunk)
+    _audit_admin(request, decision="allow", reason="LEASE_SHRUNK", lease_id=lease_id)
+    return {"shrunk": True, "lease": shrunk.model_dump(mode="json")}
+
+
+def _audit_admin(request: Request, *, decision: str, reason: str, lease_id: str) -> None:
+    request.app.state.audit.record({
+        "decision_id": f"az_{uuid.uuid4().hex[:12]}",
+        "user_id": "admin",
+        "tenant": "-",
+        "department": None,
+        "app_id": None,
+        "agent_id": None,
+        "model_requested": f"lease-admin:{lease_id}",
+        "model_used": lease_id,
+        "data_classification": "",
+        "decision": decision,
+        "reason": reason,
+        "rules_matched": [lease_id],
+        "latency_ms": 0,
+        "prompt_hash": hashlib.sha256(lease_id.encode()).hexdigest(),
+    })

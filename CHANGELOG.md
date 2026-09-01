@@ -6,6 +6,16 @@ All notable changes to this project are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Lease revocation + shrinking** (`DELETE`/`PATCH /v1/leases/{id}`, v0.4):
+  an operator can pull or narrow an active lease's authority mid-task,
+  effective immediately - no waiting for its natural expiry. `PATCH` reuses
+  the delegation edge's attenuation rule (`lease_attenuation_errors`), so a
+  shrink can only narrow, never widen; that shared validator also now
+  refuses to drop a parent's `require_approval`/`protected_resources`
+  safeguard on delegation, closing a gap the v0.3 delegate endpoint had
+  (an explicit non-empty `require_approval` override could previously omit
+  an action the parent required approval for). Admin-token gated and
+  audited, same as lease issuance.
 - **Lease delegation** (`POST /v1/leases/{id}/delegate`, v0.3): the lease
   holder mints an attenuated child `AuthorityLease` - self-service, mirroring
   the A2A identity edge's attenuation (child scope must be a subset of the

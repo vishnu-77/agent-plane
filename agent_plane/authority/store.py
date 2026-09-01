@@ -28,6 +28,16 @@ class LeaseStore:
         with self._lock:
             self._leases[lease.id] = lease
 
+    def revoke(self, lease_id: str) -> bool:
+        """Mark a lease revoked in place (usage counters, keyed by lease_id,
+        are untouched). Returns False if the lease doesn't exist."""
+        with self._lock:
+            lease = self._leases.get(lease_id)
+            if lease is None:
+                return False
+            self._leases[lease_id] = lease.model_copy(update={"revoked": True})
+            return True
+
     def get(self, lease_id: str) -> AuthorityLease | None:
         return self._leases.get(lease_id)
 

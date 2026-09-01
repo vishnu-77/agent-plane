@@ -249,3 +249,97 @@ def test_lease_delegation_blocked_when_parent_forbids_it(client):
     )
     assert r.status_code == 403
     assert "child_authority" in r.json()["detail"]
+
+
+def test_lease_delegation_cannot_drop_a_required_approval(client):
+    client.post(
+        "/v1/leases",
+        headers={"X-Admin-Token": "test-admin"},
+        json={
+            "id": "lease-approval-gated", "task": "t1", "agent": "a1",
+            "resources": ["res/*"], "actions": ["read", "write"],
+            "require_approval": ["write"],
+        },
+    )
+    # Non-empty override that silently omits "write" - a real escalation, not
+    # the "unspecified = inherit parent's" case (which an empty list is).
+    r = client.post(
+        "/v1/leases/lease-approval-gated/delegate",
+        headers=_auth(_token(agent_id="a1")),
+        json={"agent": "a2", "require_approval": ["read"]},
+    )
+    assert r.status_code == 403
+    assert "drops required-approval" in "; ".join(r.json()["detail"]["violations"])
+
+
+# --- lease revocation + shrinking (v0.4) -----------------------------------
+
+
+def test_admin_can_revoke_a_lease_and_it_is_denied_thereafter(client):
+    client.post(
+        "/v1/leases",
+        headers={"X-Admin-Token": "test-admin"},
+        json={
+            "id": "lease-revoke-me", "task": "t1", "agent": "a1",
+            "resources": ["res/*"], "actions": ["read"],
+        },
+    )
+    r = _authorize(client, _token(agent_id="a1"), "t1", "read", "res/thing")
+    assert r.status_code == 200
+
+    r = client.delete("/v1/leases/lease-revoke-me", headers={"X-Admin-Token": "test-admin"})
+    assert r.status_code == 200
+    assert r.json()["revoked"] is True
+
+    r = _authorize(client, _token(agent_id="a1"), "t1", "read", "res/thing")
+    assert r.status_code == 403
+    assert r.json()["detail"]["reason"] == "LEASE_REVOKED"
+
+
+def test_revoking_unknown_lease_is_404(client):
+    r = client.delete("/v1/leases/no-such-lease", headers={"X-Admin-Token": "test-admin"})
+    assert r.status_code == 404
+
+
+def test_admin_can_shrink_a_lease_and_it_is_enforced_immediately(client):
+    client.post(
+        "/v1/leases",
+        headers={"X-Admin-Token": "test-admin"},
+        json={
+            "id": "lease-shrink-me", "task": "t1", "agent": "a1",
+            "resources": ["res/*"], "actions": ["read", "write"],
+        },
+    )
+    r = client.patch(
+        "/v1/leases/lease-shrink-me",
+        headers={"X-Admin-Token": "test-admin"},
+        json={"actions": ["read"]},
+    )
+    assert r.status_code == 200
+    assert r.json()["lease"]["actions"] == ["read"]
+
+    # Still-granted action keeps working.
+    r = _authorize(client, _token(agent_id="a1"), "t1", "read", "res/thing")
+    assert r.status_code == 200
+    # Removed action is denied, effective immediately.
+    r = _authorize(client, _token(agent_id="a1"), "t1", "write", "res/thing")
+    assert r.status_code == 403
+    assert r.json()["detail"]["reason"] == "ACTION_NOT_AUTHORIZED"
+
+
+def test_shrinking_a_lease_cannot_widen_it(client):
+    client.post(
+        "/v1/leases",
+        headers={"X-Admin-Token": "test-admin"},
+        json={
+            "id": "lease-no-widen", "task": "t1", "agent": "a1",
+            "resources": ["res/*"], "actions": ["read"],
+        },
+    )
+    r = client.patch(
+        "/v1/leases/lease-no-widen",
+        headers={"X-Admin-Token": "test-admin"},
+        json={"actions": ["read", "delete"]},
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"] == "privilege_escalation"
