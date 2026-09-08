@@ -1,36 +1,59 @@
+[![CI](https://github.com/vishnu-77/agent-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/vishnu-77/agent-plane/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 # agent-plane
 
-Runtime authorization for AI-agent actions.
+Runtime least-privilege authorization for AI agents.
 
-Agents often hold tools and credentials with more capability than a specific
-task requires. agent-plane evaluates a proposed action against the task at
-hand before it reaches the real system.
+Control what an agent is authorized to do for this task — not merely what
+its credentials allow it to do.
 
-**Capability ≠ Authority.** An agent may hold a real `github.delete_repository`
-credential (its *capability*). The task in front of it might only authorize
-`branch.delete` on one repo, on non-`main` branches (its *authority*).
-`POST /v1/authorize` decides that, per action, before anything executes.
+**Capability ≠ Authority.**
+
+agent-plane sits between an AI agent and the systems it acts on, and
+evaluates each proposed action before execution.
+
+## Capability ≠ Authority
 
 ```text
 Agent capability:
   github.delete_repository
 
-Current task ("remediate-stale-branches"), lease-scoped to:
-  branch.delete on github://acme/agent-plane-demo/*  (main excluded, 5 uses max)
+Current task authority ("remediate-stale-branches"):
+  branch.delete
+  github://acme/agent-plane-demo/*
+  main excluded, 5 uses max
 
-Decision:
-  DENY  github.delete_repository        -> outside the lease entirely
-  DENY  branch.delete on .../main       -> protected resource, carved out
-  ALLOW branch.delete on .../stale-123  -> within scope
+DENY  github.delete_repository        -> outside the lease entirely
+DENY  branch.delete -> .../main       -> protected resource, carved out
+ALLOW branch.delete -> .../stale-123  -> within scope
 ```
+
+The credential says what the agent *can* do. The task's `AuthorityLease`
+says what it's *authorized* to do right now. An action is only allowed
+where both agree.
+
+## Architecture
 
 ```text
-request
-  -> identity (JWT -> Actor)
-  -> policy (YAML rules -> allow / deny / approval_required)
-  -> task authority (AuthorityLease: resource + action + limits, per task)
-  -> audit (hash-chained, HMAC-signed)
+Agent
+  |
+Identity        JWT -> Actor (user, agent, tenant)
+  |
+Policy          YAML rules -> allow / deny / approval_required
+  |
+Task Authority  AuthorityLease -> resource + action + limits, per task
+  |
+Decision        ALLOW / DENY / APPROVAL_REQUIRED
+  |
+Execution  ---> Models | MCP / Tools | APIs | RAG / Knowledge | Other Agents
+  |
+Signed Audit    hash-chained, HMAC-signed
 ```
+
+Policy governs every edge below. `AuthorityLease` is the task-scoping
+primitive that `/v1/authorize` and agent-to-agent delegation evaluate
+explicitly — see [§ One authorization plane](#one-authorization-plane-multiple-enforcement-edges).
 
 ## Quickstart
 
@@ -43,6 +66,14 @@ agentplane serve
 ```
 
 Runs with zero configuration in dev mode (SQLite + a default JWT secret).
+
+```text
+Console: http://localhost:8000/console
+Swagger: http://localhost:8000/docs
+```
+
+## Try it: same identity, different task authority
+
 Mint a token and ask whether an action is authorized:
 
 ```bash
@@ -61,7 +92,8 @@ curl -s http://localhost:8000/v1/authorize -H "Authorization: Bearer $TOKEN" -d 
 {"decision":"allow","reason":"ACTION_WITHIN_TASK_AUTHORITY","lease":"lease-fix-staging","evidence_id":"az_d14e37168fdb"}
 ```
 
-Same task, an action/resource outside what the lease actually grants:
+Same agent, same token, same task — a different action/resource the lease
+doesn't grant:
 
 ```bash
 curl -s http://localhost:8000/v1/authorize -H "Authorization: Bearer $TOKEN" -d '{
@@ -74,56 +106,173 @@ curl -s http://localhost:8000/v1/authorize -H "Authorization: Bearer $TOKEN" -d 
 {"detail":{"decision":"deny","reason":"RESOURCE_OUTSIDE_DELEGATED_SCOPE","lease":null,"evidence_id":"az_2a38d02bd2fe"}}
 ```
 
-Both examples ran against this repo's own demo data (`config/leases.yaml`)
-and its default policies — copy-pasteable as shown.
+Same identity. Same credentials. Different task authority. Different
+decision. Both examples ran against this repo's own demo data
+(`config/leases.yaml`) — copy-pasteable as shown.
 
-## Why this exists
+## Why IAM is not enough
 
-A capability grant (an API key, an OAuth scope, a tool the agent can call) is
-usually broader than any one task needs, and it doesn't change while the
-agent is running. `agent-plane` adds a narrower, expiring, per-task grant
-(an `AuthorityLease`) that the agent's raw capability must also satisfy —
-before the action reaches the target system, not after.
+```text
+IAM:          What can this identity access?
+agent-plane:  What is this agent authorized to do, for this task, right now?
+```
+
+```text
+Capability ∩ Task Authority ∩ Policy ∩ Runtime Constraints = Executable Authority
+```
+
+Cloud and application IAM (AWS IAM, Kubernetes RBAC, OAuth scopes, MCP tool
+grants) define the *ceiling* — the most an identity could ever do.
+agent-plane adds a narrower, expiring, per-task floor beneath that ceiling,
+evaluated at the moment of the action, not once at credential-issue time.
+It doesn't replace your IAM — the target system still enforces its own
+permissions; agent-plane's decision has to say yes as well.
+
+## AuthorityLease
+
+The primitive that encodes task-scoped authority:
+
+```text
+WHO       agent / identity          subject
+WHAT      permitted actions         actions
+WHERE     permitted resources       resources
+WHY       task                      task
+HOW LONG  expiry                    expires_at
+HOW MUCH  usage limits              max_uses
+EXCEPT    protected exclusions      protected_resources
+```
+
+Real example, from `config/leases.yaml`:
+
+```yaml
+- apiVersion: agent-plane/v1alpha1
+  kind: AuthorityLease
+  metadata:
+    id: lease-clean-branches
+    task: remediate-stale-branches
+  subject:
+    agent: repo-agent
+  authority:
+    resources: ["github://acme/agent-plane-demo", "github://acme/agent-plane-demo/*"]
+    actions: ["repository.read", "branch.list", "branch.delete"]
+  constraints:
+    protected_resources: ["github://acme/agent-plane-demo/branches/main"]
+    max_uses:
+      branch.delete: 5
+    expires_at: "2027-01-01T00:00:00Z"
+```
+
+`repo-agent` may hold the raw `branch.delete` capability broadly, but this
+lease narrows it to one repo, `main` excluded, capped at 5 deletes. Full
+shape and evaluation order: [spec/authority-lease.md](spec/authority-lease.md).
+
+## Delegation: narrow, never widen
+
+A lease holder can mint a child lease for a sub-agent — self-service, not
+admin-gated (`POST /v1/leases/{id}/delegate`). The child's grant is checked
+against the parent's on every field; any attempt to exceed it is refused,
+not silently capped:
+
+```text
+Parent (lease-fix-staging, devops-agent)
+staging/*
+├── deployment.read
+└── deployment.restart
+
+        | delegate
+
+Child (staging-subagent)
+staging/*
+└── deployment.read
+```
+
+Using the same `$TOKEN` from the quickstart above (`devops-agent`, the
+lease's actual holder):
+
+```bash
+curl -s http://localhost:8000/v1/leases/lease-fix-staging/delegate \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"agent": "staging-subagent", "resources": ["production/*"]}'
+```
+
+```json
+// HTTP 403 — resources outside parent lease scope
+{"detail":{"error":"privilege_escalation","violations":["resources outside parent lease scope: ['production/*']"],"decision_id":"az_4a9fa4d263db"}}
+```
+
+Checked on every field: actions, resources, `max_uses`, `maximum_impact`,
+`expires_at`, `require_approval` (a child can't quietly drop a safeguard
+the parent had), and `protected_resources` (a child can't quietly remove
+one). Enforced in code (`lease_attenuation_errors`), not convention —
+covered by `tests/test_authority.py`.
+
+## Runtime revocation
+
+```text
+issue -> use -> narrow -> revoke
+```
+
+Authority can change independently of the underlying long-lived
+credential. `DELETE /v1/leases/{id}` revokes a lease immediately; `PATCH
+/v1/leases/{id}` narrows one in place (same never-widen rule as
+delegation). Both take effect on the *next* evaluation — a lease is
+checked live on every `/v1/authorize` call, not cached from issuance.
+
+## One authorization plane. Multiple enforcement edges.
+
+```text
+Agent -> Action     POST /v1/authorize        pure decision, nothing executes
+Agent -> Tool/MCP   POST /v1/tools/invoke      policy-gated, broker holds the credential
+Agent -> Model      POST /v1/chat/completions  policy-gated, OpenAI-compatible
+Agent -> Knowledge  POST /v1/retrieve          policy-gated, identity-aware RAG
+Agent -> Agent      POST /v1/agents/delegate   scoped identity delegation (A2A)
+```
+
+Every edge shares the same identity resolver, the same YAML policy engine,
+and the same signed audit chain — not five unrelated products bolted
+together. `/v1/authorize` and `/v1/agents/delegate` additionally evaluate
+`AuthorityLease`/attenuation; the model, tool, and retrieval edges are
+governed by policy. Full endpoint table and curl walkthroughs for every
+edge: [EDGES.md](EDGES.md).
 
 ## What it enforces
 
-- **Identity** — every request carries a JWT resolved to an `Actor` (user,
-  agent, tenant, department); unauthenticated requests are rejected, not
-  treated as anonymous.
-- **Policy** — YAML rules decide allow / deny / approval-required per
-  request, with obligations (PII/secret redaction, tool-call filtering).
-- **Task authority (leases)** — an `AuthorityLease` binds a task to specific
-  resources/actions, with use limits, an expiry, and protected-resource
-  carve-outs. A child lease minted via delegation can only narrow a parent's
-  grant, never widen it — enforced in code, not just convention.
-- **Revocation** — a lease or credential can be revoked immediately; checked
-  on every subsequent use, not just at issuance.
-- **Audit** — every decision is recorded in a hash-chained, HMAC-signed log.
+**Identity** — JWT resolves to an `Actor`; unauthenticated requests are
+rejected, not treated as anonymous.
 
-Full request-authorization pipeline, every edge, and identity modes:
-**[EDGES.md](EDGES.md)**. Endpoint table: below.
+**Policy** — deterministic YAML rules decide allow / deny /
+approval-required, with obligations (PII/secret redaction, tool-call
+filtering).
 
-## Endpoints
+**Task authority** — `AuthorityLease` restricts actions and resources per
+task, with use limits and an expiry.
 
-| Method | Path                    | Purpose                                  |
-| ------ | ----------------------- | ---------------------------------------- |
-| POST   | `/v1/authorize`         | Task-authority decision (capability ≠ authority) |
-| POST   | `/v1/chat/completions`  | Governed OpenAI-compatible completion    |
-| POST   | `/v1/tools/invoke`      | Governed tool/MCP call (broker edge)     |
-| POST   | `/v1/retrieve`          | Identity-aware RAG retrieval (auth edge) |
-| POST   | `/v1/agents/delegate`   | Scoped agent-to-agent delegation (A2A)   |
-| POST   | `/v1/leases`            | Issue an `AuthorityLease` (**admin token only**) |
-| POST   | `/v1/leases/{id}/delegate` | Mint an attenuated child lease (lease holder only) |
-| PATCH  | `/v1/leases/{id}`       | Narrow an active lease in place (**admin token only**) |
-| DELETE | `/v1/leases/{id}`       | Revoke a lease immediately (**admin token only**) |
-| GET    | `/v1/usage`             | Per-tenant usage metering                |
-| GET    | `/v1/audit?limit=50`    | Recent audit events (**admin token only**) |
-| GET    | `/healthz` / `/readyz`  | Liveness / readiness                     |
+**Delegation** — child authority can only be attenuated, never widened.
 
-## View it in the browser
+**Revocation** — authority can be revoked or narrowed at runtime, checked
+on every use.
 
-`agentplane serve`, then open `/console` (operator dashboard — status,
-policies, usage, audit chain), `/docs` (Swagger UI), or `/redoc`.
+**Protected resources** — specific resources are carved out even within a
+broader granted scope.
+
+**Audit** — every decision produces a hash-chained, HMAC-signed record.
+
+## Deployment model
+
+```text
+Agent runtime (LangGraph / custom agent / managed agent)
+        |
+   agent-plane
+        |
+MCP / GitHub / cloud APIs / internal APIs / databases
+```
+
+agent-plane is a service your agent calls before (or through) acting — a
+`base_url` swap for the OpenAI-compatible edge, a broker call for tools, a
+decision call for the task-authority edge. It is not a code-free proxy for
+every managed agent platform; where an integration needs a gateway,
+sidecar, or SDK call, see [INTEGRATION.md](INTEGRATION.md) for exactly
+what's zero-code and what isn't.
 
 ## Run with Docker
 
@@ -132,32 +281,51 @@ docker build -t agent-plane .
 docker run -p 8000:8000 --env-file .env agent-plane
 ```
 
-## Tests
+## Security-sensitive behaviour covered by tests
 
-```bash
-pytest
+117 tests, `pytest`. Not exhaustive — these are the security-relevant ones:
+
+```text
+✓ parent -> child authority attenuation refused on any widened field
+✓ revoked lease rejected on next use
+✓ lease expiry enforced
+✓ protected-resource exclusion denied even within broader scope
+✓ usage-limit (max_uses) enforcement
+✓ unauthenticated request rejected (401)
+✓ audit-chain tamper detection (in-place edit, deleted middle entry)
+✓ malformed policy file fails startup closed, doesn't corrupt a live reload
+✓ empty policy bundle refuses to start in production (not silent allow-all)
+✓ tenant isolation — same agent_id/task string can't cross tenants
 ```
 
-## Limitations
+## Security model / what agent-plane is not
 
-- Policy and lease decisions are evaluated per-request against configured
-  rules — this is authorization, not a guarantee that the underlying model
-  or tool behaves correctly.
+agent-plane is **not**:
+- an LLM safety classifier or prompt-injection detector
+- a replacement for AWS IAM, Azure RBAC, or Kubernetes RBAC
+- a guarantee that the underlying model behaves correctly
+- a guarantee that an external tool executes safely
+
+agent-plane constrains the authority under which agent actions execute.
+The target system's own permissions still apply underneath it.
+
+## Current limitations
+
 - PII/secret redaction is regex-based (best-effort), not a guaranteed
   content boundary.
-- Audit-chain signing is HMAC (symmetric): tamper-evident against an
-  external attacker, not against an insider holding the signing key and
-  database write access. Deleting the *trailing* entries of the chain is
-  not detectable by chain verification alone.
+- Audit signing is HMAC (symmetric): tamper-evident against an external
+  attacker, not against an insider holding the signing key and database
+  write access. Deleting the *trailing* entries of the chain is not
+  detectable by chain verification alone (covered by a regression test
+  that documents this, not one that fixes it).
 - `LeaseStore` is in-memory, single-process — leases and usage counters
   don't survive a restart or share across workers/replicas.
-- Newest features (lease delegation, revocation, shrinking) are on `main`
-  but not yet in a tagged release.
+- Newest features (lease delegation, revocation, shrinking, tenant-scoped
+  leases) are on `main` but not yet in a tagged release.
 
-Full production-hardening checklist and known limitations:
-**[SECURITY.md](SECURITY.md)**.
+Full production-hardening checklist: [SECURITY.md](SECURITY.md).
 
-## More
+## Repository guide
 
 - **[EDGES.md](EDGES.md)** — every edge's curl walkthrough, identity modes
 - **[CONFIGURATION.md](CONFIGURATION.md)** — policies, models, tools, knowledge, leases, `.env`
