@@ -45,3 +45,16 @@ def test_deleted_link_breaks_chain():
 def test_wrong_key_fails():
     signed = _sign_chain(_events())
     assert verify_chain(signed, "attacker-key") is False
+
+
+def test_deleting_the_trailing_event_is_not_detected():
+    # Known limitation, documented in SECURITY.md: verify_chain only proves
+    # internal consistency of whatever rows it's handed. Deleting the LAST
+    # event (unlike a middle one) leaves no dangling prev_hash reference for
+    # anything after it, so the shortened chain still verifies cleanly - an
+    # insider with DB write access can trim the tail undetected. This is a
+    # regression test documenting the gap, not a fix (the fix is an external
+    # chain-head checkpoint, out of scope here).
+    signed = _sign_chain(_events())
+    del signed[-1]
+    assert verify_chain(signed, KEY) is True
