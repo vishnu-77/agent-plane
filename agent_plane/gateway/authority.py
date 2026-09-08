@@ -147,6 +147,7 @@ async def delegate_lease(
         id=(body or {}).get("id") or f"lease-{uuid.uuid4().hex[:12]}",
         task=parent.task,
         subject=child_agent,
+        tenant=parent.tenant,  # delegation never changes tenant, only the parent's own scope matters
         resources=list((body or {}).get("resources") or parent.resources),
         actions=list((body or {}).get("actions") or parent.actions),
         protected_resources=list(

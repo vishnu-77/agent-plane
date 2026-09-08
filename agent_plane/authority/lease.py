@@ -19,6 +19,7 @@ class AuthorityLease(BaseModel):
     id: str
     task: str
     subject: str  # the agent id this lease was issued to
+    tenant: str = "default"  # matches Actor.tenant's default; scopes for_subject_task lookups
 
     resources: list[str] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
@@ -114,10 +115,14 @@ def parse_lease(doc: dict[str, Any]) -> AuthorityLease:
     if not lease_id or not task or not subject:
         raise ValueError("a lease requires 'id', 'task', and 'subject' (agent)")
 
+    tenant = (subj.get("tenant") if isinstance(subj, dict) else None) \
+        or meta.get("tenant") or doc.get("tenant") or "default"
+
     return AuthorityLease(
         id=lease_id,
         task=task,
         subject=subject,
+        tenant=tenant,
         resources=auth.get("resources") or doc.get("resources") or [],
         actions=auth.get("actions") or doc.get("actions") or [],
         protected_resources=constraints.get("protected_resources")
