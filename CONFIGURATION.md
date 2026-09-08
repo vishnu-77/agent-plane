@@ -60,6 +60,10 @@ is needed. Branch pushes produce previews; merging to `main` deploys production.
 
 Configure Preview and Production environment variables separately:
 
+Leave unused settings unset. Empty environment values are treated as unset and
+use the application's defaults, including optional provider settings. Empty
+signing secrets still fail the production startup checks.
+
 - `ENVIRONMENT=production` enables the existing fail-closed startup checks.
 - Set independent, strong `JWT_SECRET`, `AUDIT_SIGNING_KEY`, and `ADMIN_TOKEN`
   values in Vercel; never commit them or copy the development secrets.
