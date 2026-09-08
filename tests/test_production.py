@@ -84,6 +84,49 @@ def test_console_and_root_redirect(client):
     assert root.headers["location"].endswith("/console")
 
 
+def test_production_startup_fails_closed_on_empty_policy_bundle(tmp_path, monkeypatch):
+    # A policy dir that exists but whose files all parse to zero policies (as
+    # opposed to a missing dir, which falls back to packaged defaults) must
+    # not be allowed to boot in production as an unnoticed allow-all.
+    pol_dir = tmp_path / "policies"
+    pol_dir.mkdir()
+    (pol_dir / "empty.yaml").write_text("", encoding="utf-8")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "a.db"))
+    monkeypatch.setenv("POLICY_DIR", str(pol_dir))
+    monkeypatch.setenv("JWT_SECRET", "x" * 40)
+    monkeypatch.setenv("AUDIT_SIGNING_KEY", "y" * 40)
+    from agent_plane.config import get_settings
+
+    get_settings.cache_clear()
+    from agent_plane.main import create_app
+
+    with pytest.raises(Exception):  # noqa: B017 - lifespan raises RuntimeError
+        with TestClient(create_app()):
+            pass
+    get_settings.cache_clear()
+
+
+def test_development_still_allows_empty_policy_bundle_with_a_warning(tmp_path, monkeypatch):
+    # Same empty bundle, but outside production - must still boot (existing
+    # dev-mode allow-all behaviour), just logged loudly.
+    pol_dir = tmp_path / "policies"
+    pol_dir.mkdir()
+    (pol_dir / "empty.yaml").write_text("", encoding="utf-8")
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "a.db"))
+    monkeypatch.setenv("POLICY_DIR", str(pol_dir))
+    from agent_plane.config import get_settings
+
+    get_settings.cache_clear()
+    from agent_plane.main import create_app
+
+    with TestClient(create_app()) as c:
+        assert c.get("/readyz").status_code == 200
+    get_settings.cache_clear()
+
+
 def test_production_startup_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.setenv("STORAGE_BACKEND", "local")
