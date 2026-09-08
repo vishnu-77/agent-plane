@@ -35,6 +35,36 @@ def test_development_has_no_production_errors():
     assert Settings().production_errors() == []
 
 
+def test_blank_hosted_environment_uses_defaults(tmp_path, monkeypatch):
+    # Hosting dashboards may create empty values for every .env.example key.
+    for name in Settings.model_fields:
+        monkeypatch.setenv(name.upper(), "")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("JWT_SECRET", "x" * 40)
+    monkeypatch.setenv("AUDIT_SIGNING_KEY", "y" * 40)
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "audit.db"))
+    from agent_plane.config import get_settings
+    from agent_plane.main import create_app
+
+    get_settings.cache_clear()
+    try:
+        with TestClient(create_app()) as c:
+            assert c.get("/healthz").status_code == 200
+            assert c.get("/readyz").json() == {"status": "ready"}
+            assert "agent-plane" in c.get("/console").text
+            assert c.get("/v1/audit").status_code == 404  # admin remains disabled
+    finally:
+        get_settings.cache_clear()
+
+
+def test_blank_secrets_do_not_bypass_production_checks(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "")
+    monkeypatch.setenv("AUDIT_SIGNING_KEY", "")
+    errors = Settings(environment="production", _env_file=None).production_errors()
+    assert any("JWT_SECRET" in error for error in errors)
+    assert any("AUDIT_SIGNING_KEY" in error for error in errors)
+
+
 def test_load_bundle_falls_back_to_packaged_defaults(tmp_path):
     # A fresh install with no policies in CWD must still be governed (not allow-all).
     bundle = load_bundle(str(tmp_path / "does-not-exist"))
