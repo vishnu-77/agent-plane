@@ -64,6 +64,11 @@ async def lifespan(app: FastAPI):
     engine = YamlPolicyEngine(bundle, provider_resolver=registry.provider_tags)
 
     if not bundle.policies:
+        if settings.environment == "production":
+            raise RuntimeError(
+                "Refusing to start in production with no policies loaded (ALLOW-ALL) - "
+                "run `agentplane init` or set POLICY_DIR."
+            )
         logger.warning(
             "No policies loaded - running ALLOW-ALL. Run `agentplane init` or set POLICY_DIR."
         )
