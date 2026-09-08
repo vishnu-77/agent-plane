@@ -74,7 +74,7 @@ def evaluate_authority(
         )
 
     subject = actor.agent_id or actor.user_id
-    leases = store.for_subject_task(subject, task)
+    leases = store.for_subject_task(subject, task, actor.tenant)
     if not leases:
         return AuthorityDecision(
             decision=DecisionAction.DENY, reason=AuthorityReason.NO_ACTIVE_LEASE,

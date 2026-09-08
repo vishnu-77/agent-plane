@@ -44,10 +44,10 @@ class LeaseStore:
     def list(self) -> list[AuthorityLease]:
         return list(self._leases.values())
 
-    def for_subject_task(self, subject: str, task: str) -> list[AuthorityLease]:
+    def for_subject_task(self, subject: str, task: str, tenant: str = "default") -> list[AuthorityLease]:
         return [
             lease for lease in self._leases.values()
-            if lease.subject == subject and lease.task == task
+            if lease.subject == subject and lease.task == task and lease.tenant == tenant
         ]
 
     def use_count(self, lease_id: str, action: str) -> int:
