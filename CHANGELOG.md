@@ -5,6 +5,8 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-08
+
 ### Added
 - **Lease revocation + shrinking** (`DELETE`/`PATCH /v1/leases/{id}`, v0.4):
   an operator can pull or narrow an active lease's authority mid-task,
@@ -40,6 +42,14 @@ All notable changes to this project are documented here. Format loosely follows
   staged v0.1-v1.0 plan.
 
 ### Fixed
+- **`LeaseStore` was not tenant-partitioned:** two tenants sharing an
+  `agent_id` + task string could collide and share leases/usage counters.
+  `AuthorityLease` gets a `tenant` field; lookup and evaluation now filter
+  by it, and delegated child leases carry the parent's tenant rather than
+  the delegating actor's own claim.
+- **Fail-closed on an empty policy bundle in production:** a `POLICY_DIR`
+  whose files all parse to zero policies logged a warning but still started
+  in `ENVIRONMENT=production`, running allow-all. Now refuses to start.
 - The tool broker (`POST /v1/tools/invoke`) and RAG edge (`POST /v1/retrieve`)
   now apply the `redact` obligation to tool arguments/results and retrieved
   document text - previously only the model-completion edge redacted.
