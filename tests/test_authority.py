@@ -39,12 +39,11 @@ def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _authorize(client, token, task, action, resource):
-    return client.post(
-        "/v1/authorize",
-        headers=_auth(token),
-        json={"task": task, "action": action, "resource": resource},
-    )
+def _authorize(client, token, task, action, resource, impact=None):
+    body = {"task": task, "action": action, "resource": resource}
+    if impact is not None:
+        body["impact"] = impact
+    return client.post("/v1/authorize", headers=_auth(token), json=body)
 
 
 def test_action_within_task_scope_allowed(client):
@@ -343,3 +342,58 @@ def test_shrinking_a_lease_cannot_widen_it(client):
     )
     assert r.status_code == 403
     assert r.json()["detail"]["error"] == "privilege_escalation"
+
+
+# --- consequence-aware decisions (v0.5: maximum_impact actually gates) -----
+
+
+def test_irreversible_action_denied_against_a_reversible_lease(client):
+    # config/leases.yaml's devops-agent lease has maximum_impact: reversible.
+    token = _token(agent_id="devops-agent")
+    r = _authorize(
+        client, token, "fix-staging-checkout", "deployment.restart", "staging/checkout",
+        impact="irreversible",
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"]["reason"] == "ACTION_IMPACT_EXCEEDS_LEASE"
+
+
+def test_undeclared_impact_defaults_to_reversible(client):
+    # No `impact` field at all behaves exactly as before this gate existed.
+    token = _token(agent_id="devops-agent")
+    r = _authorize(client, token, "fix-staging-checkout", "deployment.restart", "staging/checkout")
+    assert r.status_code == 200
+
+
+def test_irreversible_action_allowed_when_lease_permits_it(client):
+    client.post(
+        "/v1/leases",
+        headers={"X-Admin-Token": "test-admin"},
+        json={
+            "id": "lease-high-impact", "task": "t1", "agent": "a1",
+            "resources": ["res/*"], "actions": ["delete"], "maximum_impact": "irreversible",
+        },
+    )
+    r = _authorize(client, _token(agent_id="a1"), "t1", "delete", "res/thing", impact="irreversible")
+    assert r.status_code == 200
+    assert r.json()["reason"] == "ACTION_WITHIN_TASK_AUTHORITY"
+
+
+def test_impact_gate_does_not_consume_a_use_slot(client):
+    # A denied-for-impact call shouldn't burn a max_uses slot the caller never
+    # got to use.
+    client.post(
+        "/v1/leases",
+        headers={"X-Admin-Token": "test-admin"},
+        json={
+            "id": "lease-impact-no-burn", "task": "t1", "agent": "a1",
+            "resources": ["res/*"], "actions": ["delete"], "max_uses": {"delete": 1},
+        },
+    )
+    r = _authorize(client, _token(agent_id="a1"), "t1", "delete", "res/thing", impact="irreversible")
+    assert r.status_code == 403
+    assert r.json()["detail"]["reason"] == "ACTION_IMPACT_EXCEEDS_LEASE"
+
+    # The use slot is still there for a properly-scoped (reversible) call.
+    r = _authorize(client, _token(agent_id="a1"), "t1", "delete", "res/thing")
+    assert r.status_code == 200

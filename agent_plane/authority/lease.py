@@ -43,7 +43,10 @@ def resource_matches(patterns: list[str], resource: str) -> bool:
     return any(fnmatch.fnmatchcase(resource, p) for p in patterns)
 
 
-_IMPACT_RANK = {"reversible": 0, "irreversible": 1}
+# Shared with evaluator.py, which gates a proposed action's declared impact
+# against a lease's `maximum_impact` ceiling the same way this ranks a child
+# lease's ceiling against its parent's.
+IMPACT_RANK = {"reversible": 0, "irreversible": 1}
 
 
 def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> list[str]:
@@ -66,7 +69,7 @@ def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> l
         if parent_limit is not None and limit > parent_limit:
             errors.append(f"max_uses[{action}]={limit} exceeds parent limit {parent_limit}")
     # Unknown impact values rank as irreversible (fail closed).
-    if _IMPACT_RANK.get(child.maximum_impact, 1) > _IMPACT_RANK.get(parent.maximum_impact, 1):
+    if IMPACT_RANK.get(child.maximum_impact, 1) > IMPACT_RANK.get(parent.maximum_impact, 1):
         errors.append(
             f"maximum_impact exceeds parent ({child.maximum_impact} > {parent.maximum_impact})"
         )

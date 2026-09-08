@@ -48,6 +48,9 @@ async def authorize(
     resource = (body or {}).get("resource")
     if not task or not action or not resource:
         raise HTTPException(status_code=400, detail="'task', 'action', and 'resource' are required")
+    # Caller-declared, like action/resource - the evaluator enforces it against
+    # the lease's `maximum_impact` ceiling, it doesn't independently verify it.
+    impact = (body or {}).get("impact") or "reversible"
 
     try:
         actor = resolve_identity(authorization, settings, request.app.state.revocations)
@@ -55,7 +58,8 @@ async def authorize(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     decision = evaluate_authority(
-        request.app.state.leases, actor, task=task, action=action, resource=resource
+        request.app.state.leases, actor, task=task, action=action, resource=resource,
+        impact=impact,
     )
 
     audit.record({
