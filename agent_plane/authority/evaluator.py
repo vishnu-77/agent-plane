@@ -8,7 +8,9 @@ Two independent gates, in order:
    grant, same one the tool broker enforces.
 2. **Task authority** - do any of the actor's active :class:`AuthorityLease`
    grants for this *task* cover this *resource* and *action*, under their
-   constraints (protected resources, use limits, expiry)?
+   constraints (protected resources, use limits, expiry, and the proposed
+   action's declared ``impact`` against the lease's ``maximum_impact``
+   ceiling)?
 
 Capability without task authority is exactly the "agent holds
 github.delete_repository but this task only authorises branch cleanup on one
@@ -22,7 +24,7 @@ from enum import Enum
 
 from pydantic import BaseModel
 
-from agent_plane.authority.lease import resource_matches
+from agent_plane.authority.lease import IMPACT_RANK, resource_matches
 from agent_plane.authority.store import LeaseStore
 from agent_plane.schemas.canonical import Actor, DecisionAction
 
@@ -35,6 +37,7 @@ class AuthorityReason(str, Enum):
     RESOURCE_OUTSIDE_DELEGATED_SCOPE = "RESOURCE_OUTSIDE_DELEGATED_SCOPE"
     RESOURCE_PROTECTED = "RESOURCE_PROTECTED"
     ACTION_NOT_AUTHORIZED = "ACTION_NOT_AUTHORIZED"
+    ACTION_IMPACT_EXCEEDS_LEASE = "ACTION_IMPACT_EXCEEDS_LEASE"
     ACTION_LIMIT_EXCEEDED = "ACTION_LIMIT_EXCEEDED"
     ACTION_WITHIN_TASK_AUTHORITY = "ACTION_WITHIN_TASK_AUTHORITY"
     ACTION_REQUIRES_APPROVAL = "ACTION_REQUIRES_APPROVAL"
@@ -62,7 +65,8 @@ def _capability_covers(actor: Actor, action: str) -> bool:
 
 
 def evaluate_authority(
-    store: LeaseStore, actor: Actor, *, task: str, action: str, resource: str
+    store: LeaseStore, actor: Actor, *, task: str, action: str, resource: str,
+    impact: str = "reversible",
 ) -> AuthorityDecision:
     decision_id = f"az_{uuid.uuid4().hex[:12]}"
 
@@ -109,6 +113,11 @@ def evaluate_authority(
             )
         if action not in lease.actions:
             best_reason = AuthorityReason.ACTION_NOT_AUTHORIZED
+            continue
+        # Unknown impact values rank as irreversible (fail closed), same
+        # convention as lease_attenuation_errors.
+        if IMPACT_RANK.get(impact, 1) > IMPACT_RANK.get(lease.maximum_impact, 1):
+            best_reason = AuthorityReason.ACTION_IMPACT_EXCEEDS_LEASE
             continue
         if not store.try_consume(lease.id, action, lease.max_uses.get(action)):
             best_reason = AuthorityReason.ACTION_LIMIT_EXCEEDED

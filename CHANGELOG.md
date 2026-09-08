@@ -6,6 +6,13 @@ All notable changes to this project are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Consequence-aware decisions** (v0.5): `POST /v1/authorize` takes an
+  optional, caller-declared `impact` (`reversible` | `irreversible`,
+  defaults to `reversible`) and denies (`ACTION_IMPACT_EXCEEDS_LEASE`)
+  outright when it outranks the matched lease's `maximum_impact` ceiling -
+  previously that field was parsed but purely informational. Checked before
+  `max_uses` is consumed, so a denied-for-impact call doesn't burn a use
+  slot the caller never got to spend.
 - **Lease revocation + shrinking** (`DELETE`/`PATCH /v1/leases/{id}`, v0.4):
   an operator can pull or narrow an active lease's authority mid-task,
   effective immediately - no waiting for its natural expiry. `PATCH` reuses
