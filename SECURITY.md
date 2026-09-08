@@ -21,8 +21,10 @@ start with default secrets). Before exposing it:
 - [ ] Set a strong `ADMIN_TOKEN` (or leave the admin API disabled).
 - [ ] Put the service behind TLS and your own network controls.
 - [ ] Restrict `CORS_ORIGINS` to known front-ends.
-- [ ] Review `policies/*.yaml` - an empty policy dir means allow-all (the app
-      warns, and falls back to bundled defaults).
+- [ ] Review `policies/*.yaml` - a missing/empty policy dir falls back to
+      bundled defaults; if every file present still resolves to zero policies,
+      the app now refuses to start in production (warns and runs allow-all
+      outside production).
 - [ ] Treat the audit log as evidence: ship it to durable, append-only storage.
 
 ## Built-in abuse protection
