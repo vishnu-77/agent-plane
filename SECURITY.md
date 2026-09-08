@@ -4,7 +4,7 @@
 
 Please report security issues privately - do **not** open a public issue.
 
-- Email: **team@togro.co** (subject: `agent-plane security`)
+- Email: **vishnu7stanite@gmail.com** (subject: `agent-plane security`)
 - Or use GitHub's private "Report a vulnerability" advisory flow.
 
 We aim to acknowledge within 3 business days and to provide a remediation
