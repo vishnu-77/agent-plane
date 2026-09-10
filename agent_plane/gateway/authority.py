@@ -113,6 +113,7 @@ async def issue_lease(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid lease: {exc}") from exc
     request.app.state.leases.add(lease)
+    _audit_admin(request, decision="allow", reason="LEASE_ISSUED", lease_id=lease.id)
     return {"issued": True, "lease": lease.model_dump(mode="json")}
 
 

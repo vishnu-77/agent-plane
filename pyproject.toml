@@ -62,7 +62,7 @@ build-backend = "setuptools.build_meta"
 include = ["agent_plane*"]
 
 [tool.setuptools.package-data]
-agent_plane = ["defaults/policies/*.yaml", "defaults/config/*.yaml", "console/*.html"]
+agent_plane = ["defaults/policies/*.yaml", "defaults/config/*.yaml", "console/*.html", "console/*.css", "console/*.js"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

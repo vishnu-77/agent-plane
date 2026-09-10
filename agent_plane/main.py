@@ -13,9 +13,9 @@ import uuid
 from contextlib import asynccontextmanager
 from importlib.resources import files
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from agent_plane.audit.store import build_audit_store
 from agent_plane.authority.store import build_lease_store
@@ -170,6 +170,14 @@ def create_app() -> FastAPI:
     async def console() -> HTMLResponse:
         html = (files("agent_plane.console") / "index.html").read_text(encoding="utf-8")
         return HTMLResponse(html)
+
+    @app.get("/console/assets/{name}", include_in_schema=False)
+    async def console_asset(name: str) -> Response:
+        media_types = {"console.css": "text/css", "console.js": "text/javascript"}
+        if name not in media_types:
+            raise HTTPException(status_code=404, detail="not found")
+        content = (files("agent_plane.console") / name).read_text(encoding="utf-8")
+        return Response(content, media_type=media_types[name])
 
     @app.get("/readyz")
     async def readyz() -> JSONResponse:

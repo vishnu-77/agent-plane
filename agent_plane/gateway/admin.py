@@ -7,6 +7,7 @@ credential or reload policies without restarting the control plane.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -81,7 +82,72 @@ async def show_policies(
     return {
         "policy_version": engine.bundle.version,
         "rules": [p.name for p in engine.bundle.policies],
+        "policies": [p.model_dump(mode="json") for p in engine.bundle.policies],
     }
+
+
+@admin_router.get("/gateway")
+async def gateway_catalog(
+    request: Request, x_admin_token: str | None = Header(default=None)
+) -> dict[str, Any]:
+    """Explicitly allowlisted operational metadata; never credentials or documents."""
+    _require_admin(request, x_admin_token)
+    state = request.app.state
+    settings: Settings = state.settings
+    configured = {
+        "openai": bool(settings.openai_api_key),
+        "anthropic": bool(settings.anthropic_api_key),
+        "azure": bool(settings.azure_openai_api_key and settings.azure_openai_endpoint),
+    }
+    models = []
+    for model_id in state.registry.list_models():
+        entry = state.registry.resolve(model_id)
+        models.append({
+            "id": entry.model_id, "provider": entry.provider,
+            "upstream_model": entry.upstream_model, "tags": sorted(entry.tags),
+            "fallback": list(entry.fallback),
+            "credentials_configured": configured.get(entry.provider, False),
+        })
+    tools = []
+    for name in state.tools.list():
+        spec = state.tools.get(name)
+        tools.append({"name": name, "type": spec.type, "method": spec.method})
+    return {
+        "environment": settings.environment,
+        "identity_mode": settings.identity_mode,
+        "storage_backend": settings.storage_backend,
+        "lease_storage": "in_memory",
+        "models": models,
+        "tools": tools,
+        "knowledge": [
+            {"name": name, "type": state.knowledge.get(name).type}
+            for name in state.knowledge.list()
+        ],
+    }
+
+
+@admin_router.get("/leases")
+async def list_leases(
+    request: Request, x_admin_token: str | None = Header(default=None)
+) -> dict[str, Any]:
+    """Operator inventory across tenants, including instance-local use counts."""
+    _require_admin(request, x_admin_token)
+    store = request.app.state.leases
+    now = datetime.now(UTC)
+    items = []
+    for lease in store.list():
+        expiry = lease.expires_at
+        # Legacy manifests may omit a timezone; display them consistently as UTC.
+        if expiry is not None and expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+        status = "revoked" if lease.revoked else (
+            "expired" if expiry is not None and expiry <= now else "active"
+        )
+        items.append({
+            **lease.model_dump(mode="json"), "status": status,
+            "uses": {action: store.use_count(lease.id, action) for action in lease.actions},
+        })
+    return {"items": items, "storage": "in_memory"}
 
 
 @admin_router.post("/policies/reload")
@@ -91,6 +157,8 @@ async def reload_policies(
     _require_admin(request, x_admin_token)
     settings: Settings = request.app.state.settings
     bundle = load_bundle(settings.policy_dir)
+    if settings.environment == "production" and not bundle.policies:
+        raise HTTPException(status_code=400, detail="Cannot activate an empty policy bundle in production")
     # Hot-swap the engine; the router reads app.state.engine per request.
     request.app.state.engine = YamlPolicyEngine(
         bundle, provider_resolver=request.app.state.registry.provider_tags
