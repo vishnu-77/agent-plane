@@ -306,7 +306,8 @@ changes.
 
 ## What's genuinely NOT plug-and-play yet
 
-Being direct about the limits, per [`ROADMAP.md`](ROADMAP.md):
+Integration gaps only. The security limitations of the control plane itself
+live in one place - [`SECURITY.md`](SECURITY.md) - and are not restated here.
 
 - **No framework middleware/plugin** for LangChain/LangGraph/CrewAI - you
   write the one-line wrapper per call site (§3-§5). An MCP adapter (v0.2)
@@ -314,9 +315,9 @@ Being direct about the limits, per [`ROADMAP.md`](ROADMAP.md):
   code, since MCP already centralizes tool dispatch - that's not built yet.
 - **No TypeScript SDK** - raw `fetch` (four lines, shown in §5) covers it,
   just without the typed wrapper the Python SDK gives you.
-- **Lease delegation isn't enforced** - `child_authority` is parsed but a
-  sub-agent can't yet be issued an attenuated *lease* the way it can an
-  attenuated *identity* (§6).
+- **No approvals subsystem** - an `approval_required` decision returns HTTP
+  202 and stops there. Routing that to a human, and resuming the action once
+  it's granted, is yours to build.
 
 None of these block integration today; they're where the wrapper-per-call-site
 approach in §3-§5 eventually gets replaced with zero-code interception.
