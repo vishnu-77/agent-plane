@@ -4,6 +4,7 @@ untouched rather than corrupting it."""
 from __future__ import annotations
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 
@@ -24,7 +25,9 @@ def test_startup_crashes_on_malformed_policy_file(tmp_path, monkeypatch):
     get_settings.cache_clear()
     from agent_plane.main import create_app
 
-    with pytest.raises(Exception):  # malformed YAML raises at startup, not silently ignored
+    # yaml.YAMLError, not bare Exception: a blind catch would also pass on an
+    # ImportError or a typo in this test, which is the opposite of the assertion.
+    with pytest.raises(yaml.YAMLError):
         with TestClient(create_app()):
             pass
     get_settings.cache_clear()
