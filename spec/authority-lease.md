@@ -33,7 +33,7 @@ consequence:
   maximum_impact: reversible     # reversible | irreversible - ceiling this lease permits
 
 delegation:
-  child_authority: subset_only   # reserved for lease delegation (not yet enforced)
+  child_authority: subset_only   # subset_only | none - "none" refuses re-delegation
 ```
 
 A flat dict (same field names, no nesting) is also accepted - that's what
@@ -90,15 +90,11 @@ curl -X POST localhost:8000/v1/leases -H "X-Admin-Token: $ADMIN_TOKEN" -d '{
 `config/leases.yaml` seeds the default set the same way `config/tools.yaml`
 seeds the tool catalog - edit it for your own agents/tasks.
 
-## Known limits (v0.1)
+## Known limits
 
-- **In-memory, single-process.** Leases and use counters don't survive a
-  restart or scale across workers - the same tradeoff `main.py`'s runtime
-  revocation set already makes. Move to the `AuditStore`/`UsageStore` SQL
-  pattern if that matters.
-- `consequence.maximum_impact` gates against the `impact` the *caller*
-  declares on `POST /v1/authorize` - it isn't independently classified from
-  the action itself. A caller that omits or under-reports `impact` isn't
-  caught here; that's the same trust boundary `action`/`resource` already
-  have. There's no per-tool/per-action impact registry yet to cross-check
-  a self-report against.
+Two matter most when reading this spec — an evaluation that returns `allow`
+executes nothing, and `impact` is a self-report by the party being governed.
+
+The maintained list lives in
+[SECURITY.md § Known limitations](../SECURITY.md#known-limitations-read-before-relying-on-it),
+not here.

@@ -112,6 +112,12 @@ def test_console_and_root_redirect(client):
     root = client.get("/", follow_redirects=False)
     assert root.status_code in (307, 308)
     assert root.headers["location"].endswith("/console")
+    for asset, content_type in (("console.css", "text/css"), ("console.js", "text/javascript")):
+        response = client.get(f"/console/assets/{asset}")
+        assert response.status_code == 200
+        assert content_type in response.headers["content-type"]
+        assert len(response.content) > 100
+    assert client.get("/console/assets/__init__.py").status_code == 404
 
 
 def test_production_startup_fails_closed_on_empty_policy_bundle(tmp_path, monkeypatch):

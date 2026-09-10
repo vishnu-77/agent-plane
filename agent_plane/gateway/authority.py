@@ -1,6 +1,11 @@
-"""The task-authority edge (`POST /v1/authorize`) - the core enforcement
+"""The task-authority edge (`POST /v1/authorize`) - the core *decision*
 primitive: "is this specific proposed action authorised for the current task,
 before it reaches the real system?"
+
+This edge executes nothing: it answers, and the caller acts on the answer, so
+an agent that never asks is not bound by it. The enforcing edges are the tool
+broker and the model proxy, where the credential lives server-side. See
+"Where a decision actually binds" in README.md.
 
 Same identity layer and the same signed audit chain as every other edge; this
 adds a new decision point on top (:mod:`agent_plane.authority.evaluator`), not
@@ -16,6 +21,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import ValidationError
 
 from agent_plane.authority.evaluator import evaluate_authority
 from agent_plane.authority.lease import AuthorityLease, lease_attenuation_errors, parse_lease
@@ -107,6 +113,7 @@ async def issue_lease(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid lease: {exc}") from exc
     request.app.state.leases.add(lease)
+    _audit_admin(request, decision="allow", reason="LEASE_ISSUED", lease_id=lease.id)
     return {"issued": True, "lease": lease.model_dump(mode="json")}
 
 
@@ -250,12 +257,23 @@ async def shrink_lease(
         raise HTTPException(status_code=404, detail="lease not found")
 
     body = body or {}
-    shrunk = current.model_copy(update={
+    # model_copy(update=...) does NOT validate in pydantic v2 - a string
+    # `expires_at` would be stored in a datetime field and then raise
+    # TypeError in the evaluator on every later authorize call for this
+    # subject+task. Re-validate the merged document instead.
+    merged = current.model_dump(mode="json")
+    merged.update({
         k: body[k] for k in (
             "resources", "actions", "protected_resources", "max_uses",
             "require_approval", "expires_at", "maximum_impact",
         ) if k in body
     })
+    try:
+        shrunk = AuthorityLease.model_validate(merged)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"invalid lease update: {exc.error_count()} error(s)"
+        ) from exc
 
     errors = lease_attenuation_errors(current, shrunk)
     if errors:

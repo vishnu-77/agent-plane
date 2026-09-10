@@ -62,7 +62,7 @@ build-backend = "setuptools.build_meta"
 include = ["agent_plane*"]
 
 [tool.setuptools.package-data]
-agent_plane = ["defaults/policies/*.yaml", "defaults/config/*.yaml", "console/*.html"]
+agent_plane = ["defaults/policies/*.yaml", "defaults/config/*.yaml", "console/*.html", "console/*.css", "console/*.js"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -77,4 +77,8 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
-ignore = ["E501"]
+# UP042 (str+Enum -> StrEnum) stays off deliberately: these members are
+# serialised into hash-chained audit records, and StrEnum changes what
+# str()/format() yield for a mixin enum. Not worth a decision-path
+# behaviour change to satisfy a style rule.
+ignore = ["E501", "UP042"]

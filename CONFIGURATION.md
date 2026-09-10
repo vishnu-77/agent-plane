@@ -80,6 +80,10 @@ audit, usage, and cache/quota data (install the corresponding optional extras),
 but do not make lease state shared or durable. Do not use this serverless demo
 for enforcement that depends on durable revocation or global lease-use limits.
 
+The in-memory lease constraint is not specific to serverless — it applies to
+any multi-worker deployment. See
+[SECURITY.md § Known limitations](SECURITY.md#known-limitations-read-before-relying-on-it).
+
 Check the preview before merging:
 
 ```bash
