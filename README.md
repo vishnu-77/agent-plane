@@ -218,7 +218,7 @@ credential. `DELETE /v1/leases/{id}` revokes a lease immediately; `PATCH
 delegation). Both take effect on the *next* evaluation — a lease is
 checked live on every `/v1/authorize` call, not cached from issuance.
 
-## One authorization plane. Multiple enforcement edges.
+## One authorization plane. Multiple edges.
 
 ```text
 Agent -> Action     POST /v1/authorize        pure decision, nothing executes
@@ -235,7 +235,30 @@ together. `/v1/authorize` and `/v1/agents/delegate` additionally evaluate
 governed by policy. Full endpoint table and curl walkthroughs for every
 edge: [EDGES.md](EDGES.md).
 
-## What it enforces
+## Where a decision actually binds
+
+Two different things are on offer here, and the difference matters more than
+any feature in this README.
+
+**Chokepoints — the plane executes, so the answer is binding.** On
+`/v1/tools/invoke`, `/v1/chat/completions` and `/v1/retrieve`, the credential
+lives on the server side: the broker calls the tool with *its* key, the proxy
+holds the provider key, retrieval filters before returning. An agent that
+skips these edges has no credential to skip them *with* — provided you also
+revoke its direct provider/tool credentials, which is on you, not on
+agent-plane.
+
+**Decision point — the plane answers, your code obeys.** `/v1/authorize`
+executes nothing. It returns allow / deny / approval-required and your caller
+does the rest (`if decision.allowed: ...`). An agent that never asks, or
+ignores a 403, is not constrained by it. Task authority is a control on an
+orchestrator you trust to ask — it is not a sandbox, and it does not contain
+a compromised or prompt-injected agent that holds its own credentials.
+
+Closing that gap — MCP adapter, egress interception, or per-lease credential
+minting — is the open design question, tracked in [ROADMAP.md](ROADMAP.md).
+
+### What the decision itself covers
 
 **Identity** — JWT resolves to an `Actor`; unauthenticated requests are
 rejected, not treated as anonymous.
@@ -256,6 +279,8 @@ on every use.
 broader granted scope.
 
 **Audit** — every decision produces a hash-chained, HMAC-signed record.
+
+Known limits on all of the above: [SECURITY.md](SECURITY.md).
 
 ## Deployment model
 
@@ -283,7 +308,7 @@ docker run -p 8000:8000 --env-file .env agent-plane
 
 ## Security-sensitive behaviour covered by tests
 
-117 tests, `pytest`. Not exhaustive — these are the security-relevant ones:
+Run `pytest` for the full suite. Not exhaustive — these are the security-relevant ones:
 
 ```text
 ✓ parent -> child authority attenuation refused on any widened field
@@ -311,19 +336,18 @@ The target system's own permissions still apply underneath it.
 
 ## Current limitations
 
-- PII/secret redaction is regex-based (best-effort), not a guaranteed
-  content boundary.
-- Audit signing is HMAC (symmetric): tamper-evident against an external
-  attacker, not against an insider holding the signing key and database
-  write access. Deleting the *trailing* entries of the chain is not
-  detectable by chain verification alone (covered by a regression test
-  that documents this, not one that fixes it).
-- `LeaseStore` is in-memory, single-process — leases and usage counters
-  don't survive a restart or share across workers/replicas.
-- Newest features (lease delegation, revocation, shrinking, tenant-scoped
-  leases) are on `main` but not yet in a tagged release.
+Four that decide whether this fits your deployment at all:
 
-Full production-hardening checklist: [SECURITY.md](SECURITY.md).
+- **`/v1/authorize` decides, it does not execute** — an agent that never asks
+  is not constrained by it.
+- **`impact` is caller-declared**, and defaults to the permissive value.
+- **Leases, use counters and revocations live in process memory** — they don't
+  survive a restart or span workers.
+- **Audit truncation is undetectable** and signing is symmetric (HMAC).
+
+The full list, with what each one does and doesn't cover, is maintained in one
+place: **[SECURITY.md § Known limitations](SECURITY.md#known-limitations-read-before-relying-on-it)**.
+That file also carries the production-hardening checklist.
 
 ## Repository guide
 

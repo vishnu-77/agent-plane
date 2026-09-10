@@ -1,6 +1,11 @@
-"""The task-authority edge (`POST /v1/authorize`) - the core enforcement
+"""The task-authority edge (`POST /v1/authorize`) - the core *decision*
 primitive: "is this specific proposed action authorised for the current task,
 before it reaches the real system?"
+
+This edge executes nothing: it answers, and the caller acts on the answer, so
+an agent that never asks is not bound by it. The enforcing edges are the tool
+broker and the model proxy, where the credential lives server-side. See
+"Where a decision actually binds" in README.md.
 
 Same identity layer and the same signed audit chain as every other edge; this
 adds a new decision point on top (:mod:`agent_plane.authority.evaluator`), not
