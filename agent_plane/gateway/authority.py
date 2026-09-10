@@ -16,6 +16,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import ValidationError
 
 from agent_plane.authority.evaluator import evaluate_authority
 from agent_plane.authority.lease import AuthorityLease, lease_attenuation_errors, parse_lease
@@ -250,12 +251,23 @@ async def shrink_lease(
         raise HTTPException(status_code=404, detail="lease not found")
 
     body = body or {}
-    shrunk = current.model_copy(update={
+    # model_copy(update=...) does NOT validate in pydantic v2 - a string
+    # `expires_at` would be stored in a datetime field and then raise
+    # TypeError in the evaluator on every later authorize call for this
+    # subject+task. Re-validate the merged document instead.
+    merged = current.model_dump(mode="json")
+    merged.update({
         k: body[k] for k in (
             "resources", "actions", "protected_resources", "max_uses",
             "require_approval", "expires_at", "maximum_impact",
         ) if k in body
     })
+    try:
+        shrunk = AuthorityLease.model_validate(merged)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"invalid lease update: {exc.error_count()} error(s)"
+        ) from exc
 
     errors = lease_attenuation_errors(current, shrunk)
     if errors:
