@@ -9,10 +9,10 @@ is authorized only where the two intersect; see
 from __future__ import annotations
 
 import fnmatch
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AuthorityLease(BaseModel):
@@ -36,6 +36,17 @@ class AuthorityLease(BaseModel):
     maximum_impact: str = "reversible"        # reversible | irreversible
     child_authority: str = "subset_only"       # "subset_only" | "none"
     revoked: bool = False
+
+    @field_validator("expires_at")
+    @classmethod
+    def _tz_aware(cls, value: datetime | None) -> datetime | None:
+        """A naive expiry (e.g. `expires_at: "2027-01-01T00:00:00"` in a YAML
+        manifest) would raise TypeError when the evaluator compares it to an
+        aware `datetime.now(UTC)`. Normalize on the way in, once, so no
+        consumer has to defend against it."""
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
 
 
 def resource_matches(patterns: list[str], resource: str) -> bool:

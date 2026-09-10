@@ -1,14 +1,18 @@
-"""Regression tests for PATCH /v1/leases/{id} input validation.
+"""Regression tests for two crash paths in lease handling.
 
-Reachable from a normal admin request, and it left the affected subject+task
-permanently broken (HTTP 500 on every subsequent /v1/authorize) rather than
-failing the bad request.
+Both were reachable from a normal admin request and both left the affected
+subject+task permanently broken (HTTP 500 on every subsequent /v1/authorize)
+rather than failing the bad request.
 """
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 import jwt
 import pytest
 from fastapi.testclient import TestClient
+
+from agent_plane.authority.lease import AuthorityLease, parse_lease
 
 JWT_SECRET = "lease-validation-secret"
 ADMIN = {"X-Admin-Token": "test-admin"}
@@ -50,6 +54,8 @@ def _issue(client, **overrides):
     return doc
 
 
+# --- PATCH /v1/leases/{id} must validate the merged document -----------------
+
 def test_patch_rejects_a_malformed_expires_at(client):
     """`model_copy(update=...)` does not validate in pydantic v2. A string here
     used to be stored straight into a datetime field."""
@@ -86,3 +92,33 @@ def test_authorize_still_works_after_a_rejected_patch(client):
     )
     assert r.status_code != 500, r.text
     assert r.json()["decision"] == "allow"
+
+
+# --- naive datetimes must never reach the evaluator -------------------------
+
+def test_naive_expiry_is_normalized_to_utc():
+    lease = AuthorityLease(
+        id="l1", task="t", subject="a",
+        expires_at=datetime(2027, 1, 1, 0, 0, 0),  # naive
+    )
+    assert lease.expires_at.tzinfo is not None
+
+
+def test_naive_expiry_from_a_yaml_manifest_is_normalized():
+    lease = parse_lease({
+        "id": "l2", "task": "t", "subject": "a",
+        "constraints": {"expires_at": "2027-01-01T00:00:00"},  # no Z, no offset
+    })
+    assert lease.expires_at.tzinfo is not None
+    assert lease.expires_at > datetime.now(UTC)
+
+
+def test_authorize_with_a_naive_expiry_lease_does_not_500(client):
+    _issue(client, expires_at="2027-01-01T00:00:00")
+    r = client.post(
+        "/v1/authorize",
+        json={"task": "t-shrink", "action": "deployment.restart",
+              "resource": "staging/checkout"},
+        headers=_auth(),
+    )
+    assert r.status_code != 500, r.text
