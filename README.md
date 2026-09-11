@@ -12,7 +12,7 @@ Control what an agent is authorised to do for this task, not merely what its cre
 [![License: MIT](https://img.shields.io/badge/License-MIT-333333.svg)](LICENSE)
 
 <sub>
-<a href="integration%20guide.md">Documentation</a> · <a href="ARCHITECTURE.md">Architecture</a> · <a href="SECURITY.md">Security</a> · <a href="#implemented-capabilities">Implemented capabilities</a> · <a href="CONTRIBUTING.md">Contributing</a>
+<a href="docs/README.md">Documentation</a> · <a href="ARCHITECTURE.md">Architecture</a> · <a href="SECURITY.md">Security</a> · <a href="#implemented-capabilities">Implemented capabilities</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </sub>
 
 <br />
@@ -25,7 +25,7 @@ Control what an agent is authorised to do for this task, not merely what its cre
 
 agent-plane is an authority layer for autonomous agents.
 
-Integrate its decision API into a trusted executor, or route configured tools through its MCP gateway preview, to check task authority before execution. Model, tool-broker, retrieval, and delegation interfaces also provide identity and policy controls; they do not all automatically evaluate task leases. Installing the service or SDK does not intercept existing agents.
+Integrate its decision API into a trusted executor (one line with the SDK adapters), or route MCP tools through its gateway, to check task authority before execution. Approval-required actions open a human-in-the-loop request the executor resumes exactly once. Model, tool-broker, retrieval, and delegation interfaces also provide identity and policy controls; they do not all automatically evaluate task leases. Installing the service or SDK does not intercept existing agents.
 
 **Capability ≠ Authority.**
 
@@ -34,7 +34,8 @@ An agent may possess a GitHub credential capable of deleting a repository. That 
 * **Task-scoped authority.** Give an agent only the actions and resources required for the current task.
 * **Inspect recorded authority.** Connect decisions to available identity, lease, policy, and delegation evidence. Unrecorded prompt-to-task provenance stays unknown.
 * **Check delegation scope.** Child leases pass attenuation checks against their parent. Ancestry is not durable and ancestor budgets are not shared.
-* **Revoke authority while an agent is running.** Narrow or revoke an active lease without rotating the underlying credential.
+* **Revoke authority while an agent is running.** Narrow or revoke an active lease without rotating the underlying credential; every replica sees it on the next check.
+* **Put a human in the loop.** APPROVAL REQUIRED opens a tracked request; approve from the console, API, or a signed webhook receiver, and the executor resumes once.
 * **Integrate at agent edges.** Model, tool-broker, retrieval, delegation, and task-authority interfaces provide different enforcement coverage.
 * **Inspect decision evidence.** Recorded ALLOW, DENY, and APPROVAL REQUIRED decisions carry audit evidence. The MCP preview records upstream outcomes separately from authorization.
 
@@ -56,7 +57,7 @@ agentplane serve --host 127.0.0.1
 
 Versioned wheels provide another installation path. Package-index installation applies once a release has been published; see [distribution](#distribution).
 
-agent-plane starts with a development configuration, SQLite audit storage, and process-local authority. The console opens in Demo mode. Configure application credentials through the [integration guide](<integration guide.md>); provider keys are needed only for real model calls.
+agent-plane starts with a development configuration and SQLite storage for audit evidence, leases, and approvals. The console opens in Demo mode. Follow the [quickstart](docs/quickstart.md) to issue a lease from a template, authorize an action, approve it, and inspect the evidence; provider keys are needed only for real model calls.
 
 ```text
 Console    http://localhost:8000/console
@@ -79,11 +80,11 @@ Open **http://127.0.0.1:8780/flow** and enter the local admin token printed by t
 | Delete `stale-fix` | APPROVAL REQUIRED | Not dispatched |
 | Delete protected `main` | DENY / `RESOURCE_PROTECTED` | Not dispatched |
 
-This runs a real MCP client, gateway, and local mock upstream. It does not contact GitHub. The gateway is an opt-in **single-process development preview**, pinned to protocol `2026-07-28`, and refuses production-mode startup. See the [MCP implementation guide](spec/mcp-gateway-preview.md).
+This runs a real MCP client, gateway, and local mock upstream. It does not contact GitHub. The gateway is opt-in, pinned to protocol `2026-07-28`, and production-capable with the shared SQL authority store. Generate a mapping file for your own upstream with `agentplane mcp discover`. See the [MCP gateway guide](docs/integration/mcp-gateway.md).
 
 ### Understand a runtime authority decision
 
-The staging example below illustrates evaluation semantics, assuming an identity capability covering the `deployment` namespace. For runnable staging requests, see the [integration guide](<integration guide.md>); the MCP demo above uses branch operations.
+The staging example below illustrates evaluation semantics, assuming an identity capability covering the `deployment` namespace. For runnable staging requests, see the [authorization guide](docs/integration/authorization.md); the MCP demo above uses branch operations.
 
 An agent is fixing a failed deployment in staging.
 
@@ -295,7 +296,7 @@ task authority
 
 An active lease can be narrowed or revoked independently of the underlying credential.
 
-The next authority evaluation in the same process sees the new state. Revocation does not cancel an action already dispatched or automatically revoke existing child leases.
+The next authority evaluation on any replica sees the new state, because leases live in the shared SQL store. Revocation does not cancel an action already dispatched or automatically revoke existing child leases.
 
 This makes authority task-scoped and dynamic rather than fixed at credential issuance.
 
@@ -312,7 +313,8 @@ The interfaces share identity and audit infrastructure, with different enforceme
 | Agent → tool / API       | Tool broker               | Available |
 | Agent → knowledge        | Retrieval gateway         | Available |
 | Agent → agent            | Delegation                | Available |
-| Agent → MCP              | `/mcp` authority gateway  | Development preview |
+| Agent → MCP              | `/mcp` authority gateway  | Available (opt-in) |
+| Human → approval         | `/v1/approvals`           | Available |
 
 Model, tool-broker, and retrieval routes do not automatically evaluate an AuthorityLease. Integrations must add a trusted task-authority check where needed.
 
@@ -386,7 +388,7 @@ Use the configured MCP preview to combine admission and dispatch:
 Agent → /mcp → capability + policy + lease checks → upstream tool
 ```
 
-The existing `/v1/tools/invoke` broker checks tool policy and capabilities but does not automatically evaluate task leases. A trusted dispatcher must authorize the same operation first and prevent direct bypass. See the [integration guide](<integration guide.md>).
+The existing `/v1/tools/invoke` broker checks tool policy and capabilities but does not automatically evaluate task leases. A trusted dispatcher must authorize the same operation first and prevent direct bypass. See the [tool calls guide](docs/integration/tool-calls.md).
 
 ### Custom orchestrators
 
@@ -413,7 +415,7 @@ For the out-of-scope staging example, `/v1/authorize` returns HTTP 403 with this
 }
 ```
 
-ALLOW uses HTTP 200 with a top-level payload; APPROVAL REQUIRED uses HTTP 202 with a `detail` payload. Approval-required does not queue or resume a workflow automatically.
+ALLOW uses HTTP 200 with a top-level payload; APPROVAL REQUIRED uses HTTP 202 with a `detail` payload carrying an `approval_id`. Once an operator approves it, repeating the same call with `"approval": "<id>"` returns ALLOW / `ACTION_APPROVED` exactly once. See [approvals](docs/integration/approvals.md).
 
 Depending on the endpoint and available records, evidence can expose:
 
@@ -481,7 +483,7 @@ short-lived downstream credentials
 service-mesh enforcement
 ```
 
-Read [SECURITY.md](SECURITY.md) before relying on agent-plane as a production boundary. Leases and use counters remain process-local: use one worker and one replica per authority store. PostgreSQL and Redis do not make authority state durable or shared. The MCP preview refuses production-mode startup.
+Read [SECURITY.md](SECURITY.md) before relying on agent-plane as a production boundary. Leases, use counters, approvals, and the MCP request ledger live in the shared SQL store (SQLite or PostgreSQL), so replicas stay consistent and a revocation reaches all of them; `AUTHORITY_STORE=memory` is refused in production.
 
 ---
 
@@ -492,24 +494,27 @@ The following capabilities exist in this working tree. This does not imply the c
 | Area | Implemented behavior |
 | --- | --- |
 | Task authority | AuthorityLease issuance; agent/task binding; action and resource scope; protected resources; expiry; configured use caps; ALLOW, DENY, and APPROVAL REQUIRED decisions |
-| Runtime lease control | Admin inspection, narrowing, and revocation within the active process |
+| Runtime lease control | Admin inspection, narrowing, and revocation, durable and shared across replicas; lease templates (`POST /v1/leases/from-template`) with injection-safe variables |
+| Approvals | Tracked approval requests for APPROVAL REQUIRED decisions; approve/reject via API, console, or signed webhook receiver; one-shot resume bound to the exact action; lease revocation wins over a granted approval |
+| Provenance | Optional `context` on `/v1/authorize` (parent evidence id, prompt hash, conversation id, …) stored verbatim on the signed record and shown in the console |
 | Delegation | Separate signed child identity and child lease APIs; attenuation checks for scope and constraints |
 | Policy and identity | YAML policies, JWT identity, optional signed delegation identity, capability checks, and content-derived classification |
 | Model gateway | Compatible Chat Completions routing, provider fallback, policy controls, quotas, and redaction |
 | Tool and retrieval interfaces | Registered-tool broker with policy and capability checks; identity-aware retrieval |
-| MCP gateway preview | Explicit tool mappings and trusted task bindings; admission before dispatch; upstream credential separation; request and response bounds; process-local request deduplication |
+| MCP gateway | Explicit tool mappings and trusted task bindings; admission before dispatch; upstream credential separation; request and response bounds; shared request-key deduplication; approval resume; `agentplane mcp discover` mapping generator |
 | Audit evidence | Hash-chained, HMAC-signed records; MCP decision, dispatch, completion/error, and uncertain-outcome receipts |
 | Runtime console | Read-only Demo/Live modes; selectable authority graph; decision search and filtering; five inspector tabs; four-second polling; evidence export; accessible motion controls |
 | Guided user flow | Connect, Bind, Request, Decide, and Inspect walkthrough backed by actual local mock MCP evidence |
-| Integration and packaging | FastAPI service and CLI, independent Python HTTP SDK, wheels and source distributions, Docker, CI, and release workflow |
-| Storage | Local SQLite audit storage; optional PostgreSQL audit and Redis cache/quota backends |
+| Integration and packaging | FastAPI service and CLI; Python SDK with admin client, framework adapters (LangChain, CrewAI, OpenAI Agents, custom loops), and an executor conformance kit; TypeScript SDK; wheels, Docker (slim and Alpine), Helm chart and Kubernetes manifests, CI, and release workflow |
+| Observability | `/metrics` Prometheus text, JSON logs with request ids, `/healthz` and `/readyz` |
+| Storage | SQLite by default; PostgreSQL for audit and authority state and Redis for cache/quota in the Compose and Kubernetes profiles |
 
 ### Current limits
 
-- Leases, use counters, request deduplication, and revocation coordination are process-local. Run one worker and one replica per authority store.
-- MCP enforcement is a development preview with a pinned protocol; production-mode startup is rejected.
+- Lease lookup is keyed by subject and task; tenant isolation is the issuer's responsibility (prefix identifiers per tenant).
+- The MCP gateway serves one upstream per configuration file and pins one protocol version.
 - Parent changes do not cascade through existing child leases, and children do not share aggregate ancestor budgets.
-- `maximum_impact` is metadata with attenuation comparison. Runtime consequence enforcement, approval orchestration, automatic agent inventory, and observe mode are unavailable.
+- `maximum_impact` is metadata with attenuation comparison. Runtime consequence enforcement, automatic agent inventory, and observe mode are unavailable.
 - Model, broker, and retrieval routes do not automatically evaluate task leases. The integration must enforce task authority where needed and prevent direct bypass.
 
 See [Security](SECURITY.md), [AuthorityLease semantics](spec/authority-lease.md), and the [MCP preview guide](spec/mcp-gateway-preview.md) for the operational boundaries.
@@ -526,7 +531,7 @@ docker run -p 127.0.0.1:8000:8000 --env-file .env \
   -e SQLITE_PATH=/data/audit.db -v agent-plane-audit:/data agent-plane
 ```
 
-The image runs as UID 10001 with one worker. The volume preserves audit records, not runtime-issued leases or use counters. For the PostgreSQL and Redis profile, run `docker compose up --build` after configuring `.env`.
+The image is a two-stage build (about 287 MB with every extra; `Dockerfile.alpine` is about 184 MB) that runs as UID 10001. The volume preserves audit records, leases, use counters, and approvals across restarts. For the PostgreSQL and Redis profile, run `docker compose up --build` after configuring `.env`; for Kubernetes, use the [Helm chart](deploy/README.md).
 
 ## Distribution
 
@@ -538,7 +543,7 @@ From the repository root, install the SDK into your application's environment:
 python -m pip install ./sdk/python
 ```
 
-See the [SDK README](sdk/python/README.md) for response handling and the [integration guide](<integration guide.md#10-distribute-and-release>) for wheels, containers, and release setup. The [release workflow](.github/workflows/release.yml) builds and tests artifacts on manual dispatch. Matching version tags publish after required checks pass and publishing configuration is in place.
+See the [Python SDK README](sdk/python/README.md) and the [TypeScript SDK README](sdk/typescript/README.md) for response handling, and the [authorization guide](docs/integration/authorization.md#10-distribute-and-release) for wheels, containers, and release setup. The [release workflow](.github/workflows/release.yml) builds and tests artifacts on manual dispatch. Matching version tags publish after required checks pass and publishing configuration is in place.
 
 ## Verification
 
@@ -562,8 +567,9 @@ These checks use local fixtures and a mock upstream, without provider API keys. 
 | [spec/authority-lease.md](spec/authority-lease.md) | AuthorityLease semantics and evaluation              |
 | [SECURITY.md](SECURITY.md)             | Threat model, limitations and production hardening   |
 | [CONTRIBUTING.md](CONTRIBUTING.md)         | Contribution workflow                                |
-| [Integration guide](<integration guide.md>) | Runnable setup, executor wiring, and distribution |
-| [MCP preview](spec/mcp-gateway-preview.md) | Implemented gateway and interactive user flow |
+| [docs/](docs/README.md)                  | Quickstart, per-edge integration guides, approvals, adapters, API reference, deployment |
+| [MCP gateway](docs/integration/mcp-gateway.md) | Discovery, bindings, production operation; [spec](spec/mcp-gateway-preview.md) has the implementation notes |
+| [deploy/](deploy/README.md)              | Container, Compose, Helm chart, Kubernetes manifests |
 | [Configuration](CONFIGURATION.md) | Policies, providers, identity, storage, and leases |
 
 ---

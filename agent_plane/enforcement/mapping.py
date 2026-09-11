@@ -62,6 +62,8 @@ class GatewayConfig(BaseModel):
     timeout_seconds: float = Field(default=10, gt=0, le=60)
     max_concurrency: int = Field(default=8, ge=1, le=64)
     max_response_bytes: int = Field(default=1_000_000, ge=1024, le=4_000_000)
+    # Upper bound on retained request keys (deduplication ledger).
+    max_request_keys: int = Field(default=10_000, ge=100, le=1_000_000)
     bindings: list[Binding]
     tools: list[Mapping]
 

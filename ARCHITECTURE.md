@@ -36,12 +36,31 @@ identity + signed audit) is shared; enforcement is replicated per edge:
 | Agent → knowledge (RAG) | `POST /v1/retrieve` | ✅ |
 | Agent → agent (A2A) | `POST /v1/agents/delegate` | ✅ |
 | Agent → action (task authority) | `POST /v1/authorize` | ✅ |
-| Agent → MCP | `POST /mcp` | Development preview |
+| Agent → MCP | `POST /mcp` | ✅ (opt-in, `MCP_GATEWAY_FILE`) |
+| Human → approval | `/v1/approvals` | ✅ |
 
 The interfaces share identity and audit infrastructure, with different checks.
 Task-lease evaluation is explicit on `/v1/authorize` and the configured MCP path;
 model, broker, and retrieval routes do not automatically evaluate task leases.
-Per-edge walkthroughs and curl examples: [EDGES.md](EDGES.md).
+Per-edge walkthroughs and curl examples: [EDGES.md](EDGES.md) and
+[docs/integration](docs/integration/README.md).
+
+## Authority state
+
+Leases, per-action use counters, approval requests, and the MCP request-key
+ledger live in `SqlLeaseStore` / `SqlApprovalStore`
+(`agent_plane/authority/store.py`, `agent_plane/approvals/store.py`), sharing
+the audit database. Use reservation is one atomic `UPDATE ... WHERE count <
+limit`; on Postgres, admission additionally holds a transaction-scoped
+advisory lock, so many replicas can evaluate concurrently without double
+spending a use, and a revocation is visible to every replica on its next
+lookup. `AUTHORITY_STORE=memory` keeps the earlier single-process behaviour for
+tests and is refused in production.
+
+The approval loop is a state machine on top of the same store:
+`pending → approved | rejected | expired`, then `approved → consumed` exactly
+once when the executor resumes with the approval id. A revoked or expired
+lease always wins over a granted approval.
 
 ## Postgres + Redis (opt-in)
 
@@ -50,4 +69,5 @@ docker compose up --build      # sets STORAGE_BACKEND=postgres automatically
 ```
 
 Identical behavior to the zero-setup SQLite + in-memory path, backed by Postgres
-(audit) and Redis (cache/quota) instead.
+(audit + authority state) and Redis (cache/quota) instead. Helm and plain
+Kubernetes manifests are under [deploy/](deploy/README.md).

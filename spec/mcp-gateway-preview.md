@@ -1,8 +1,10 @@
 # MCP enforcement preview: implementation and user flow
 
-Implemented as an opt-in, single-process **development preview** in this working
-tree. It combines task-authority admission and dispatch for explicitly configured
-MCP tools, with the operational limits described below.
+An opt-in gateway that combines task-authority admission and dispatch for
+explicitly configured MCP tools. Since 0.4 its authority state (leases, use
+counters, the request-key ledger, approvals) lives in the shared SQL store, so
+it runs in `ENVIRONMENT=production` and across replicas. Operational limits are
+described below; the operator's path is [docs/integration/mcp-gateway.md](../docs/integration/mcp-gateway.md).
 
 ## Run the complete user flow
 
@@ -110,23 +112,28 @@ replace the task lease.
 ## Failure and retry semantics
 
 The gateway does not automatically retry tool execution. A client may supply a
-stable `_meta["agent-plane/request-id"]` for process-local deduplication. Reusing
+stable `_meta["agent-plane/request-id"]` for deduplication across every replica
+sharing the authority store. Reusing
 the same key for a completed request returns its previous result; changed
 arguments or an in-progress/uncertain unresolved attempt do not execute again.
-At most 10,000 such keys are retained; capacity exhaustion fails closed instead
-of evicting replay protection. Without a key, each call is a distinct attempt.
+At most `max_request_keys` (default 10,000) keys are retained; capacity
+exhaustion fails closed instead of evicting replay protection, and
+`SqlLeaseStore.purge_requests()` reclaims reconciled keys. Without a key, each
+call is a distinct attempt.
 
-Deduplication, leases, counters, and revocation coordination remain process-local.
-A restart loses that state. There is no generic exactly-once execution guarantee.
+Deduplication, leases, counters, approvals, and revocation are durable in the SQL
+authority store and shared by every replica. There is still no generic
+exactly-once execution guarantee.
 An audit failure after reservation may leave a spent use without execution;
 reservations are not automatically refunded. Revocation prevents admissions after
 its commit, not actions already admitted. Admissions are not durable, parent
 budgets are not coordinated, and automatic outcome reconciliation is unavailable.
 
-The preview rejects `ENVIRONMENT=production` when MCP is enabled and restricts
-the client-facing MCP host/origin to local development defaults. It has no OAuth
-onboarding, Agent Key registry, automatic client rewrite, durable approval workflow,
-or observe mode. Existing REST tool broker behavior remains separate; installing
+An APPROVAL REQUIRED admission opens an approval request and returns its id in
+the evidence; the client resumes with `_meta["agent-plane/approval-id"]` and the
+same arguments. `agentplane mcp discover` generates a reviewable mapping file
+from an upstream's tool list. The gateway has no OAuth onboarding, Agent Key
+registry, automatic client rewrite, or observe mode. Existing REST tool broker behavior remains separate; installing
 this feature does not intercept arbitrary broker, shell, or model-tool traffic.
 
 ## Verification

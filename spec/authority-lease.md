@@ -83,13 +83,15 @@ curl -X POST localhost:8000/v1/leases -H "X-Admin-Token: $ADMIN_TOKEN" -d '{
 `config/leases.yaml` seeds the default set the same way `config/tools.yaml`
 seeds the tool catalog - edit it for your own agents/tasks.
 
-## Known limits (v0.1)
+## Current limits
 
-- **In-memory, single-process.** Leases and use counters don't survive a
-  restart or scale across workers - the same tradeoff `main.py`'s runtime
-  revocation set already makes. Move to the `AuditStore`/`UsageStore` SQL
-  pattern if that matters.
-- `delegation.child_authority` is parsed but not yet enforced - no lease
-  delegation endpoint exists yet (the A2A edge, `/v1/agents/delegate`,
-  delegates *identity* scope, not lease authority).
-- `consequence.maximum_impact` is parsed but purely informational.
+- **Storage.** Since 0.4 leases, use counters, and approvals live in the SQL
+  authority store (`AUTHORITY_STORE=sql`, sharing the audit database) and are
+  durable and shared across replicas. `memory` restores the earlier
+  single-process behaviour for tests only. The runtime *credential* revocation
+  set in `main.py` is still process-local.
+- `delegation.child_authority` gates `POST /v1/leases/{id}/delegate`; children
+  do not share an aggregate ancestor budget and parent changes do not cascade.
+- `consequence.maximum_impact` is compared during attenuation but is otherwise
+  informational.
+- Lease lookup is keyed by subject and task, not tenant.

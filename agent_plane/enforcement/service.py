@@ -1,4 +1,7 @@
-"""Single-process admission and dispatch. No authority is inferred from prompts."""
+"""Admission and dispatch for configured MCP tools. No authority is inferred
+from prompts. Authority state and the request-key ledger live in the lease
+store, so with the SQL store every replica sees the same leases, use counts,
+and in-flight request keys."""
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +10,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 
+from agent_plane.approvals.store import new_request
 from agent_plane.authority.evaluator import evaluate_authority
 from agent_plane.enforcement.mapping import GatewayConfig
 from agent_plane.guardrails import scanner
@@ -26,7 +30,6 @@ class EnforcementService:
         self.upstream = upstream
         self.tools = {tool.name: tool for tool in config.tools}
         self.active = 0
-        self.requests: dict[tuple, tuple[str, dict | None]] = {}
 
     def binding(self, actor: Actor):
         if not actor.agent_id or not actor.allowed_tools:
@@ -73,9 +76,57 @@ class EnforcementService:
                         and any(c in actor.allowed_tools for c in ("*", tool.action, tool.action.split('.')[0]))
                         and (lease.max_uses.get(tool.action) is None or self.app.state.leases.use_count(lease.id, tool.action) < lease.max_uses[tool.action]))
 
-    async def invoke(self, actor: Actor, name: str, arguments: dict, request_key: str | None = None):
+    def _approvals(self):
+        return getattr(self.app.state, "approvals", None)
+
+    def _open_approval(self, actor: Actor, context: dict, lease) -> str | None:
+        """Raise an approval request for an APPROVAL_REQUIRED admission."""
+        store = self._approvals()
+        if store is None:
+            return None
+        settings = getattr(self.app.state, "settings", None)
+        req = new_request(
+            tenant=actor.tenant, subject=actor.agent_id or actor.user_id, task=context["task"],
+            action=context["action"], resource=context["resource"], lease_id=context["lease_id"],
+            evidence_id=context["admission_id"],
+            ttl_seconds=getattr(settings, "approval_ttl_seconds", 3600),
+            context={"tool": context["tool"], "protocol_surface": "mcp",
+                     "argument_digest": context["argument_digest"]},
+            lease_expires_at=lease.expires_at if lease else None,
+        )
+        store.create(req)
+        notifier = getattr(self.app.state, "approval_notifier", None)
+        if notifier is not None:
+            notifier.emit("approval.requested", req.model_dump(mode="json"))
+        return req.id
+
+    def _resume_approval(self, actor: Actor, approval_id: str, context: dict) -> tuple[str, str]:
+        """Validate an approval for this exact admission. Returns (decision, reason);
+        an approved request is consumed here, atomically, before any use is spent."""
+        store = self._approvals()
+        req = store.get(approval_id) if store is not None else None
+        subject = actor.agent_id or actor.user_id
+        if req is None or req.subject != subject or req.tenant != actor.tenant:
+            return "deny", "APPROVAL_NOT_FOUND"
+        if (req.task, req.action, req.resource, req.context.get("argument_digest")) != (
+            context["task"], context["action"], context["resource"], context["argument_digest"]
+        ):
+            return "deny", "APPROVAL_MISMATCH"
+        if req.status == "pending":
+            return "approval_required", "APPROVAL_PENDING"
+        if req.status != "approved":
+            return "deny", {"rejected": "APPROVAL_REJECTED", "expired": "APPROVAL_EXPIRED",
+                            "consumed": "APPROVAL_ALREADY_USED"}[req.status]
+        if not store.consume(req.id):
+            return "deny", "APPROVAL_ALREADY_USED"
+        return "allow", "ACTION_APPROVED"
+
+    async def invoke(self, actor: Actor, name: str, arguments: dict, request_key: str | None = None,
+                     approval_id: str | None = None):
         if name not in self.tools:
             raise ValueError("Unknown or unmapped tool")
+        if approval_id is not None and (not isinstance(approval_id, str) or not 1 <= len(approval_id) <= 64):
+            raise ValueError("Invalid approval id")
         binding = self.binding(actor)
         tool = self.tools[name]
         # Validate before policy, then revalidate and resolve the exact final arguments.
@@ -88,20 +139,20 @@ class EnforcementService:
         resource = tool.resolve(forwarded)
         digest = hashlib.sha256(json.dumps([name, forwarded], sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         key = (actor.tenant, actor.agent_id, request_key) if request_key else None
+        ledger = self.app.state.leases  # shared across replicas when the store is durable
         if key:
             if not isinstance(request_key, str) or not 1 <= len(request_key) <= 128:
                 raise ValueError("Invalid request key")
-            if key in self.requests:
-                previous, result = self.requests[key]
+            seen = ledger.request_lookup(key)
+            if seen is not None:
+                previous, result = seen
                 if previous != digest or result is None:
                     raise ValueError("Request key conflict or request already in progress; not retried")
                 return result
-            if len(self.requests) >= 10000:
-                raise ValueError("Request key capacity reached; restart only after reconciling outcomes")
         if self.active >= self.config.max_concurrency:
             raise ValueError("Gateway concurrency limit reached")
         if key:
-            self.requests[key] = (digest, None)
+            ledger.request_reserve(key, digest, self.config.max_request_keys)
         self.active += 1
         context = {"admission_id": f"az_{uuid.uuid4().hex[:16]}", "task": binding.task,
                    "tool": name, "upstream_tool": tool.upstream_tool, "action": tool.action,
@@ -116,6 +167,12 @@ class EnforcementService:
                     decision, reason = policy.decision.value, policy.reason or "TOOL_POLICY_REQUIRES_APPROVAL"
                 lease = self.app.state.leases.get(binding.lease)
                 context["lease_snapshot"] = lease.model_dump(mode="json") if lease else None
+                if approval_id and decision != "deny":
+                    # Resume: a granted approval stands in for the approval gate, never for a dead lease.
+                    decision, reason = self._resume_approval(actor, approval_id, context)
+                    context["approval_id"] = approval_id
+                elif decision == "approval_required":
+                    context["approval_id"] = self._open_approval(actor, context, lease)
                 data = self.record(actor, context, phase="decision", outcome="not_dispatched", decision=decision, reason=reason, policy=policy)
                 if decision == "allow":
                     # The lock covers policy-independent authority checks, required audit
@@ -146,7 +203,7 @@ class EnforcementService:
                         raise
                     result = {"decision": decision, "reason": "UPSTREAM_OUTCOME_UNKNOWN", "evidence": data, "result": None}
             if key:
-                self.requests[key] = (digest, result)
+                ledger.request_complete(key, digest, result)
             return result
         finally:
             self.active -= 1

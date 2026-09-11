@@ -38,8 +38,18 @@ Same config-driven, default-deny pattern as models - see
 
 - `config/tools.yaml` (or `TOOLS_FILE`) - the tool broker's catalog.
 - `config/knowledge.yaml` (or `KNOWLEDGE_FILE`) - RAG sources + access metadata.
-- `config/leases.yaml` (or `LEASES_FILE`) - `AuthorityLease` grants; also issuable
-  at runtime via `POST /v1/leases`.
+- `config/leases.yaml` (or `LEASES_FILE`) - `AuthorityLease` grants seeded on
+  first start; also issuable at runtime via `POST /v1/leases`. Stored copies win
+  over the YAML on restart, so a revocation or shrink is never undone by a
+  redeploy.
+- `config/lease-templates.yaml` (or `LEASE_TEMPLATES_FILE`) - named lease shapes
+  for `POST /v1/leases/from-template`; variables fill `{placeholders}` in
+  resources and may not contain globs or traversal.
+- `APPROVAL_TTL_SECONDS`, `APPROVAL_WEBHOOK_URL` - approval-request lifetime and
+  the signed webhook for `approval.*` events.
+- `AUTHORITY_STORE` (`sql` default, `memory`) - where leases, use counters,
+  approvals, and the MCP request ledger live.
+- `LOG_FORMAT` (`text`/`json`), `METRICS_ENABLED` - observability.
 - `config/capability-manifest.yaml` + `config/threat-model.yaml` - kept in sync by
   `agentplane authority check-freshness` (CI-enforced).
 

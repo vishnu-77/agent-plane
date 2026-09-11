@@ -38,8 +38,12 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       STORAGE_BACKEND: postgres
+      AUTHORITY_STORE: sql
       POSTGRES_URL: postgresql+psycopg://agentplane:agentplane@postgres:5432/agentplane
       REDIS_URL: redis://redis:6379/0
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      APPROVAL_WEBHOOK_URL: ${APPROVAL_WEBHOOK_URL:-}
+      MCP_GATEWAY_FILE: ${MCP_GATEWAY_FILE:-}
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       AUDIT_SIGNING_KEY: ${AUDIT_SIGNING_KEY:-dev-audit-key-change-me}
@@ -58,7 +62,8 @@ services:
       redis:
         condition: service_healthy
 
-# These persist audit/cache data; AuthorityLeases still live in one process.
+# Postgres holds audit evidence, leases, use counters, approvals, and the
+# gateway request ledger, so `docker compose up --scale gateway=3` is safe.
 volumes:
   postgres-data:
   redis-data:

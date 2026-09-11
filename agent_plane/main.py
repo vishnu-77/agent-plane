@@ -2,8 +2,9 @@
 
 On startup the control-plane components are built once and attached to
 ``app.state``: the policy bundle is loaded, the model registry is constructed,
-and the cache/audit stores are initialized per the configured backend. In
-``environment=production`` the startup is fail-closed (no default secrets).
+and the cache/audit/authority stores are initialized per the configured
+backend. In ``environment=production`` the startup is fail-closed (no default
+secrets, no process-local authority store).
 """
 from __future__ import annotations
 
@@ -11,23 +12,30 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from importlib.resources import files
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from agent_plane.approvals.notify import ApprovalNotifier
+from agent_plane.approvals.store import build_approval_store
 from agent_plane.audit.store import build_audit_store
 from agent_plane.authority.store import build_lease_store
+from agent_plane.authority.templates import build_template_catalog
 from agent_plane.cache.store import build_cache_store
 from agent_plane.config import Settings, get_settings
 from agent_plane.gateway.a2a import a2a_router
 from agent_plane.gateway.admin import admin_router
+from agent_plane.gateway.approvals import approvals_router
 from agent_plane.gateway.authority import authority_router
 from agent_plane.gateway.broker import broker_router
 from agent_plane.gateway.retrieval import retrieval_router
 from agent_plane.gateway.router import router
 from agent_plane.gateway.usage_api import usage_router
+from agent_plane.observability import Metrics, configure_logging
 from agent_plane.policy.engine import YamlPolicyEngine
 from agent_plane.policy.loader import load_bundle
 from agent_plane.routing.knowledge import build_knowledge_store
@@ -38,12 +46,15 @@ from agent_plane.usage.store import build_usage_store
 logger = logging.getLogger("agent_plane")
 
 
+def _installed_version() -> str:
+    try:
+        return package_version("agent-plane")
+    except PackageNotFoundError:
+        return "0.0.0+local"
+
+
 def _configure_logging(settings: Settings) -> None:
-    level = getattr(logging, settings.log_level.upper(), logging.INFO)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    configure_logging(settings.log_level, settings.log_format)
 
 
 @asynccontextmanager
@@ -79,16 +90,24 @@ async def lifespan(app: FastAPI):
     app.state.tools = build_tool_registry(settings)
     app.state.knowledge = build_knowledge_store(settings)
     app.state.leases = build_lease_store(settings)
+    app.state.lease_templates = build_template_catalog(settings)
+    app.state.approvals = build_approval_store(settings)
+    app.state.approval_notifier = ApprovalNotifier(
+        settings.approval_webhook_url, settings.audit_signing_key
+    )
     app.state.cache = build_cache_store(settings)
     app.state.audit = build_audit_store(settings)
     app.state.usage = build_usage_store(settings)
+    if not hasattr(app.state, "metrics"):
+        app.state.metrics = Metrics()
     # Runtime revocation set, mutated live by the admin API.
     app.state.revocations = set()
 
     logger.info(
-        "agent-plane ready: env=%s identity=%s backend=%s policy_version=%s",
-        settings.environment, settings.identity_mode, settings.storage_backend,
-        bundle.version,
+        "agent-plane ready: version=%s env=%s identity=%s backend=%s authority_store=%s "
+        "policy_version=%s",
+        _installed_version(), settings.environment, settings.identity_mode,
+        settings.storage_backend, settings.authority_store, bundle.version,
     )
     if getattr(app.state, "mcp_app", None) is not None:
         async with app.state.mcp_app.router.lifespan_context(app.state.mcp_app):
@@ -100,10 +119,11 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="agent-plane - Enterprise Agentic AI Control Plane",
-        version="0.1.0",
+        title="agent-plane - runtime authority for AI agents",
+        version=_installed_version(),
         lifespan=lifespan,
     )
+    app.state.metrics = Metrics()
 
     if settings.cors_origin_list:
         app.add_middleware(
@@ -148,16 +168,23 @@ def create_app() -> FastAPI:
             response = await call_next(request)
         except Exception:  # noqa: BLE001 - last-resort guard, logged below
             logger.exception("unhandled error req_id=%s path=%s", request_id, request.url.path)
+            app.state.metrics.observe_request(
+                request.method, request.url.path, 500, time.perf_counter() - started)
             return JSONResponse(
                 status_code=500,
                 content={"error": "internal_error", "request_id": request_id},
                 headers={"X-Request-ID": request_id},
             )
-        took = int((time.perf_counter() - started) * 1000)
+        elapsed = time.perf_counter() - started
+        app.state.metrics.observe_request(
+            request.method, request.url.path, response.status_code, elapsed)
         response.headers["X-Request-ID"] = request_id
         logger.info(
             "%s %s -> %s %dms req_id=%s",
-            request.method, request.url.path, response.status_code, took, request_id,
+            request.method, request.url.path, response.status_code, int(elapsed * 1000), request_id,
+            extra={"method": request.method, "path": request.url.path,
+                   "status": response.status_code, "latency_ms": int(elapsed * 1000),
+                   "request_id": request_id},
         )
         return response
 
@@ -177,19 +204,26 @@ def create_app() -> FastAPI:
 
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
-        # Ready only if the audit store is reachable (DB connectivity).
+        # Ready only if the audit and authority stores are reachable.
         try:
             app.state.audit.recent(limit=1)
+            app.state.leases.list()
             return JSONResponse({"status": "ready"})
         except Exception as exc:  # noqa: BLE001
             logger.exception("readiness check failed")
             return JSONResponse({"status": "not_ready", "error": str(exc)}, status_code=503)
+
+    if settings.metrics_enabled:
+        @app.get("/metrics", include_in_schema=False)
+        async def metrics():
+            return app.state.metrics.response()
 
     app.include_router(router)
     app.include_router(broker_router)
     app.include_router(retrieval_router)
     app.include_router(a2a_router)
     app.include_router(authority_router)
+    app.include_router(approvals_router)
     app.include_router(usage_router)
     app.include_router(admin_router)
     if settings.mcp_gateway_file:

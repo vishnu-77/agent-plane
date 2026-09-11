@@ -5,6 +5,58 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-11
+
+### Added
+- **Durable, shared authority store** (`AUTHORITY_STORE=sql`, default): leases,
+  per-action use counters, approvals, and the MCP request-key ledger persist in
+  the audit database (SQLite or PostgreSQL). Use reservation is one atomic
+  `UPDATE ... WHERE count < limit`; PostgreSQL admission holds a transaction-scoped
+  advisory lock. Multiple workers and replicas are supported; a revocation reaches
+  all of them. YAML leases are seeded once and stored state wins on restart.
+  `memory` keeps the previous single-process behaviour and is refused in production.
+- **Approval loop**: an APPROVAL REQUIRED decision creates a tracked request
+  (`GET /v1/approvals`, `POST /v1/approvals/{id}/approve|reject`), the executor
+  resumes with `"approval": "<id>"` on `/v1/authorize` and receives ALLOW /
+  `ACTION_APPROVED` exactly once. Bound to the exact task/action/resource,
+  expires with `APPROVAL_TTL_SECONDS` and never outlives the lease; a revoked or
+  expired lease wins over a granted approval. Optional signed webhook
+  (`APPROVAL_WEBHOOK_URL`, HMAC-SHA256 in `X-AgentPlane-Signature`). The MCP
+  gateway raises the same requests and resumes via `_meta["agent-plane/approval-id"]`.
+  Console gains a **Pending Approvals** panel with approve/reject.
+- **Lease templates**: `config/lease-templates.yaml`, `GET /v1/lease-templates`,
+  `POST /v1/leases/from-template`. Variables fill `{placeholders}` and are
+  restricted so a caller cannot widen scope with globs or traversal.
+- **Provenance context**: optional `context` map on `/v1/authorize`
+  (`parent_evidence_id`, `prompt_hash`, `conversation_id`, ...), validated, stored
+  on the signed audit record as `agent-plane.provenance.v1`, echoed in the
+  response, and rendered in the console inspector.
+- **Python SDK**: `AgentPlane.authorize(approval=, context=)`, `get_approval`,
+  `wait_for_approval`, `delegate`; new `AgentPlaneAdmin` (issue/template/get/
+  shrink/revoke leases, approval queue, audit); `agentplane.adapters` (`govern`
+  decorator, `governed_dispatch`, `langchain_tool`/`crewai_tool`,
+  `openai_agents_guard`); `agentplane.testing.check_executor` conformance kit.
+- **TypeScript SDK** (`sdk/typescript`, `@agent-plane/sdk`): same contract,
+  zero dependencies, `govern` wrapper, admin client.
+- **MCP gateway**: production-capable; shared request deduplication;
+  `agentplane mcp discover` generates a reviewable mapping file from an upstream.
+- **Operations**: `/metrics` (Prometheus text), `LOG_FORMAT=json`, readiness
+  checks the authority store, Helm chart and plain Kubernetes manifests under
+  `deploy/`, `Dockerfile.alpine`.
+- **Docs**: restructured under `docs/` (quickstart, per-edge integration guides,
+  approvals, adapters, conformance, API reference with committed `openapi.json`,
+  deployment). `integration guide.md` moved to `docs/integration/authorization.md`.
+
+### Changed
+- Docker image is a two-stage build shipping a stripped virtualenv: 368 MB ->
+  287 MB with every extra (`EXTRAS` build arg trims further). The volume now
+  preserves leases and approvals as well as audit records.
+- `agentplane serve --workers N` is accepted with the SQL store.
+- `examples/smoke_container.py` asserts lease persistence after restart.
+- Lease issuance is recorded on the audit chain (`LEASE_ISSUED`).
+- `production_errors()` no longer refuses `MCP_GATEWAY_FILE`; it refuses
+  `AUTHORITY_STORE=memory` instead.
+
 ## [0.3.0] - 2026-09-11
 
 ### Added

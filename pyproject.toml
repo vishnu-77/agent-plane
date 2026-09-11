@@ -1,6 +1,6 @@
 [project]
 name = "agent-plane"
-version = "0.3.0"
+version = "0.4.0"
 description = "Runtime authority for AI agents: task-scoped authorization, policy enforcement, and MCP gateway"
 readme = "README.md"
 license = { text = "MIT" }

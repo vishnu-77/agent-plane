@@ -19,7 +19,8 @@
 !/MANIFEST.in
 !/README.md
 !/INTEGRATION.md
-!/integration guide.md
+!/Dockerfile.alpine
+!/deploy/
 !/EDGES.md
 !/CONFIGURATION.md
 !/ARCHITECTURE.md
@@ -34,9 +35,17 @@
 !/.gitignore
 !/.github/
 
-# Public README asset only; internal docs remain ignored.
+# Public docs (docs/README.md, quickstart, integration guides, API reference,
+# deployment) and the README hero asset; the Medium series and capstone drafts
+# stay local.
 !/docs/
 /docs/*
+!/docs/README.md
+!/docs/quickstart.md
+!/docs/api-reference.md
+!/docs/deployment.md
+!/docs/openapi.json
+!/docs/integration/
 !/docs/assets/
 /docs/assets/*
 !/docs/assets/hero.png
@@ -60,3 +69,7 @@ audit.db
 *.sqlite
 sdk/python/build/
 sdk/python/dist/
+sdk/typescript/dist/
+node_modules/
+.playwright-mcp/
+.ruff_cache/

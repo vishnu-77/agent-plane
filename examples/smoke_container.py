@@ -45,12 +45,14 @@ def main() -> None:
                           headers={"X-Admin-Token": env["ADMIN_TOKEN"]}) as client:
             records = client.get("/v1/audit").json()["events"]
             assert set(evidence["evidence_ids"]) <= {record["decision_id"] for record in records}
-            # Audit survives; the documented process-local lease does not.
-            assert client.get(f"/v1/leases/{evidence['lease_id']}").status_code == 404
+            # Audit and the runtime-issued lease both survive the restart (SQL authority store).
+            lease = client.get(f"/v1/leases/{evidence['lease_id']}")
+            assert lease.status_code == 200, lease.text
+            assert lease.json()["id"] == evidence["lease_id"]
         if args.save:
             args.save.parent.mkdir(parents=True, exist_ok=True)
             docker("save", "--output", str(args.save), args.image, timeout=300)
-        print("PASS: non-root image, writable SQLite volume, runtime decisions, audit persistence")
+        print("PASS: non-root image, writable SQLite volume, runtime decisions, audit + lease persistence")
     except Exception:
         subprocess.run(["docker", "logs", name], check=False, timeout=15)
         raise

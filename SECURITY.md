@@ -24,6 +24,15 @@ start with default secrets). Before exposing it:
 - [ ] Review `policies/*.yaml` - an empty policy dir means allow-all (the app
       warns, and falls back to bundled defaults).
 - [ ] Treat the audit log as evidence: ship it to durable, append-only storage.
+- [ ] Keep `AUTHORITY_STORE=sql` (the default) and point every replica at one
+      shared Postgres, so leases, use counters, approvals, and revocations are
+      consistent across workers. `memory` is refused in production.
+- [ ] Restrict `/metrics` at the ingress (or set `METRICS_ENABLED=false`); it
+      is unauthenticated by design.
+- [ ] If you set `APPROVAL_WEBHOOK_URL`, verify `X-AgentPlane-Signature` on the
+      receiver before acting on an event.
+- [ ] Review any `agentplane mcp discover` output before enabling the MCP
+      gateway: every generated `action`/`resource` mapping is a grant surface.
 
 ## Built-in abuse protection
 
@@ -47,6 +56,14 @@ start with default secrets). Before exposing it:
 - **`jwt_claims` identity mode trusts tokens as-is** and tokens may lack expiry. Use
   `IDENTITY_MODE=delegation` in production (the server warns otherwise).
 - The tool broker executes **operator-configured** endpoints; validate any tool you add.
+- **Authorization is not execution.** An ALLOW (or a consumed approval) proves
+  a decision was made, not that the side effect happened or was the only one.
+  The executor owns idempotency and outcome logging; the MCP gateway records
+  dispatch/completion receipts but cannot prove a timed-out call had no effect.
+- **Lease lookup is keyed by subject and task, not tenant.** Prefix identifiers
+  per tenant in your issuer; the runtime does not isolate tenants' leases.
+- **Multi-process SQLite** is correct (use reservation is one atomic statement)
+  but serialises writers; use Postgres when running more than one replica.
 
 CI runs `pip-audit` to surface dependency CVEs.
 

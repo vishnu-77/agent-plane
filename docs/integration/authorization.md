@@ -13,7 +13,7 @@ or install a framework plugin.
 
 ## 1. Where it fits
 
-For the new gateway path, see the [MCP enforcement preview](spec/mcp-gateway-preview.md).
+For the new gateway path, see the [MCP enforcement preview](../../spec/mcp-gateway-preview.md).
 It includes a runnable MCP client/upstream demonstration and `/flow` walkthrough.
 The direct-HTTP integration below remains supported; the preview does not
 automatically intercept existing model or REST tool calls.
@@ -101,7 +101,7 @@ and scoped console access are not implemented in this reference console.
 
 The example below uses HS256 `jwt_claims` mode with a token signed by the trusted
 backend. Signed delegation identity is also available through
-`IDENTITY_MODE=delegation`; see [EDGES.md](EDGES.md) for issuer configuration.
+`IDENTITY_MODE=delegation`; see [EDGES.md](../../EDGES.md) for issuer configuration.
 An empty capability list currently means no capability-level restriction, so
 specify the intended capabilities explicitly.
 
@@ -248,8 +248,11 @@ def guarded_restart(client, agent_token, task_id, deployment, existing_restart):
 `existing_restart` is your existing backend function. The wrapper intentionally
 does not catch transport, authentication, or malformed-response errors and then
 continue: any such failure must stop execution. The returned approval status
-must pause the task in your orchestrator. There is no approve-and-resume endpoint
-in the current implementation; do not translate a pending decision into ALLOW.
+must pause the task in your orchestrator. The 202 payload carries an
+`approval_id`; once an operator approves it (`POST /v1/approvals/{id}/approve`,
+the console, or a webhook receiver), repeat the identical authorize call with
+`"approval": "<id>"` to receive ALLOW / `ACTION_APPROVED` exactly once. Never
+translate a pending decision into ALLOW yourself. See [approvals](approvals.md).
 
 Authorization and execution are separate operations, not an atomic transaction.
 The caller owns target validation, execution-result logging, idempotency, and
@@ -292,8 +295,9 @@ with AgentPlane(os.environ["AGENT_PLANE_URL"], os.environ["AGENT_TOKEN"]) as pla
     if decision.allowed:
         # Your trusted executor performs the exact authorized operation here.
         print("Allowed", decision.evidence_id)
-    elif decision.decision == "approval_required":
-        print("Pending approval", decision.reason)
+    elif decision.needs_approval:
+        resumed = plane.wait_for_approval(decision, timeout=600)   # polls, then resumes
+        print("Resumed", resumed.decision, resumed.reason)
     else:
         print("Blocked", decision.reason)
 ```
@@ -303,7 +307,7 @@ Authentication, transport, and server errors propagate as HTTPX exceptions;
 malformed or contradictory replies raise `AuthorizationProtocolError`.
 An exception must stop execution. The client never retries authorization
 automatically because a check may consume a lease use count. See the
-[SDK reference](sdk/python/README.md).
+[SDK reference](../../sdk/python/README.md).
 
 ## 6. Connect and use the console
 
@@ -347,34 +351,37 @@ is supplied in this repository; an invented symbol is not presented as its logo.
 | `POST /v1/retrieve` | Register knowledge sources and call the retrieval API. | Uses the repository's configured retrieval implementation; connecting an existing datastore requires an adapter. |
 | `POST /v1/agents/delegate` | Obtain a scoped child identity token. | Requires configured signed delegation identity and signing key. |
 | `POST /v1/leases/{id}/delegate` | The lease holder requests a child lease. | Separate from identity-token delegation; an active lease can be narrowed for a child, with attenuation checks. |
-| `PATCH` / `DELETE /v1/leases/{id}` | Admin narrows or revokes authority. | These operations are not exposed as actions in the read-only console. |
+| `PATCH` / `DELETE /v1/leases/{id}` | Admin narrows or revokes authority. | Effective on every replica at its next evaluation. |
+| `POST /v1/leases/from-template` | Admin issues a lease from a named template plus scoped variables. | Variables cannot contain globs or traversal. |
+| `/v1/approvals` | Operators list, approve, and reject pending requests. | The console's Pending Approvals panel calls these with the admin token. |
 
 To combine brokered execution with task authority, your trusted dispatcher must
 check `/v1/authorize` before `/v1/tools/invoke` for the same proposed operation.
 The agent must not be able to bypass that dispatcher and invoke the broker or
 target directly. A framework's central tool-dispatch hook is a useful insertion
-point. Alternatively, the optional [MCP gateway preview](spec/mcp-gateway-preview.md)
+point. Alternatively, the optional [MCP gateway preview](../../spec/mcp-gateway-preview.md)
 combines admission and dispatch for explicitly configured MCP tools. Its trusted
 task bindings, protocol requirements, and development-only limits are documented
 there; it does not intercept arbitrary framework calls.
 
 ## 8. Deployment boundaries
 
-- Leases, authorization use counters, and runtime revocation state are in memory.
-  Use a single process for this reference authority store. The CLI rejects
-  `--workers` values other than `1`; direct ASGI deployments must also use one
-  worker and one replica for a given authority store. Adding Postgres and
-  Redis for other components does not make leases shared or durable.
+- Leases, use counters, approvals, and the MCP request ledger live in the SQL
+  authority store (`AUTHORITY_STORE=sql`, the default), sharing the audit
+  database. Every replica must point at the same database; with PostgreSQL,
+  admission holds an advisory lock and use reservation is a single atomic
+  update, so `--workers N` and multiple replicas are safe. `memory` restores
+  the old single-process behaviour and is refused in production.
 - Lease lookup currently uses subject and task, without a separate tenant key.
   Tenant-prefixing identifiers avoids accidental collisions but does not itself
   provide tenant isolation. Enforce ownership in your trusted issuer and add
   tenant-scoped storage/evaluation before sharing it across untrusted tenants.
 - Signed delegation identity is supported; production startup checks reject
   particular default secrets but are not a full deployment security review.
-  See [SECURITY.md](SECURITY.md) for the current boundaries.
-- Human approval orchestration, persistent approval grants, and resume logic
-  remain integration work. Consequence assessment and rollback are not provided;
-  `maximum_impact` is currently informational.
+  See [SECURITY.md](../../SECURITY.md) for the current boundaries.
+- Approval requests are persisted and resumable (see [approvals](approvals.md));
+  notifying the right human is your webhook receiver's job. Consequence
+  assessment and rollback are not provided; `maximum_impact` is informational.
 - Historical lease snapshots, complete approver lineage, and execution-result
   telemetry are not captured by the authority API. The console leaves these
   fields unknown instead of synthesizing evidence.
@@ -460,21 +467,22 @@ SQLite path overrides `SQLITE_PATH=audit.db` in a local `.env` file.
 
 The smoke test uses an isolated container and named volume, confirms UID 10001,
 tests all three decisions, then restarts the container to check audit persistence.
-It also confirms that runtime-issued leases disappear on restart. Its temporary
+It also confirms that a runtime-issued lease survives the restart. Its temporary
 container and volume are removed afterward. `--save` writes the tested image
 for transfer using `docker load --input dist/image.tar` on another host.
 
 `docker compose up --build` instead runs the gateway with Postgres audit storage
 and Redis cache/quota storage in named volumes. Compose forwards the configured
 admin and identity settings; its bundled database credentials are local defaults.
-Neither deployment makes leases durable. Run one worker and one replica for each
-authority store, and reissue required leases after a restart. Production identity,
-network access, and credentials still require the setup in [SECURITY.md](SECURITY.md).
+Both deployments persist leases and approvals alongside the audit chain.
+For more than one replica use the Compose profile or the Helm chart in
+[deploy/](../../deploy/README.md). Production identity,
+network access, and credentials still require the setup in [SECURITY.md](../../SECURITY.md).
 
 ### GitHub release workflow
 
-The repository's [release workflow](.github/workflows/release.yml) calls the
-[CI workflow](.github/workflows/ci.yml) before publishing. Required jobs cover
+The repository's [release workflow](../../.github/workflows/release.yml) calls the
+[CI workflow](../../.github/workflows/ci.yml) before publishing. Required jobs cover
 Python 3.11/3.12 tests, clean wheel installation, container runtime and persistence,
 and console browser regression checks. Existing lint and dependency-audit jobs
 are informational; review their output separately.
@@ -509,11 +517,12 @@ from the configured index and pull the matching container version.
 | `NO_ACTIVE_LEASE` | Agent identity and task must match the lease subject and task. |
 | `ACTION_OUTSIDE_CAPABILITY_MANIFEST` | Check the token's allowed capability namespace or exact action. |
 | Pending approval treated as success | Unwrap the `detail` object and inspect the decision, including for HTTP `202`. |
-| Lease disappears after restart | Runtime-issued leases are in memory; configuration-seeded leases reload from YAML. |
+| Lease state differs from YAML after restart | Stored leases win over the YAML seed, so a revocation or shrink is never undone by a redeploy; delete the row or issue a new lease id. |
+| `APPROVAL_MISMATCH` on resume | The resume must repeat the exact task, action, and resource the approval was raised for. |
 | Empty live stream | Execute authorization requests against the same server; connecting the console does not generate events. |
 | Demo differs from live inspector | Demo contains labeled illustrative context that the current audit schema cannot supply. |
 
-Further references: [integration overview](INTEGRATION.md),
-[configuration](CONFIGURATION.md), [endpoint examples](EDGES.md), and
-[authority specification](spec/authority-lease.md). Where older narrative notes
+Further references: [integration overview](README.md),
+[configuration](../../CONFIGURATION.md), [endpoint examples](../../EDGES.md), and
+[authority specification](../../spec/authority-lease.md). Where older narrative notes
 conflict, use the current endpoint implementation and tested behavior in this guide.

@@ -1,0 +1,143 @@
+# Default values for agent-plane.
+#
+# Minimum production setup:
+#   1. Point `postgres.url` (or `existingSecret`) at a shared Postgres. Leases,
+#      approvals, use counters, and audit evidence live there, so replicas can
+#      scale and a revocation reaches every pod.
+#   2. Provide strong JWT_SECRET / ADMIN_TOKEN / AUDIT_SIGNING_KEY via
+#      `existingSecret` (recommended) or `secrets.*`.
+#   3. Set `env.ENVIRONMENT=production` and IDENTITY_MODE=delegation.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/vishnu-77/agent-plane
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: "/metrics"
+  prometheus.io/port: "8000"
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+  port: 8000
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: agent-plane.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # Block the unauthenticated metrics path at the edge when exposing publicly.
+  # e.g. nginx.ingress.kubernetes.io/server-snippet: "location /metrics { deny all; }"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+# Non-secret configuration. Every key becomes an environment variable.
+env:
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+  LOG_FORMAT: json
+  IDENTITY_MODE: delegation
+  STORAGE_BACKEND: postgres
+  AUTHORITY_STORE: sql
+  METRICS_ENABLED: "true"
+  RATE_LIMIT_PER_MINUTE: "600"
+  TRUST_FORWARDED_FOR: "true"
+  APPROVAL_TTL_SECONDS: "3600"
+  # APPROVAL_WEBHOOK_URL: https://hooks.example.com/agent-plane
+  # MCP_GATEWAY_FILE: /app/config/mcp-gateway.yaml   (mount it via extraVolumes)
+extraEnv: []            # raw env entries (valueFrom etc.)
+
+postgres:
+  # SQLAlchemy URL. Leave empty when supplied through existingSecret as POSTGRES_URL.
+  url: ""
+redis:
+  url: ""
+
+# Secrets. Prefer existingSecret with keys:
+#   JWT_SECRET, ADMIN_TOKEN, AUDIT_SIGNING_KEY, POSTGRES_URL, REDIS_URL,
+#   DELEGATION_PUBLIC_KEY, DELEGATION_SIGNING_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
+existingSecret: ""
+secrets:
+  JWT_SECRET: ""
+  ADMIN_TOKEN: ""
+  AUDIT_SIGNING_KEY: ""
+  DELEGATION_PUBLIC_KEY: ""
+  DELEGATION_SIGNING_KEY: ""
+  OPENAI_API_KEY: ""
+  ANTHROPIC_API_KEY: ""
+
+# Policies and config YAML mounted at /app/policies and /app/config. When
+# empty, the image's bundled defaults are used. Keys are file names.
+policies: {}
+#  sensitive-tool-approval.yaml: |
+#    ...
+config: {}
+#  leases.yaml: |
+#    leases: []
+#  lease-templates.yaml: |
+#    templates: []
+
+extraVolumes: []
+extraVolumeMounts: []
+
+livenessProbe:
+  httpGet: { path: /healthz, port: http }
+  initialDelaySeconds: 5
+  periodSeconds: 15
+readinessProbe:
+  httpGet: { path: /readyz, port: http }
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3

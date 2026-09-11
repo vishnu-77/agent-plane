@@ -102,8 +102,9 @@ def build_gateway(app, path):
         try:
             meta = dict(ctx.meta or {})
             request_key = meta.get("agent-plane/request-id")
+            approval_id = meta.get("agent-plane/approval-id")
             result = await service.invoke(ctx.request.state.agent_plane_actor, params.name,
-                                          params.arguments or {}, request_key)
+                                          params.arguments or {}, request_key, approval_id)
             evidence = result["evidence"]
             if result["result"] is not None:
                 response = types.CallToolResult.model_validate(result["result"])

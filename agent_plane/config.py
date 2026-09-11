@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     # "local"   -> SQLite audit + in-memory cache/quota (default, zero setup)
     # "postgres"-> Postgres audit + Redis cache/quota (docker-compose profile)
     storage_backend: Literal["local", "postgres"] = "local"
+    # Where AuthorityLeases, use counters, approvals, and the gateway request
+    # ledger live:
+    #   "sql"    -> the audit database (SQLite/Postgres). Durable and shared by
+    #               every replica, so a revocation reaches all workers. Default.
+    #   "memory" -> process-local (single worker only; lost on restart).
+    authority_store: Literal["sql", "memory"] = "sql"
 
     sqlite_path: str = "audit.db"
     postgres_url: str = "postgresql+psycopg://agentplane:agentplane@localhost:5432/agentplane"
@@ -128,6 +134,23 @@ class Settings(BaseSettings):
     # YAML catalog of task-bound AuthorityLease grants. Unset -> config/leases.yaml
     # if present, else no leases (default-deny: no lease means no authority).
     leases_file: str | None = None
+    # YAML catalog of lease templates for POST /v1/leases/from-template.
+    # Unset -> config/lease-templates.yaml if present, else the packaged defaults.
+    lease_templates_file: str | None = None
+
+    # --- Approvals (human in the loop for APPROVAL_REQUIRED decisions) ---
+    # Pending approvals expire after this many seconds (0 = only the lease expiry
+    # bounds them). An approval never outlives the lease it was raised under.
+    approval_ttl_seconds: int = 3600
+    # Optional webhook that receives signed approval.requested/approved/rejected
+    # events (HMAC-SHA256 with AUDIT_SIGNING_KEY in X-AgentPlane-Signature).
+    approval_webhook_url: str | None = None
+
+    # --- Observability ---
+    # "text" (default) or "json" (one JSON object per line, for log shippers).
+    log_format: Literal["text", "json"] = "text"
+    # Expose Prometheus text metrics at /metrics (no auth; restrict at the edge).
+    metrics_enabled: bool = True
 
     # --- Admin API (live revocation + policy hot-reload) ---
     # Unset = admin API disabled. Set a strong token to enable; callers pass it
@@ -172,8 +195,10 @@ class Settings(BaseSettings):
         if self.environment != "production":
             return []
         errors: list[str] = []
-        if self.mcp_gateway_file:
-            errors.append("MCP gateway is a single-process development preview; durable authority is not implemented")
+        if self.authority_store == "memory":
+            errors.append(
+                "AUTHORITY_STORE=memory is process-local; use the default sql store in production"
+            )
         for field, default in self._DEFAULT_SECRETS.items():
             if getattr(self, field) == default:
                 errors.append(f"{field.upper()} is still the insecure default")

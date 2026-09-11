@@ -31,6 +31,32 @@ jobs:
         run: python -m pytest -q
       - name: Exercise MCP client through the gateway and mock upstream
         run: python examples/mcp_gateway_demo.py
+      - name: Committed OpenAPI export is current
+        run: python examples/export_openapi.py --check
+
+  sdk-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test the TypeScript SDK (no build step; Node strips types)
+        working-directory: sdk/typescript
+        run: node --experimental-strip-types --test test/
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint and render the chart
+        run: |
+          helm lint deploy/helm/agent-plane
+          helm template ci deploy/helm/agent-plane \
+            --set secrets.JWT_SECRET=ci --set postgres.url=postgresql+psycopg://ci@db/ci > /dev/null
+          helm template ci deploy/helm/agent-plane --set existingSecret=s --set autoscaling.enabled=true \
+            --set ingress.enabled=true > /dev/null
   distributions:
     needs: test
     runs-on: ubuntu-latest
