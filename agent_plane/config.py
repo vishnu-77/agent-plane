@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     # if present, else no tools (default-deny). Agents never hold tool creds.
     tools_file: str | None = None
 
+    # Optional, explicitly configured single-process MCP enforcement preview.
+    mcp_gateway_file: str | None = None
+
     # --- Knowledge sources (config-driven; the RAG authorization edge) ---
     # YAML catalog of retrieval sources + documents with access metadata.
     # Unset -> config/knowledge.yaml if present, else no sources (default-deny).
@@ -169,6 +172,8 @@ class Settings(BaseSettings):
         if self.environment != "production":
             return []
         errors: list[str] = []
+        if self.mcp_gateway_file:
+            errors.append("MCP gateway is a single-process development preview; durable authority is not implemented")
         for field, default in self._DEFAULT_SECRETS.items():
             if getattr(self, field) == default:
                 errors.append(f"{field.upper()} is still the insecure default")

@@ -5,6 +5,8 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-11
+
 ### Added
 - **Lease revocation + shrinking** (`DELETE`/`PATCH /v1/leases/{id}`, v0.4):
   an operator can pull or narrow an active lease's authority mid-task,
@@ -35,9 +37,8 @@ All notable changes to this project are documented here. Format loosely follows
 - **`examples/devops-agent/demo.py`** and **`examples/verify_deployment.py`**:
   a runnable capability-vs-authority demo and a live-deployment smoke test
   covering every edge.
-- **`INTEGRATION.md`** and **`ROADMAP.md`**: a plug-and-play integration guide
-  (with an honest accounting of what is and isn't zero-code today) and the
-  staged v0.1-v1.0 plan.
+- **`INTEGRATION.md`**: an integration guide describing setup and the
+  application changes required for each interface.
 
 ### Fixed
 - The tool broker (`POST /v1/tools/invoke`) and RAG edge (`POST /v1/retrieve`)

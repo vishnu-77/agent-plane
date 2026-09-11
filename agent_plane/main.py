@@ -90,7 +90,11 @@ async def lifespan(app: FastAPI):
         settings.environment, settings.identity_mode, settings.storage_backend,
         bundle.version,
     )
-    yield
+    if getattr(app.state, "mcp_app", None) is not None:
+        async with app.state.mcp_app.router.lifespan_context(app.state.mcp_app):
+            yield
+    else:
+        yield
 
 
 def create_app() -> FastAPI:
@@ -166,6 +170,11 @@ def create_app() -> FastAPI:
         html = (files("agent_plane.console") / "index.html").read_text(encoding="utf-8")
         return HTMLResponse(html)
 
+    @app.get("/flow", include_in_schema=False)
+    async def integration_flow() -> HTMLResponse:
+        html = (files("agent_plane.console") / "flow.html").read_text(encoding="utf-8")
+        return HTMLResponse(html)
+
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
         # Ready only if the audit store is reachable (DB connectivity).
@@ -183,6 +192,19 @@ def create_app() -> FastAPI:
     app.include_router(authority_router)
     app.include_router(usage_router)
     app.include_router(admin_router)
+    if settings.mcp_gateway_file:
+        from starlette.routing import Route
+
+        from agent_plane.gateway.mcp import build_gateway
+
+        app.state.gateway_body_limit = settings.max_request_bytes or 1_000_000
+        app.state.mcp_app, endpoint = build_gateway(app, settings.mcp_gateway_file)
+        # A callable ASGI object avoids Starlette interpreting it as request -> response.
+        class MCPRoute:
+            async def __call__(self, scope, receive, send):
+                await endpoint(scope, receive, send)
+
+        app.router.routes.append(Route("/mcp", endpoint=MCPRoute()))
     return app
 
 

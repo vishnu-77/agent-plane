@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -20,13 +25,88 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,mcp]"
+          pip install -e ./sdk/python
       - name: Test
         run: python -m pytest -q
-      - name: Build wheel
+      - name: Exercise MCP client through the gateway and mock upstream
+        run: python examples/mcp_gateway_demo.py
+  distributions:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check versions and build both distributions
         run: |
-          pip install build
-          python -m build --wheel
+          python -m pip install build twine
+          python examples/check_release_version.py
+          python -m build --outdir dist/release/server
+          python -m build sdk/python --outdir dist/release/sdk
+          python -m twine check --strict dist/release/server/* dist/release/sdk/*
+      - name: Smoke-test wheels in a clean environment
+        run: python examples/smoke_distribution.py --dist-dir dist/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-distributions
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  container:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install smoke-test client
+        run: python -m pip install httpx pyjwt ./sdk/python
+      - name: Build and validate Compose configuration
+        run: |
+          docker compose config --quiet
+          docker build --tag agent-plane:ci .
+      - name: Smoke-test the image and save release candidates
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            python examples/smoke_container.py --image agent-plane:ci --save artifacts/image.tar
+          else
+            python examples/smoke_container.py --image agent-plane:ci
+          fi
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        with:
+          name: tested-container
+          path: artifacts/image.tar
+          if-no-files-found: error
+          retention-days: 3
+
+  console:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install browser test tooling
+        run: |
+          python -m pip install . ./sdk/python
+          npm install --prefix "$RUNNER_TEMP/console-qa" playwright
+          "$RUNNER_TEMP/console-qa/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Run console browser regression checks
+        env:
+          SQLITE_PATH: ${{ runner.temp }}/console-audit.db
+        run: |
+          python -m agent_plane.cli serve --host 127.0.0.1 --port 8765 > "$RUNNER_TEMP/console.log" 2>&1 &
+          python -c "from examples.smoke_runtime import wait_ready; wait_ready('http://127.0.0.1:8765')"
+          NODE_PATH="$RUNNER_TEMP/console-qa/node_modules" node tests/console.browser.cjs
 
   lint:
     runs-on: ubuntu-latest

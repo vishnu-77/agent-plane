@@ -1,12 +1,17 @@
 # Integrating agent-plane into an existing product
 
+For the current step-by-step setup, runnable authorization example, exact
+response handling, and console instructions, use the
+**[integration guide](<integration guide.md>)**. This page provides the broader
+integration overview; code snippets below are illustrative unless stated otherwise.
+
 **Short answer to "is it plug-and-play": for model calls, yes - genuinely
 zero code change (it's an OpenAI-compatible `base_url` swap). For tool calls,
 RAG, and task-scoped authorization, it's "one wrapper function per call site,"
 not zero-code - there's no universal interception point across arbitrary
-agent frameworks yet (that's what the MCP adapter in
-[`ROADMAP.md`](ROADMAP.md) v0.2 closes). This document is the real, honest
-path for both.**
+agent frameworks. Configured MCP tools can now use the optional
+[MCP gateway preview](spec/mcp-gateway-preview.md), which binds authenticated
+agents to operator-configured tasks and leases before dispatch.**
 
 Everything below was run against a live `agentplane serve` process while
 writing this doc (`examples/verify_deployment.py` is the script that did it -
@@ -25,11 +30,12 @@ agentplane init                 # scaffolds policies/ + config/ into the cwd
 cp .env.example .env            # set JWT_SECRET, ADMIN_TOKEN at minimum
 agentplane serve --port 8000
 
-# B. Docker
+# B. Docker (persist audit evidence in a writable named volume)
 docker build -t agent-plane .
-docker run -p 8000:8000 --env-file .env agent-plane
+docker run -p 127.0.0.1:8000:8000 --env-file .env \
+  -e SQLITE_PATH=/data/audit.db -v agent-plane-audit:/data agent-plane
 
-# C. Docker Compose with Postgres + Redis (for real concurrency/scale)
+# C. Docker Compose with persistent Postgres audit + Redis cache/quota
 docker compose up --build
 ```
 
@@ -115,7 +121,8 @@ inspect it via the `x_control_plane` block in the response, or `GET /v1/audit`.
 ## 3. Tool calls - one wrapper function
 
 There's no framework-agnostic interception point for arbitrary tool-calling
-code (yet - MCP adapter is the closest thing, see §7). The integration is one
+code. For configured MCP tools, see the [gateway preview](spec/mcp-gateway-preview.md).
+For other tools, the integration is one
 function that every tool-call site routes through instead of calling the tool
 directly.
 
@@ -182,34 +189,25 @@ for the full object and reason-code reference.
 
 **Integration shape, three steps:**
 
-```python
-from agentplane import AgentPlane   # sdk/python - pip install -e sdk/python for now
+1. Your trusted backend issues a task-bound lease through `POST /v1/leases`
+   using its admin credential.
+2. Your trusted tool executor checks `POST /v1/authorize` before each proposed
+   action, authenticating with the agent bearer token.
+3. Execute only on an explicit ALLOW. Pause approval-required actions and block
+   denials, authentication errors, unavailable service, or malformed responses.
 
-plane = AgentPlane("http://localhost:8000", token)
+The [integration guide](<integration guide.md>) includes a complete direct-HTTP
+Python example and an executor wrapper. It handles the actual response shapes:
+`200` has a top-level decision, while both `202` and `403` wrap the decision in
+`detail`. The separately packaged Python client (`agent-plane-sdk`, imported as
+`agentplane`) handles all three outcomes and rejects malformed responses.
+Install it from `./sdk/python` or a release wheel; see the
+[SDK README](sdk/python/README.md). Do not treat an HTTP success status alone
+as authorization.
 
-# Step 1 - at task/session start, issue (or your orchestrator issues) a lease
-# scoping what THIS task may do. Admin-token gated - your backend does this,
-# not the agent.
-httpx.post("http://localhost:8000/v1/leases",
-    headers={"X-Admin-Token": ADMIN_TOKEN},
-    json={
-        "id": f"lease-{session_id}", "task": task_id, "agent": "devops-agent",
-        "resources": ["staging/*"], "actions": ["deployment.read", "deployment.restart"],
-        "protected_resources": ["production/*"],
-        "expires_at": (now + timedelta(hours=1)).isoformat(),
-    })
-
-# Step 2 - before EVERY proposed action, ask (this is the actual enforcement point)
-decision = plane.authorize(task=task_id, action="deployment.restart", resource="staging/checkout")
-
-# Step 3 - only execute if allowed; the reason code tells you (and the agent) why not
-if decision.allowed:
-    do_the_real_thing()
-elif decision.decision == "approval_required":
-    queue_for_human(decision)
-else:
-    tell_the_agent_why(decision.reason)   # e.g. RESOURCE_OUTSIDE_DELEGATED_SCOPE
-```
+The tool broker (`/v1/tools/invoke`) evaluates its own tool policies and capability
+checks; it does not automatically evaluate task AuthorityLeases. Combine it with
+the explicit authorization check when task-specific enforcement is needed.
 
 Model the `action`/`resource` naming after your own domain (`branch.delete` +
 `github://org/repo`, `payment.refund` + `stripe://acct_x/charge_y`, whatever
@@ -217,14 +215,24 @@ your agent's actions actually are) - agent-plane doesn't need to know your
 schema, only that leases and requests agree on the strings.
 
 ```ts
-// No TS SDK yet (see ROADMAP.md v0.2) - it's four lines of fetch either way.
+// Illustrative server-side helper; no TypeScript SDK is currently packaged.
 async function authorize(task: string, action: string, resource: string) {
   const r = await fetch("http://localhost:8000/v1/authorize", {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ task, action, resource }),
   });
-  return r.json();   // { decision, reason, lease, evidence_id } on 200/202/403 alike
+  const expected: Record<number, string> = {
+    200: "allow", 202: "approval_required", 403: "deny"
+  };
+  if (!expected[r.status]) throw new Error(`Authorization HTTP ${r.status}`);
+  const body = await r.json();
+  const decision = body?.detail ?? body;
+  if (decision?.decision !== expected[r.status] ||
+      typeof decision?.evidence_id !== "string" || !decision.evidence_id) {
+    throw new Error("Invalid authorization response; action blocked");
+  }
+  return decision; // Execute only if decision.decision === "allow".
 }
 ```
 
@@ -270,8 +278,8 @@ changes.
 1. Deploy agent-plane (§0), confirm `curl /healthz`.
 2. Decide identity mode; wire your backend to mint a token per agent
    invocation (§1).
-3. Swap your model client's `base_url` (§2) - ship this alone first, it's
-   zero-risk and immediately gives you policy + audit on every model call.
+3. For compatible model calls, update the client's `base_url` (§2) and validate
+   behavior against your application's requests, tools, and provider configuration.
 4. Wrap tool-execution call sites through `/v1/tools/invoke` (§3), one at a
    time, starting with your highest-risk tools.
 5. Wrap RAG retrieval through `/v1/retrieve` (§4) if you have a knowledge base.
@@ -304,19 +312,25 @@ changes.
 
 ---
 
-## What's genuinely NOT plug-and-play yet
+## Current capabilities and remaining integration work
 
-Being direct about the limits, per [`ROADMAP.md`](ROADMAP.md):
+Current integration limits:
 
 - **No framework middleware/plugin** for LangChain/LangGraph/CrewAI - you
-  write the one-line wrapper per call site (§3-§5). An MCP adapter (v0.2)
-  would let MCP-based agents get tool/task governance without touching their
-  code, since MCP already centralizes tool dispatch - that's not built yet.
+  write the wrapper per call site (§3-§5). The optional
+  [MCP gateway preview](spec/mcp-gateway-preview.md) now enforces task authority
+  for configured tools through `/mcp`. It is a single-process development
+  preview with a pinned protocol version, not universal client compatibility.
 - **No TypeScript SDK** - raw `fetch` (four lines, shown in §5) covers it,
   just without the typed wrapper the Python SDK gives you.
-- **Lease delegation isn't enforced** - `child_authority` is parsed but a
-  sub-agent can't yet be issued an attenuated *lease* the way it can an
-  attenuated *identity* (§6).
+- **Lease delegation is implemented** through `POST /v1/leases/{id}/delegate`:
+  the holder can request a child lease, with scope attenuation checks. This is
+  separate from the child identity token in §6. Leases and their use counters
+  remain in memory and are not shared across workers.
+- **Approval orchestration and consequence enforcement remain integration work.**
+  Approval-required decisions do not execute an action, and the server does not
+  provide an approval-and-resume endpoint. `maximum_impact` is informational.
 
-None of these block integration today; they're where the wrapper-per-call-site
-approach in §3-§5 eventually gets replaced with zero-code interception.
+Direct HTTP integration is available today. Persistent authority, approval
+orchestration, and framework interception require additional work; use the
+[integration guide](<integration guide.md>) to assess those boundaries.

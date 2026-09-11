@@ -1,6 +1,11 @@
 .git/
 .github/
 docs/
+**/*PLAN*.md
+**/*ROADMAP*.md
+**/*plan*.md
+**/*roadmap*.md
+spec/authority-provenance.md
 tests/
 .venv/
 venv/

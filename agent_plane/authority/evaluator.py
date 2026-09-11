@@ -62,7 +62,18 @@ def _capability_covers(actor: Actor, action: str) -> bool:
 
 
 def evaluate_authority(
-    store: LeaseStore, actor: Actor, *, task: str, action: str, resource: str
+    store: LeaseStore, actor: Actor, *, task: str, action: str, resource: str,
+    consume: bool = True, lease_ids: frozenset[str] | None = None,
+) -> AuthorityDecision:
+    """Evaluate atomically; preview never consumes a use. Legacy calls still do."""
+    with store.transaction():
+        return _evaluate_authority(store, actor, task=task, action=action,
+                                   resource=resource, consume=consume, lease_ids=lease_ids)
+
+
+def _evaluate_authority(
+    store: LeaseStore, actor: Actor, *, task: str, action: str, resource: str,
+    consume: bool, lease_ids: frozenset[str] | None,
 ) -> AuthorityDecision:
     decision_id = f"az_{uuid.uuid4().hex[:12]}"
 
@@ -75,6 +86,8 @@ def evaluate_authority(
 
     subject = actor.agent_id or actor.user_id
     leases = store.for_subject_task(subject, task)
+    if lease_ids is not None:
+        leases = [lease for lease in leases if lease.id in lease_ids]
     if not leases:
         return AuthorityDecision(
             decision=DecisionAction.DENY, reason=AuthorityReason.NO_ACTIVE_LEASE,
@@ -96,6 +109,14 @@ def evaluate_authority(
             decision_id=decision_id,
         )
 
+    # Protection is a deny override across all active matching grants, independent
+    # of insertion order. No use may be consumed before checking this override.
+    for lease in active:
+        if resource_matches(lease.resources, resource) and resource_matches(lease.protected_resources, resource):
+            return AuthorityDecision(decision=DecisionAction.DENY,
+                                     reason=AuthorityReason.RESOURCE_PROTECTED,
+                                     lease_id=lease.id, decision_id=decision_id)
+
     best_reason = AuthorityReason.RESOURCE_OUTSIDE_DELEGATED_SCOPE
     for lease in active:
         if not resource_matches(lease.resources, resource):
@@ -110,7 +131,10 @@ def evaluate_authority(
         if action not in lease.actions:
             best_reason = AuthorityReason.ACTION_NOT_AUTHORIZED
             continue
-        if not store.try_consume(lease.id, action, lease.max_uses.get(action)):
+        limit = lease.max_uses.get(action)
+        available = (store.try_consume(lease.id, action, limit) if consume else
+                     limit is None or store.use_count(lease.id, action) < limit)
+        if not available:
             best_reason = AuthorityReason.ACTION_LIMIT_EXCEEDED
             continue
 

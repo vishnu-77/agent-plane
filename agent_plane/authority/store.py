@@ -8,6 +8,7 @@ share across workers. Move to the SQL-backed pattern used by
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -22,7 +23,13 @@ class LeaseStore:
     def __init__(self, leases: list[AuthorityLease] | None = None):
         self._leases: dict[str, AuthorityLease] = {lease.id: lease for lease in (leases or [])}
         self._usage: dict[tuple[str, str], int] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+
+    @contextmanager
+    def transaction(self):
+        """Serialize admission with lease mutations within this single process."""
+        with self._lock:
+            yield self
 
     def add(self, lease: AuthorityLease) -> None:
         with self._lock:

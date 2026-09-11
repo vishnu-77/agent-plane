@@ -240,30 +240,31 @@ async def shrink_lease(
     same "never grants more" rule as delegation; widening is refused."""
     require_admin(request, x_admin_token)
     store = request.app.state.leases
-    current = store.get(lease_id)
-    if current is None:
-        raise HTTPException(status_code=404, detail="lease not found")
+    with store.transaction():
+        current = store.get(lease_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="lease not found")
 
-    body = body or {}
-    shrunk = current.model_copy(update={
-        k: body[k] for k in (
-            "resources", "actions", "protected_resources", "max_uses",
-            "require_approval", "expires_at", "maximum_impact",
-        ) if k in body
-    })
+        body = body or {}
+        shrunk = current.model_copy(update={
+            k: body[k] for k in (
+                "resources", "actions", "protected_resources", "max_uses",
+                "require_approval", "expires_at", "maximum_impact",
+            ) if k in body
+        })
 
-    errors = lease_attenuation_errors(current, shrunk)
-    if errors:
-        _audit_admin(
-            request, decision="deny",
-            reason="privilege escalation refused: " + "; ".join(errors), lease_id=lease_id,
-        )
-        raise HTTPException(status_code=403, detail={
-            "error": "privilege_escalation", "violations": errors})
+        errors = lease_attenuation_errors(current, shrunk)
+        if errors:
+            _audit_admin(
+                request, decision="deny",
+                reason="privilege escalation refused: " + "; ".join(errors), lease_id=lease_id,
+            )
+            raise HTTPException(status_code=403, detail={
+                "error": "privilege_escalation", "violations": errors})
 
-    store.add(shrunk)
-    _audit_admin(request, decision="allow", reason="LEASE_SHRUNK", lease_id=lease_id)
-    return {"shrunk": True, "lease": shrunk.model_dump(mode="json")}
+        store.add(shrunk)
+        _audit_admin(request, decision="allow", reason="LEASE_SHRUNK", lease_id=lease_id)
+        return {"shrunk": True, "lease": shrunk.model_dump(mode="json")}
 
 
 def _audit_admin(request: Request, *, decision: str, reason: str, lease_id: str) -> None:

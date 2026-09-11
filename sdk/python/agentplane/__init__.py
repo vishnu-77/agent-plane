@@ -19,7 +19,18 @@ from dataclasses import dataclass
 
 import httpx
 
-__all__ = ["AgentPlane", "AuthorityDecision"]
+__all__ = ["AgentPlane", "AuthorityDecision", "AuthorizationProtocolError"]
+
+
+class AuthorizationProtocolError(RuntimeError):
+    """The server did not return a consistent, usable authorization decision.
+
+    Callers must stop execution on this error, just as on an HTTP or transport
+    error. An unexpected response must never authorize a real action.
+    """
+
+
+_EXPECTED = {200: "allow", 202: "approval_required", 403: "deny"}
 
 
 @dataclass(frozen=True)
@@ -46,15 +57,30 @@ class AgentPlane:
         resp = self._client.post(
             "/v1/authorize", json={"task": task, "action": action, "resource": resource}
         )
-        # 200 (allow), 202 (approval_required), and 403 (deny) all carry the same
-        # decision body - FastAPI wraps non-2xx ones in {"detail": ...}.
-        body = resp.json()
-        payload = body.get("detail", body) if resp.status_code >= 300 else body
+        if resp.status_code not in _EXPECTED:
+            resp.raise_for_status()
+            raise AuthorizationProtocolError("Unexpected authorization HTTP status")
+        # FastAPI also wraps HTTP 202 in detail; HTTP success is not permission.
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise AuthorizationProtocolError("Invalid authorization JSON") from exc
+        payload = body.get("detail", body) if isinstance(body, dict) else None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("decision") != _EXPECTED[resp.status_code]
+            or not isinstance(payload.get("reason"), str)
+            or not payload["reason"]
+            or not isinstance(payload.get("evidence_id"), str)
+            or not payload["evidence_id"]
+            or (payload.get("lease") is not None and not isinstance(payload["lease"], str))
+        ):
+            raise AuthorizationProtocolError("Inconsistent authorization decision")
         return AuthorityDecision(
-            decision=payload.get("decision", "deny"),
-            reason=payload.get("reason", "UNKNOWN"),
+            decision=payload["decision"],
+            reason=payload["reason"],
             lease=payload.get("lease"),
-            evidence_id=payload.get("evidence_id", ""),
+            evidence_id=payload["evidence_id"],
         )
 
     def close(self) -> None:

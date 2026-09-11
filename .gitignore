@@ -16,9 +16,10 @@
 !/sdk/
 !/examples/
 !/pyproject.toml
+!/MANIFEST.in
 !/README.md
-!/ROADMAP.md
 !/INTEGRATION.md
+!/integration guide.md
 !/EDGES.md
 !/CONFIGURATION.md
 !/ARCHITECTURE.md
@@ -33,6 +34,22 @@
 !/.gitignore
 !/.github/
 
+# Public README asset only; internal docs remain ignored.
+!/docs/
+/docs/*
+!/docs/assets/
+/docs/assets/*
+!/docs/assets/hero.png
+
+# Internal planning documents stay local, including within public directories.
+ROADMAP.md
+GATEWAY_PLAN.md
+spec/authority-provenance.md
+**/*PLAN*.md
+**/*ROADMAP*.md
+**/*plan*.md
+**/*roadmap*.md
+
 # 3) Strip build/runtime artifacts that live *inside* the re-included dirs.
 __pycache__/
 *.py[cod]
@@ -41,3 +58,5 @@ __pycache__/
 .env
 audit.db
 *.sqlite
+sdk/python/build/
+sdk/python/dist/

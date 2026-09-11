@@ -1,0 +1,13 @@
+include INTEGRATION.md
+include docs/assets/hero.png
+include integration?guide.md
+include CONFIGURATION.md
+include SECURITY.md
+include Dockerfile
+include docker-compose.yml
+include .env.example
+include spec/authority-lease.md
+include spec/mcp-gateway-preview.md
+recursive-include examples *.py
+global-exclude *PLAN*.md *ROADMAP*.md *plan*.md *roadmap*.md
+exclude spec/authority-provenance.md

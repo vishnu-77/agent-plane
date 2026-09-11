@@ -62,6 +62,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "init":
         _init(args)
     elif args.cmd == "serve":
+        if args.workers != 1:
+            parser.error("AuthorityLease storage is process-local; --workers must be 1")
         import uvicorn
 
         uvicorn.run(

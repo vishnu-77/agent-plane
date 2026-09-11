@@ -32,14 +32,15 @@ identity + signed audit) is shared; enforcement is replicated per edge:
 | Edge | Endpoint | Status |
 | ---- | -------- | ------ |
 | Agent → model | `POST /v1/chat/completions` | ✅ |
-| Agent → tool / MCP / API | `POST /v1/tools/invoke` | ✅ |
+| Agent → tool / API | `POST /v1/tools/invoke` | ✅ |
 | Agent → knowledge (RAG) | `POST /v1/retrieve` | ✅ |
 | Agent → agent (A2A) | `POST /v1/agents/delegate` | ✅ |
 | Agent → action (task authority) | `POST /v1/authorize` | ✅ |
-| Agent → data / egress | (egress broker) | planned |
+| Agent → MCP | `POST /mcp` | Development preview |
 
-Every edge runs the same flow - *identity → deterministic policy decision →
-least-privilege → execute with the broker's credential → one signed audit chain*.
+The interfaces share identity and audit infrastructure, with different checks.
+Task-lease evaluation is explicit on `/v1/authorize` and the configured MCP path;
+model, broker, and retrieval routes do not automatically evaluate task leases.
 Per-edge walkthroughs and curl examples: [EDGES.md](EDGES.md).
 
 ## Postgres + Redis (opt-in)

@@ -35,6 +35,16 @@ def test_development_has_no_production_errors():
     assert Settings().production_errors() == []
 
 
+@pytest.mark.parametrize("workers", ["0", "2", "-1"])
+def test_cli_rejects_unsafe_worker_counts(workers, capsys):
+    from agent_plane.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["serve", "--workers", workers])
+    assert error.value.code == 2
+    assert "process-local" in capsys.readouterr().err
+
+
 def test_load_bundle_falls_back_to_packaged_defaults(tmp_path):
     # A fresh install with no policies in CWD must still be governed (not allow-all).
     bundle = load_bundle(str(tmp_path / "does-not-exist"))

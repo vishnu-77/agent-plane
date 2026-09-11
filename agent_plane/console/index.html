@@ -1,328 +1,423 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agent-plane · control plane</title>
+<meta name="color-scheme" content="light">
+<title>agent-plane · Runtime authority</title>
 <style>
-  :root{
-    --bg:#0a0d14; --bg2:#0e131d; --surface:#121826; --surface2:#161d2e;
-    --line:#222c40; --line2:#2c3850; --fg:#e9eef7; --mut:#8a97ad; --mut2:#5d6b82;
-    --accent:#67e8f9; --accent2:#22d3ee; --glow:#22d3ee55;
-    --allow:#4ade80; --deny:#f87171; --approval:#fbbf24; --plane:#7dd3fc;
-    --r:14px; --shadow:0 1px 0 #ffffff08, 0 12px 30px -12px #00000080;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0}
-  body{
-    background:
-      radial-gradient(1100px 520px at 78% -8%, #11324022, transparent 60%),
-      radial-gradient(900px 500px at 10% 110%, #15203a30, transparent 55%),
-      var(--bg);
-    color:var(--fg);
-    font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial;
-    -webkit-font-smoothing:antialiased;
-  }
-  header{
-    position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:14px;
-    padding:14px 24px; flex-wrap:wrap;
-    background:linear-gradient(180deg,#0b0f18ee,#0b0f18b0); backdrop-filter:blur(10px);
-    border-bottom:1px solid var(--line);
-  }
-  .brand{display:flex; align-items:center; gap:11px}
-  .logo{width:30px;height:30px;border-radius:9px;background:
-    conic-gradient(from 200deg, var(--accent), #4f46e5, var(--accent));
-    box-shadow:0 0 22px var(--glow); position:relative}
-  .logo::after{content:"";position:absolute;inset:6px;border-radius:5px;background:var(--bg2)}
-  .brand b{font-size:16px;letter-spacing:.2px}
-  .brand span{color:var(--mut);font-size:12.5px}
-  .grow{flex:1}
-  header input{
-    background:#0b1019; border:1px solid var(--line); color:var(--fg);
-    border-radius:9px; padding:8px 11px; width:184px; outline:none; transition:border-color .15s;
-  }
-  header input:focus{border-color:var(--accent2)}
-  .btn{background:#18324a; color:#cfeff7; border:1px solid #235c70; border-radius:9px;
-    padding:8px 13px; cursor:pointer; font-weight:600; transition:.15s}
-  .btn:hover{border-color:var(--accent); box-shadow:0 0 0 3px #22d3ee22}
-  .toggle{display:flex;align-items:center;gap:7px;color:var(--mut);font-size:12.5px;cursor:pointer;user-select:none}
-  .toggle input{accent-color:var(--accent2)}
-
-  main{max-width:1180px; margin:0 auto; padding:24px; display:grid; gap:20px}
-  .panel{background:linear-gradient(180deg,var(--surface),var(--surface2));
-    border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow)}
-  .panel h2{margin:0;padding:14px 18px;font-size:12px;text-transform:uppercase;letter-spacing:.9px;
-    color:var(--mut); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px}
-  .panel h2 .sp{flex:1}
-  .pbody{padding:16px 18px}
-
-  /* stat strip */
-  .stats{display:grid; grid-template-columns:repeat(6,1fr); gap:14px}
-  .stat{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 16px}
-  .stat .k{color:var(--mut); font-size:11.5px; text-transform:uppercase; letter-spacing:.6px}
-  .stat .v{font-size:26px; font-weight:700; margin-top:3px; font-variant-numeric:tabular-nums}
-  .v.allow{color:var(--allow)} .v.deny{color:var(--deny)} .v.appr{color:var(--approval)}
-  .v.small{font-size:15px; font-weight:600}
-
-  /* topology */
-  .topowrap{padding:8px}
-  svg .nodebox{fill:url(#gNode); stroke:var(--line2)}
-  svg .hub{fill:url(#gHub); stroke:#2b6f86}
-  svg .lbl{fill:var(--fg); font:600 13px ui-sans-serif,system-ui}
-  svg .sub{fill:var(--mut); font:11px ui-sans-serif,system-ui}
-  svg .count{fill:var(--accent); font:700 17px ui-sans-serif,system-ui; text-anchor:end}
-  svg .hubt{fill:#bff0fb; font:700 13px ui-sans-serif,system-ui; letter-spacing:.5px}
-  svg .hubp{fill:#cbd5e1; font:11.5px ui-sans-serif,system-ui}
-  svg .link{stroke:var(--line2); stroke-width:2; fill:none}
-  svg .link.active{stroke:var(--accent2); stroke-width:2.4; filter:drop-shadow(0 0 4px var(--glow));
-    stroke-dasharray:7 8; animation:flow 1.1s linear infinite}
-  svg .planned .nodebox{stroke-dasharray:4 4; opacity:.5}
-  svg .planned .lbl, svg .planned .sub{opacity:.6}
-  @keyframes flow{to{stroke-dashoffset:-30}}
-  .edge-on{filter:drop-shadow(0 0 8px var(--glow))}
-
-  /* feed */
-  .feed{max-height:420px; overflow:auto}
-  .ev{display:grid; grid-template-columns:64px 1fr auto; gap:12px; align-items:center;
-    padding:10px 8px; border-bottom:1px solid var(--line); animation:fade .35s ease}
-  .ev:last-child{border-bottom:0}
-  @keyframes fade{from{opacity:0;transform:translateY(-4px)}}
-  .ev .t{color:var(--mut2); font-size:12px; font-variant-numeric:tabular-nums}
-  .ev .who{font-size:12.5px}
-  .ev .who code{background:#0c1320;border:1px solid var(--line);border-radius:6px;padding:1px 6px}
-  .ev .who .small{color:var(--mut); font-size:11.5px}
-  .badge{padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid}
-  .badge.allow{color:var(--allow);border-color:#4ade8040;background:#4ade8012}
-  .badge.deny{color:var(--deny);border-color:#f8717140;background:#f8717112}
-  .badge.approval_required{color:var(--approval);border-color:#fbbf2440;background:#fbbf2412}
-  .tag{display:inline-block;font-size:10.5px;color:var(--mut);border:1px solid var(--line);
-    border-radius:6px;padding:1px 6px;margin-left:6px}
-
-  .two{display:grid; grid-template-columns:1.5fr 1fr; gap:20px}
-  .rule{display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px dashed #ffffff0d; font-size:13px}
-  .rule:last-child{border-bottom:0}
-  .mut{color:var(--mut)} .err{color:var(--deny)} .dimhint{color:var(--mut2);font-size:12px}
-  .dot{width:9px;height:9px;border-radius:50%;background:var(--mut2);box-shadow:0 0 0 0 transparent}
-  .dot.ok{background:var(--allow);box-shadow:0 0 10px #4ade8088}
-  .dot.bad{background:var(--deny)}
-  a{color:var(--accent)}
-  @media(max-width:860px){.stats{grid-template-columns:repeat(3,1fr)}.two{grid-template-columns:1fr}}
+:root{--bg:#f7f7f2;--paper:#fcfcf8;--ink:#242722;--muted:#666a61;--line:#c8cbc1;--graphite:#777c71;--wash:#eeefe7;--allow:#3e6b50;--allow-bg:#edf2e9;--deny:#a3473c;--deny-bg:#f6eae5;--approval:#88651f;--approval-bg:#f6f0de;--mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}button,input,select{font:inherit;color:inherit;border-radius:0}button,select{cursor:pointer}button{background:transparent;border:1px solid var(--line);padding:7px 11px;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap}button:hover{background:var(--wash);border-color:var(--graphite)}button:disabled{cursor:default;opacity:.5}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ink);outline-offset:3px}a{color:inherit;text-underline-offset:3px}input,select{background:var(--paper);border:1px solid var(--line);padding:8px 10px;min-width:0}h1,h2,h3,p{margin:0}h1{font-size:26px;line-height:1.2;font-weight:550;letter-spacing:-1px}h2{font-size:14px;font-weight:600;letter-spacing:-.15px}h3{font-size:12px;font-weight:600}code,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}code{font-size:11px;overflow-wrap:anywhere}.muted{color:var(--muted)}.eyebrow{font:10px/1.4 var(--mono);letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}[hidden]{display:none!important}.icon{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.4;flex-shrink:0}.square{width:5px;height:5px;background:currentColor;display:inline-block;flex-shrink:0}.badge{font:10px/1.4 var(--mono);letter-spacing:.3px;display:inline-flex;align-items:center;gap:6px;padding:4px 7px;border:1px solid var(--line);white-space:nowrap}.allow{color:var(--allow);--state:var(--allow);--state-bg:var(--allow-bg)}.deny{color:var(--deny);--state:var(--deny);--state-bg:var(--deny-bg)}.approval_required{color:var(--approval);--state:var(--approval);--state-bg:var(--approval-bg)}.badge.allow,.badge.deny,.badge.approval_required{border-color:var(--state);background:var(--state-bg)}.quiet-btn{border-color:transparent;padding:6px 8px;font-size:11px}.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}.primary:hover{background:#41463c;color:var(--bg)}
+.app-header{height:66px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:28px;padding:0 32px}.brand{display:flex;align-items:center;gap:11px;font-family:var(--mono);font-size:19px;letter-spacing:-1px;font-weight:600}.header-divider{height:20px;width:1px;background:var(--line)}.header-location{font-size:12px;color:var(--muted)}.header-right{margin-left:auto;display:flex;align-items:center;gap:14px}.mode-switch{display:flex;border:1px solid var(--line);padding:2px}.mode-switch button{border:0;padding:4px 13px;font:10px var(--mono);letter-spacing:.5px}.mode-switch button[aria-pressed=true]{background:var(--ink);color:var(--bg)}.connection-label{font:10px var(--mono);display:flex;gap:7px;align-items:center}.app-main{max-width:1760px;margin:auto;padding:29px 32px 0}.titlebar{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:24px}.title-copy{display:flex;align-items:baseline;gap:20px}.title-copy p{font-size:12px;color:var(--muted)}.title-actions{display:flex;align-items:center;gap:12px}.sample-tag{border:1px solid var(--line);padding:4px 7px;font:9px var(--mono);letter-spacing:.7px}.execution{display:grid;grid-template-columns:1fr 1.24fr 1.16fr 1.15fr .9fr;border:1px solid var(--line);background:var(--paper)}.chain-step{position:relative;padding:15px 20px 16px;min-width:0}.chain-step:not(:last-child){border-right:1px solid var(--line)}.chain-value{margin-top:9px;font:12px var(--mono);overflow-wrap:anywhere;line-height:1.55}.chain-caption{margin-top:4px;font-size:10px;color:var(--muted);overflow-wrap:anywhere}.decision-summary{display:flex;align-items:center;gap:15px;border:1px solid var(--line);border-top:0;padding:13px 20px;background:var(--state-bg,var(--wash));border-left:3px solid var(--state,var(--graphite))}.decision-summary .summary-symbol{font:20px var(--mono);color:var(--state,var(--ink))}.summary-text{font-size:12px;font-weight:500;color:var(--ink)}.summary-code{margin-top:2px;font:10px var(--mono);color:var(--state,var(--muted));overflow-wrap:anywhere}.decision-id{margin-left:auto;display:flex;gap:12px;align-items:center;color:var(--ink);font:10px var(--mono)}.status-message{font:11px/1.5 var(--mono);padding:10px 0;color:var(--muted)}
+.workspace{display:grid;grid-template-columns:minmax(0,1.85fr) minmax(365px,1fr);gap:20px;margin-top:22px}.panel{border:1px solid var(--line);background:var(--paper);min-width:0}.panel-head{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line);min-height:63px}.section-num{font:10px var(--mono);color:var(--muted);border-right:1px solid var(--line);padding-right:11px;margin-right:1px}.panel-head .head-meta{margin-left:auto;font:10px var(--mono);color:var(--muted)}.panel-subtitle{font-size:10px;color:var(--muted);margin-top:3px}.graph-tools{margin-left:auto}.graph-canvas{overflow:auto;position:relative}.authority-svg{display:block;width:100%;min-width:710px;height:auto}.graph-node{cursor:pointer;outline:none}.graph-node rect{fill:var(--paper);stroke:var(--graphite);stroke-width:1}.graph-node:hover rect,.graph-node:focus-visible rect,.graph-node.selected rect{stroke:var(--ink);stroke-width:2}.graph-node .node-type{fill:var(--muted);font:8px var(--mono);letter-spacing:.7px}.graph-node .node-title{fill:var(--ink);font:11px var(--mono)}.graph-node .node-sub{fill:var(--muted);font:8px var(--mono)}.graph-node .node-icon{fill:none;stroke:var(--graphite);stroke-width:1.1}.graph-edge{fill:none;stroke:var(--graphite);stroke-width:1;marker-end:url(#arrow)}.edge-text{font:8px var(--mono);fill:var(--muted)}.scope-boundary{fill:#f0f1e94d;stroke:var(--graphite);stroke-dasharray:4 4}.scope-label{font:8px var(--mono);letter-spacing:.7px;fill:var(--muted)}.selected-edge{stroke:var(--state,var(--ink));stroke-width:1.8;marker-end:url(#state-arrow)}.graph-node.target rect{stroke:var(--state,var(--graphite));fill:var(--state-bg,var(--paper))}.graph-node.target .node-title,.graph-node.target .node-type{fill:var(--state,var(--ink))}.graph-legend{display:flex;align-items:center;gap:19px;padding:10px 18px;border-top:1px solid var(--line);font:9px var(--mono);color:var(--muted)}.legend-line{display:inline-block;width:18px;border-top:1px solid var(--graphite);vertical-align:middle;margin-right:5px}.legend-line.dashed{border-top-style:dashed}.graph-details{min-height:54px;padding:12px 18px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);display:flex;align-items:center;gap:12px}.graph-details strong{color:var(--ink);font-weight:500;flex-shrink:0}.graph-details span{overflow-wrap:anywhere}.relations{border-top:1px solid var(--line);padding:9px 18px;font:10px var(--mono)}.relations summary{cursor:pointer;color:var(--muted)}.relations ul{padding-left:18px;line-height:1.8}.stream-controls{padding:12px;display:grid;grid-template-columns:1fr 120px;gap:8px;border-bottom:1px solid var(--line)}.search-wrap{position:relative;min-width:0}.search-wrap .icon{position:absolute;left:9px;top:10px;color:var(--muted)}.search-wrap input{width:100%;font-size:11px;padding-left:30px}.stream-controls select{font-size:10px;padding:7px}.stream-columns{padding:8px 14px;display:grid;grid-template-columns:60px 1fr;gap:10px;font:8px var(--mono);color:var(--muted);letter-spacing:.5px;border-bottom:1px solid var(--line)}.stream-columns span:last-child{display:flex;justify-content:space-between}.stream-feed{height:439px;overflow:auto;scrollbar-width:thin}.event-row{display:grid;grid-template-columns:60px minmax(0,1fr);gap:10px;width:100%;border:0;border-bottom:1px solid var(--line);padding:14px;text-align:left;white-space:normal;position:relative;background:transparent}.event-row:hover{background:var(--wash)}.event-row[aria-pressed=true]{background:var(--wash)}.event-row[aria-pressed=true]::before{content:'';position:absolute;inset:0 auto 0 0;width:3px;background:var(--ink)}.event-time{font:9px var(--mono);color:var(--muted);padding-top:3px}.event-body{min-width:0}.event-top{display:flex;justify-content:space-between;gap:5px;align-items:center}.event-agent{font:10px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.event-top .badge{font-size:8px;padding:2px 4px;letter-spacing:0;gap:4px}.event-action{margin-top:5px;font:11px var(--mono);overflow-wrap:anywhere}.event-reason{margin-top:3px;font-size:10px;color:var(--muted);overflow-wrap:anywhere}.stream-foot{display:flex;justify-content:space-between;gap:10px;padding:11px 14px;border-top:1px solid var(--line);font:9px var(--mono);color:var(--muted)}.empty{padding:36px 22px;color:var(--muted);font-size:12px;line-height:1.8}.empty strong{display:block;color:var(--ink);font-weight:500;margin-bottom:5px}
+.inspector{margin-top:20px}.inspector .panel-head{min-height:54px;padding-top:12px;padding-bottom:12px}.inspector-tools{margin-left:auto;display:flex;align-items:center;gap:7px}.inspector-tools .mono{font-size:10px;color:var(--muted)}.tabs{display:flex;border-bottom:1px solid var(--line);padding:0 18px;gap:24px;overflow:auto}.tabs button{border:0;border-bottom:2px solid transparent;padding:13px 0 11px;font-size:11px;color:var(--muted)}.tabs button[aria-selected=true]{border-bottom-color:var(--ink);color:var(--ink);font-weight:600}.inspector-content{padding:20px;min-height:220px}.inspector-meta{display:flex;justify-content:space-between;gap:15px;margin-bottom:17px;align-items:center}.inspector-meta .meta-title{font:13px var(--mono)}.provenance{font:9px var(--mono);color:var(--muted);border:1px solid var(--line);padding:3px 6px;display:inline-block}.detail-grid{display:grid;grid-template-columns:1.1fr 1.6fr 1fr;gap:28px}.detail-column+.detail-column{border-left:1px solid var(--line);padding-left:28px}.detail-row{display:flex;justify-content:space-between;gap:16px;margin-top:9px;align-items:baseline;font-size:11px}.detail-row>span:first-child{color:var(--muted);flex-shrink:0}.detail-row code{text-align:right}.detail-list{margin:8px 0 0;list-style:none;padding:0;font:10px/1.8 var(--mono);overflow-wrap:anywhere}.detail-list li::before{content:'↳';color:var(--muted);margin-right:8px}.detail-title{font:9px var(--mono);letter-spacing:.7px;color:var(--muted);text-transform:uppercase;margin-top:16px}.detail-title:first-child{margin-top:0}.inspector-note{margin-top:17px;padding-top:11px;border-top:1px solid var(--line);font-size:10px;color:var(--muted)}.grants{width:100%;border-collapse:collapse;font-size:11px}.grants th{text-align:left;font:9px var(--mono);text-transform:uppercase;letter-spacing:.6px;color:var(--muted);padding:0 12px 10px}.grants td{padding:10px 12px;border-top:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}.grants td:first-child{width:22%}.grants td:nth-child(2){width:46%;font-family:var(--mono);font-size:10px}.table-scroll{overflow:auto}.consequence-scroll{overflow:auto;padding:10px 0}.consequence-chain{display:grid;grid-template-columns:repeat(6,minmax(155px,1fr));gap:20px;min-width:1030px}.consequence-step{position:relative;border:1px solid var(--line);padding:13px;min-height:104px}.consequence-step:not(:last-child)::after{content:'→';position:absolute;right:-16px;top:40px;color:var(--muted);font-family:var(--mono)}.consequence-step strong{display:block;font:11px/1.6 var(--mono);margin-top:10px;overflow-wrap:anywhere}.consequence-step p{font-size:10px;color:var(--muted);margin-top:5px}.checkpoint{display:flex;gap:12px;align-items:center;margin-top:12px;font-size:11px}.tree{display:flex;align-items:stretch;gap:22px;overflow:auto;padding:8px 0}.tree-node{border:1px solid var(--line);min-width:220px;padding:14px;position:relative}.tree-node:not(:last-child)::after{content:'→';position:absolute;right:-17px;top:34px;font-family:var(--mono)}.tree-node strong{display:block;font:12px var(--mono);margin:8px 0}.tree-node p{font-size:10px;color:var(--muted)}.timeline{display:grid;grid-template-columns:minmax(250px,1fr) minmax(250px,1fr);gap:30px}.timeline-item{border-left:1px solid var(--line);padding:0 0 15px 17px;position:relative}.timeline-item::before{content:'';position:absolute;left:-3px;top:6px;width:5px;height:5px;background:var(--graphite)}.timeline-item time{font:9px var(--mono);color:var(--muted)}.timeline-item p{font-size:11px;margin-top:4px}.timeline-item code{color:var(--muted);font-size:9px}.evidence-dl{margin:0}.evidence-dl dt{font:9px var(--mono);color:var(--muted);margin-top:10px}.evidence-dl dt:first-child{margin-top:0}.evidence-dl dd{margin:3px 0 0;font:10px/1.6 var(--mono);overflow-wrap:anywhere}.app-footer{display:flex;justify-content:space-between;gap:20px;padding:19px 0 22px;color:var(--muted);font:9px var(--mono)}.footer-principle{display:flex;gap:18px}.footer-principle b{font-weight:500;color:var(--ink)}dialog{width:430px;max-width:calc(100% - 32px);padding:25px;border:1px solid var(--graphite);background:var(--bg);color:var(--ink)}dialog::backdrop{background:#24272266}dialog h2{font-size:19px;margin-bottom:10px}dialog p{font-size:12px;color:var(--muted);margin-bottom:20px}dialog label{display:block;font:10px var(--mono);margin:15px 0 7px}dialog input{width:100%;font-family:var(--mono);font-size:12px}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}.dialog-note{font-size:10px!important;margin-top:10px;margin-bottom:0!important}.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 18px;background:var(--ink);color:var(--bg);font:11px var(--mono);z-index:20;max-width:calc(100% - 24px)}
+.graph-activity{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);min-height:42px;flex-wrap:wrap}.graph-activity-status{flex:1;min-width:150px;font:9px/1.6 var(--mono);color:var(--muted);display:flex;align-items:center;gap:8px}.activity-dot{display:inline-block;width:5px;height:5px;background:var(--graphite);flex-shrink:0}.graph-activity .quiet-btn{font:9px var(--mono);padding:5px 7px}.graph-pulse{fill:none;stroke:var(--ink);stroke-width:2;pointer-events:none}.graph-pulse.selected-edge{stroke:var(--state);marker-end:none}.graph-node[data-change=added] .node-icon{fill:var(--ink);stroke:var(--ink)}.graph-node[data-change=updated] .node-icon{stroke:var(--ink);stroke-width:2}
+@media(min-width:1500px){.stream-feed{height:510px}.authority-svg{max-height:560px}.graph-canvas{display:flex;justify-content:center}}
+@media(max-width:1150px){.app-header{gap:18px;padding:0 22px}.app-main{padding:24px 22px 0}.title-copy{display:block}.title-copy p{margin-top:6px}.workspace{grid-template-columns:minmax(0,1.65fr) minmax(350px,1fr);gap:14px}.chain-step{padding:14px}.chain-value{font-size:11px}.detail-grid{gap:18px}.detail-column+.detail-column{padding-left:18px}}
+@media(max-width:999px){.workspace{grid-template-columns:1fr}.stream-feed{height:350px}.header-location,.header-divider,.connection-label{display:none}.execution{grid-template-columns:repeat(5,minmax(160px,1fr));min-width:870px}.execution-scroll{overflow:auto}.decision-summary{flex-wrap:wrap}.decision-id{margin-left:35px}.detail-grid{grid-template-columns:1fr 1fr}.detail-column:last-child{grid-column:1/-1;border-left:0;border-top:1px solid var(--line);padding:15px 0 0}.tabs{gap:22px}.footer-principle{gap:10px;flex-wrap:wrap}.authority-svg{min-width:710px}.stream-columns{grid-template-columns:70px 1fr}.event-row{grid-template-columns:70px 1fr}}
+@media(max-width:600px){.app-header{height:auto;min-height:65px;padding:13px 16px;flex-wrap:wrap;gap:12px}.brand{font-size:17px}.header-right{gap:7px}.header-right>.quiet-btn{padding:6px}.connection-word{display:none}.app-main{padding:22px 14px 0}.titlebar{align-items:flex-start;margin-bottom:20px}.title-copy h1{font-size:23px}.title-copy p{font-size:11px;max-width:210px}.title-actions{gap:5px;flex-direction:column;align-items:flex-end}.title-actions button{font-size:10px;padding:6px 8px}.sample-tag{font-size:8px}.panel-head{padding:13px}.panel-head h2{font-size:12px}.panel-subtitle{font-size:9px}.graph-legend{gap:12px;font-size:8px;flex-wrap:wrap}.graph-details{align-items:flex-start;flex-direction:column;gap:5px}.decision-summary{padding:13px}.decision-id{margin-left:0;font-size:9px}.summary-text{font-size:11px}.summary-code{font-size:9px}.inspector-tools .mono{display:none}.tabs{padding:0 13px;gap:20px}.inspector-content{padding:15px}.detail-grid{grid-template-columns:1fr}.detail-column+.detail-column{padding:14px 0 0;border-left:0;border-top:1px solid var(--line)}.detail-column:last-child{grid-column:auto}.inspector-meta{align-items:flex-start;flex-direction:column;gap:7px}.timeline{grid-template-columns:1fr}.app-footer{flex-direction:column;gap:12px}.footer-principle{flex-direction:column;gap:5px}.grants{min-width:580px}.checkpoint{align-items:flex-start;flex-direction:column}.graph-tools .quiet-btn{font-size:9px}.event-top .badge{font-size:8px}.stream-controls{grid-template-columns:1fr 118px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<header>
-  <div class="brand"><div class="logo"></div><div><b>agent-plane</b><br><span>control plane console</span></div></div>
-  <span class="dot" id="hdot" title="health"></span>
-  <span class="grow"></span>
-  <input id="bearer" placeholder="Bearer token  (usage)">
-  <input id="admin" placeholder="X-Admin-Token  (audit · policies)">
-  <label class="toggle"><input type="checkbox" id="auto" checked> live</label>
-  <button class="btn" onclick="refreshAll()">Refresh</button>
+<header class="app-header">
+  <div class="brand"><span>agent-plane</span></div>
+  <span class="header-divider"></span><span class="header-location">Control console <span class="muted">/</span> Runtime authority</span>
+  <div class="header-right"><span class="connection-label" id="connection-label"><span class="square"></span> LOCAL DEMO</span><div class="mode-switch" role="group" aria-label="Data source"><button id="demo-mode" aria-pressed="true">DEMO</button><button id="live-mode" aria-pressed="false">LIVE</button></div><button class="quiet-btn" id="connection-button" aria-label="Connection settings"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1v14M8 1v14M13 1v14M1 5h4M6 11h4M11 6h4"/></svg><span class="connection-word">Connection</span></button></div>
 </header>
-
-<main>
-  <!-- stat strip -->
-  <section class="stats" id="stats"></section>
-
-  <!-- try it -->
-  <section class="panel">
-    <h2>Try it <span class="sp"></span><span class="dimhint">fire a governed request with your Bearer token - watch it appear below</span></h2>
-    <div class="pbody" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <button class="btn" onclick="tryEdge('/v1/tools/invoke',{tool:'search_kb',arguments:{q:'hello'}},'tool · search_kb')">▶ Tool call</button>
-      <button class="btn" onclick="tryEdge('/v1/retrieve',{source:'kb',query:'password reset'},'retrieve · kb')">▶ Retrieve</button>
-      <button class="btn" onclick="tryEdge('/v1/chat/completions',{model:'gpt-4.1',messages:[{role:'user',content:'hi'}]},'model · gpt-4.1')">▶ Model call</button>
-      <button class="btn" onclick="tryEdge('/v1/tools/invoke',{tool:'wire_transfer',arguments:{amount:100}},'tool · wire_transfer')">▶ Wire transfer (needs approval)</button>
-      <span id="trystatus" class="dimhint" style="margin-left:auto"></span>
-    </div>
-  </section>
-
-  <!-- topology -->
-  <section class="panel">
-    <h2>Topology <span class="sp"></span><span class="dimhint" id="topohint">decisions across edges (from the signed audit chain)</span></h2>
-    <div class="pbody topowrap">
-      <svg id="topo" viewBox="0 0 960 430" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">
-        <defs>
-          <linearGradient id="gHub" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#123243"/><stop offset="1" stop-color="#0e2330"/>
-          </linearGradient>
-          <linearGradient id="gNode" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#141b2b"/><stop offset="1" stop-color="#101626"/>
-          </linearGradient>
-        </defs>
-
-        <!-- caller -->
-        <g>
-          <rect class="nodebox" x="34" y="178" width="150" height="74" rx="12"/>
-          <text class="lbl" x="109" y="208" text-anchor="middle">Agent / User</text>
-          <text class="sub" x="109" y="226" text-anchor="middle">caller</text>
-        </g>
-        <path class="link active" d="M184 215 H300"/>
-
-        <!-- hub -->
-        <g>
-          <rect class="hub" x="300" y="138" width="270" height="154" rx="16"/>
-          <text class="hubt" x="435" y="170" text-anchor="middle">CONTROL PLANE</text>
-          <text class="hubp" x="435" y="198" text-anchor="middle">⬡  Policy engine - deterministic</text>
-          <text class="hubp" x="435" y="220" text-anchor="middle">⬡  Identity - verified delegation</text>
-          <text class="hubp" x="435" y="242" text-anchor="middle">⬡  Audit - one signed chain</text>
-          <text class="sub" x="435" y="270" text-anchor="middle" id="hub-pv">policy -</text>
-        </g>
-
-        <!-- links (hub right edge x=570,y=215 -> edge node left x=700) -->
-        <path class="link" id="l-model" d="M570 200 C 640 120, 660 70, 700 70"/>
-        <path class="link" id="l-tool"  d="M570 208 C 645 165, 660 145, 700 145"/>
-        <path class="link" id="l-rag"   d="M570 215 H700"/>
-        <path class="link" id="l-a2a"   d="M570 222 C 645 265, 660 285, 700 285"/>
-        <path class="link" id="l-egress" d="M570 230 C 640 320, 660 360, 700 360"/>
-
-        <!-- edge nodes -->
-        <g id="n-model"><rect class="nodebox" x="700" y="44" width="226" height="54" rx="12"/>
-          <text class="lbl" x="716" y="70">Model</text><text class="sub" x="716" y="88">/v1/chat/completions · LLMs</text>
-          <text class="count" id="c-model" x="910" y="78">-</text></g>
-        <g id="n-tool"><rect class="nodebox" x="700" y="118" width="226" height="54" rx="12"/>
-          <text class="lbl" x="716" y="144">Tool / MCP</text><text class="sub" x="716" y="162">/v1/tools/invoke · APIs</text>
-          <text class="count" id="c-tool" x="910" y="152">-</text></g>
-        <g id="n-rag"><rect class="nodebox" x="700" y="192" width="226" height="54" rx="12"/>
-          <text class="lbl" x="716" y="218">Knowledge / RAG</text><text class="sub" x="716" y="236">/v1/retrieve · identity-aware</text>
-          <text class="count" id="c-rag" x="910" y="226">-</text></g>
-        <g id="n-a2a"><rect class="nodebox" x="700" y="266" width="226" height="54" rx="12"/>
-          <text class="lbl" x="716" y="292">Agent → Agent</text><text class="sub" x="716" y="310">/v1/agents/delegate · scoped</text>
-          <text class="count" id="c-a2a" x="910" y="300">-</text></g>
-        <g id="n-egress" class="planned"><rect class="nodebox" x="700" y="340" width="226" height="54" rx="12"/>
-          <text class="lbl" x="716" y="366">Egress / Data</text><text class="sub" x="716" y="384">planned</text></g>
-      </svg>
-    </div>
-  </section>
-
-  <!-- feed + side -->
-  <section class="two">
-    <div class="panel">
-      <h2>Decision feed <span class="sp"></span><span class="dimhint" id="feedcount"></span></h2>
-      <div class="pbody feed" id="feed"><span class="mut">enter an admin token to stream the signed audit chain</span></div>
-    </div>
-    <div>
-      <div class="panel" style="margin-bottom:20px">
-        <h2>Policies</h2>
-        <div class="pbody" id="policies"><span class="mut">needs admin token</span></div>
-      </div>
-      <div class="panel">
-        <h2>Your usage</h2>
-        <div class="pbody" id="usage"><span class="mut">needs bearer token</span></div>
-      </div>
-    </div>
-  </section>
-
-  <p class="dimhint" style="text-align:center">API: <a href="/docs" target="_blank">/docs</a> · <a href="/redoc" target="_blank">/redoc</a> - every decision here is deterministic, and the audit chain is hash-linked &amp; signed (🔒).</p>
+<main class="app-main">
+  <div class="titlebar"><div class="title-copy"><h1>Runtime authority</h1><p>Every action. Explicit authority. Traceable decisions.</p></div><div class="title-actions"><span class="sample-tag" id="source-label">SAMPLE EVIDENCE</span><button id="refresh-button"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 6a5 5 0 1 0 0 5M13 2v4H9"/></svg>Refresh</button></div></div>
+  <section aria-label="Selected execution"><div class="execution-scroll" tabindex="0" role="region" aria-label="Execution chain"><div class="execution" id="execution"></div></div><div class="decision-summary" id="decision-summary"></div></section>
+  <p id="status-message" class="status-message" role="status" hidden></p>
+  <div class="workspace">
+    <section class="panel" aria-labelledby="graph-title"><div class="panel-head"><span class="section-num">01</span><div><h2 id="graph-title">Dynamic Authority Graph</h2><p class="panel-subtitle">Where authority begins. Where its boundaries end.</p></div><div class="graph-tools"><button class="quiet-btn" id="fit-graph"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 6V1h5M10 1h5v5M15 10v5h-5M6 15H1v-5"/></svg>Fit graph</button></div></div><div class="graph-canvas" id="graph-canvas"></div><div class="graph-legend"><span><i class="legend-line"></i>Authority path</span><span><i class="legend-line dashed"></i>Delegated boundary</span><span id="graph-provenance">Illustrative relationships</span></div><div class="graph-details" id="graph-details" aria-live="polite"></div><details class="relations"><summary>Authority relationships · text view</summary><ul id="relationship-list"></ul></details></section>
+    <section class="panel" aria-labelledby="stream-title"><div class="panel-head"><span class="section-num">02</span><div><h2 id="stream-title">Live Decision Stream</h2><p class="panel-subtitle" id="stream-subtitle">Sample runtime events</p></div><span class="head-meta"><button id="pause-button" class="quiet-btn" aria-pressed="false" aria-label="Pause live polling" disabled>Ⅱ Pause</button></span></div><div class="stream-controls"><div class="search-wrap"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.5"/><path d="m10 10 4 4"/></svg><input type="search" id="event-search" aria-label="Search runtime events" placeholder="Search agent, action, ID…"></div><select id="decision-filter" aria-label="Filter by decision"><option value="all">All decisions</option><option value="allow">Allow</option><option value="deny">Deny</option><option value="approval_required">Approval required</option></select></div><div class="stream-columns"><span>TIME · UTC</span><span>AGENT / ACTION <span>DECISION</span></span></div><div class="stream-feed" id="stream-feed" aria-label="Runtime events"></div><div class="stream-foot"><span id="stream-count"></span><span id="stream-state">FIXED DEMO · 08 EVENTS</span></div></section>
+  </div>
+  <section class="panel inspector" aria-labelledby="inspector-title"><div class="panel-head"><span class="section-num">03</span><h2 id="inspector-title">Event Inspector</h2><div class="inspector-tools"><span class="mono" id="inspector-event-id"></span><button class="quiet-btn" id="copy-id" aria-label="Copy selected decision ID"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5h9v9H5zM2 11V2h9"/></svg>Copy ID</button><button class="quiet-btn" id="export-evidence"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1v9m-3-3 3 3 3-3M2 10v4h12v-4"/></svg>Export</button></div></div><div class="tabs" role="tablist" aria-label="Event evidence"><button id="tab-lease" role="tab" aria-controls="inspector-content" aria-selected="true" tabindex="0" data-tab="lease">Lease Inspector</button><button id="tab-grant" role="tab" aria-controls="inspector-content" aria-selected="false" tabindex="-1" data-tab="grant">Action-Grant Viewer</button><button id="tab-consequence" role="tab" aria-controls="inspector-content" aria-selected="false" tabindex="-1" data-tab="consequence">Consequence Map</button><button id="tab-delegation" role="tab" aria-controls="inspector-content" aria-selected="false" tabindex="-1" data-tab="delegation">Delegation Tree</button><button id="tab-audit" role="tab" aria-controls="inspector-content" aria-selected="false" tabindex="-1" data-tab="audit">Audit Timeline</button></div><div class="inspector-content" id="inspector-content" role="tabpanel" aria-labelledby="tab-lease" tabindex="0"></div></section>
+  <footer class="app-footer"><div class="footer-principle"><span><b>AUTHORITY</b> Can the agent do this?</span><span><b>CONSEQUENCE</b> What could happen if it does?</span><span><b>DECISION</b> Connects the two.</span></div><span>READ-ONLY CONSOLE <span aria-hidden="true">/</span> <a href="/docs" target="_blank" rel="noopener">API reference ↗</a></span></footer>
 </main>
-
+<dialog id="connection-dialog" aria-labelledby="connection-title" aria-describedby="connection-description"><form id="connection-form"><h2 id="connection-title">Connect to runtime</h2><p id="connection-description">Inspect recorded decisions and current authority leases from the server shown below. Use Demo to explore sample events without connecting.</p><label for="runtime-origin">RUNTIME URL</label><input id="runtime-origin" readonly aria-readonly="true"><label for="admin-token">X-ADMIN-TOKEN</label><input id="admin-token" type="password" autocomplete="off" placeholder="Enter the server’s admin token" aria-describedby="token-help connection-privacy" required><p class="dialog-note" id="token-help">Use the server’s ADMIN_TOKEN value. Agent bearer tokens are separate.</p><p class="dialog-note" id="connection-privacy">Held in memory for this page only. This console makes read-only requests.</p><div class="dialog-actions"><button type="button" id="disconnect-button">Disconnect</button><button type="button" id="cancel-connection">Cancel</button><button type="submit" class="primary">Connect</button></div></form></dialog>
+<div id="toast" class="toast" role="status" hidden></div>
 <script>
-const $=id=>document.getElementById(id);
-const bearer=()=>$("bearer").value.trim(), admin=()=>$("admin").value.trim();
-for(const k of ["bearer","admin"]){ $(k).value=localStorage.getItem("ap_"+k)||"";
-  $(k).addEventListener("input",()=>{localStorage.setItem("ap_"+k,$(k).value); refreshAll();}); }
-const esc=s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
-async function jget(p,h={}){ try{const r=await fetch(p,{headers:h}); return {ok:r.ok,status:r.status,body:await r.json().catch(()=>({}))};}catch(e){return {ok:false,status:0,body:{}};} }
-const EDGES=["model","tool","rag","a2a"];
-const edgeKey=mr=> mr?.startsWith("tool:")?"tool" : mr?.startsWith("rag:")?"rag" : mr?.startsWith("a2a:")?"a2a" : "model";
-
-function setStats(o){
-  const cards=[
-    ["decisions",o.total,""],["allowed",o.allow,"allow"],["denied",o.deny,"deny"],
-    ["approval",o.appr,"appr"],["tenants",o.tenants,""],["policy bundle",o.pv,"small"]
-  ];
-  $("stats").innerHTML=cards.map(([k,v,c])=>`<div class="stat"><div class="k">${k}</div><div class="v ${c}">${esc(v??"-")}</div></div>`).join("");
+'use strict';
+// All displayed runtime strings pass through esc; no remote markup is trusted.
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const UNKNOWN = 'Not recorded';
+const states = {allow:'ALLOW', deny:'DENY', approval_required:'APPROVAL REQUIRED'};
+const stateClass = decision => Object.hasOwn(states, decision) ? decision : '';
+const badge = decision => `<span class="badge ${stateClass(decision)}"><span class="square"></span>${esc(states[decision] || decision || UNKNOWN)}</span>`;
+const list = values => values?.length ? `<ul class="detail-list">${values.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>` : `<p class="muted" style="margin-top:8px;font-size:11px">${UNKNOWN}</p>`;
+const row = (label, value) => `<div class="detail-row"><span>${esc(label)}</span><code>${esc(value ?? UNKNOWN)}</code></div>`;
+const shorten = (value, max=26) => { const s=String(value ?? UNKNOWN); return s.length>max ? s.slice(0,max-1)+'…' : s; };
+function dateOf(value){if(!value)return null;const s=String(value);const d=new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(s)?s:s+'Z');return Number.isNaN(d.getTime())?null:d;}
+function timeOf(value){return dateOf(value)?.toISOString().slice(11,19) || '—';}
+function fullDate(value){return dateOf(value)?.toISOString().replace('T',' ').replace(/\.\d+Z$/,' UTC') || UNKNOWN;}
+const reasonText = {
+ RESOURCE_PROTECTED:'The target is protected by the authority lease.',
+ ACTION_WITHIN_TASK_AUTHORITY:'The action is within the agent’s task authority.',
+ ACTION_REQUIRES_APPROVAL:'Human approval is required before this action can proceed.',
+ LEASE_EXPIRED:'The task authority lease has expired.',
+ LEASE_REVOKED:'The task authority lease has been revoked.',
+ RESOURCE_OUTSIDE_DELEGATED_SCOPE:'The target is outside the delegated resource scope.',
+ ACTION_NOT_AUTHORIZED:'The action is not included in the task authority.',
+ ACTION_OUTSIDE_CAPABILITY_MANIFEST:'The action exceeds the agent’s capability manifest.',
+ ACTION_LIMIT_EXCEEDED:'The action has reached its permitted use limit.',
+ NO_ACTIVE_LEASE:'No authority lease is recorded for this agent and task.'
+};
+// Demo fixtures are self-contained examples, never mixed into live evidence.
+const demoClock = '2026-09-10T14:32:08Z';
+const repoLease = {id:'lease-clean-branches',task:'remediate-stale-branches',subject:'repo-agent',resources:['github://acme/agent-plane-demo','github://acme/agent-plane-demo/*'],actions:['repository.read','branch.list','branch.delete'],protected_resources:['github://acme/agent-plane-demo/branches/main'],max_uses:{'branch.delete':5},require_approval:[],expires_at:'2026-09-10T15:00:00Z',maximum_impact:'reversible',child_authority:'subset_only',revoked:false};
+const stagingLease = {id:'lease-fix-staging',task:'fix-staging-checkout',subject:'devops-agent',resources:['staging/*'],actions:['deployment.read','deployment.restart'],protected_resources:['production/*'],max_uses:{},require_approval:[],expires_at:'2026-09-10T15:30:00Z',maximum_impact:'reversible',child_authority:'subset_only',revoked:false};
+const approvalLease = {...repoLease,id:'lease-release-cleanup',task:'review-release-branches',subject:'release-agent',require_approval:['branch.delete']};
+const childLease = {...repoLease,id:'lease-branch-reader',subject:'branch-reader',actions:['branch.list'],resources:['github://acme/agent-plane-demo/branches/*'],max_uses:{},child_authority:'none',expires_at:'2026-09-10T14:45:00Z'};
+function demoEvent(index, agent, action, resource, decision, reason, lease, extra={}){
+ const stamp=new Date(dateOf(demoClock).getTime()-index*17000).toISOString();
+ const id=`az_demo_${String(8421-index).padStart(6,'0')}`;
+ const raw={decision_id:id,created_at:stamp,user_id:agent,agent_id:agent,tenant:'acme',model_requested:`authorize:${action}`,model_used:resource,decision,reason,rules_matched:[lease.id],policy_version:null,event_hash:null,prev_hash:null,signature:null};
+ return {id,time:stamp,agent,action,target:resource,decision,reason,leaseId:lease.id,lease,leaseSource:'sample snapshot',task:lease.task,raw,provenance:'sample',human:'Morgan Chen',policy:'Repository protection · v3.2',capabilities:agent==='devops-agent'?['deployment.read','deployment.restart','deployment.delete']:['repository.read','branch.list','branch.delete'],service:agent==='devops-agent'?'Kubernetes · staging':'GitHub · acme',tool:agent==='devops-agent'?'deployment adapter':'github adapter',parent:null,consequence:null,...extra};
 }
-
-function paintTopo(counts){
-  for(const e of EDGES){
-    const c=counts[e]||0;
-    $("c-"+e).textContent=c;
-    const link=$("l-"+e), node=$("n-"+e);
-    link.classList.toggle("active",c>0);
-    node.classList.toggle("edge-on",c>0);
+const DEMO_EVENTS = [
+ demoEvent(0,'repo-agent','branch.delete','github://acme/agent-plane-demo/branches/main','deny','RESOURCE_PROTECTED',repoLease,{consequence:['Default branch removed','Build and release references break','High · delivery interruption']}),
+ demoEvent(1,'repo-agent','branch.list','github://acme/agent-plane-demo/branches','allow','ACTION_WITHIN_TASK_AUTHORITY',repoLease,{consequence:['Branch metadata returned','Cleanup candidates identified','Low · read-only access']}),
+ demoEvent(2,'release-agent','branch.delete','github://acme/agent-plane-demo/branches/release-v1','approval_required','ACTION_REQUIRES_APPROVAL',approvalLease,{consequence:['Release branch removed','Release references need recovery','Moderate · recoverable disruption']}),
+ demoEvent(3,'devops-agent','deployment.restart','staging/checkout','allow','ACTION_WITHIN_TASK_AUTHORITY',stagingLease,{policy:'Staging operations · v2.1',consequence:['Checkout pods restarted','Brief staging unavailability','Moderate · reversible restart']}),
+ demoEvent(4,'devops-agent','deployment.restart','production/checkout','deny','RESOURCE_OUTSIDE_DELEGATED_SCOPE',stagingLease,{policy:'Staging operations · v2.1',service:'Kubernetes · production',consequence:['Production pods restarted','Customer checkout interrupted','High · service availability']}),
+ demoEvent(5,'branch-reader','branch.list','github://acme/agent-plane-demo/branches/*','allow','ACTION_WITHIN_TASK_AUTHORITY',childLease,{parent:repoLease,consequence:['Branch names returned','Inventory passed to parent agent','Low · scoped metadata access']}),
+ demoEvent(6,'repo-agent','branch.delete','github://acme/agent-plane-demo/branches/stale-fix','deny','LEASE_EXPIRED',{...repoLease,id:'lease-cleanup-expired',expires_at:'2026-09-10T14:00:00Z'},{consequence:['Stale branch removed','Branch reference no longer available','Low · recoverable reference']}),
+ demoEvent(7,'repo-agent','repository.read','github://acme/agent-plane-demo','allow','ACTION_WITHIN_TASK_AUTHORITY',repoLease,{consequence:['Repository metadata returned','Task context established','Low · read-only access']})
+];
+const state={mode:'demo',events:DEMO_EVENTS,selected:DEMO_EVENTS[0],tab:'lease',node:null,query:'',filter:'all',paused:false,token:'',generation:0,busy:false,controller:null,detailController:null,detailVersion:0,connection:'demo',notice:'',policies:null,health:null,lastUpdated:null,leaseStatus:'',nodes:{}};
+function adaptLive(raw){
+ const authorization=String(raw.model_requested||'').startsWith('authorize:');
+ const gateway=gatewayContext(raw);
+ return {id:String(raw.decision_id||''),time:raw.created_at,agent:raw.agent_id||raw.user_id||UNKNOWN,action:authorization?raw.model_requested.slice(10):(raw.model_requested||UNKNOWN),target:authorization?(raw.model_used||UNKNOWN):UNKNOWN,decision:raw.decision,reason:raw.reason||UNKNOWN,leaseId:authorization&&Array.isArray(raw.rules_matched)&&typeof raw.rules_matched[0]==='string'?raw.rules_matched[0]:null,lease:null,leaseSource:null,task:gateway?.task||null,raw,provenance:'recorded',human:null,policy:raw.policy_version||null,capabilities:null,service:null,tool:gateway?.tool||null,parent:null,consequence:null,gateway};
+}
+function gatewayContext(raw){return (raw.obligations_applied||[]).find(item=>item&&typeof item==='object'&&item.schema==='agent-plane.gateway.v1');}
+function syncGatewayEvidence(){
+ const e=state.selected;if(state.mode!=='live'||!e?.gateway)return;
+ const receipts=(state.rawRecords||[]).filter(raw=>{const c=gatewayContext(raw);return c?.phase==='execution'&&c.admission_id===e.id;});
+ e.receipts=Array.from(new Map([...receipts,...(e.receipts||[])].map(r=>[r.decision_id,r])).values()).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
+ e.executionStatus=gatewayContext(e.receipts[0]||{})?.execution_status||(e.decision==='allow'?'Not recorded':e.gateway.execution_status);
+}
+function gatewayEvidence(e){
+ if(!e.gateway)return '';
+ const snapshot=e.gateway.lease_snapshot;
+ return `<div class="inspector-note"><h3>Gateway execution evidence</h3><p class="mono">${esc(e.executionStatus||'Not recorded')} · ${esc(e.gateway.tool)} · task ${esc(e.gateway.task)}</p><p>Authorization and execution are separate records. Dispatch started does not confirm completion.</p>${snapshot?`<p>Recorded lease snapshot: <code>${esc(snapshot.id)}</code> · actions <code>${esc((snapshot.actions||[]).join(', '))}</code> · resources <code>${esc((snapshot.resources||[]).join(', '))}</code>. Current lease context above is fetched separately.</p>`:''}${(e.receipts||[]).map(r=>`<p><code>${esc(r.decision_id)}</code> · ${esc(gatewayContext(r).execution_status)} · ${esc(fullDate(r.created_at))}</p>`).join('')}</div>`;
+}
+function leaseValidity(e){
+ if(!e.lease)return UNKNOWN;
+ if(e.lease.revoked)return 'Revoked';
+ const expiry=dateOf(e.lease.expires_at), at=e.provenance==='sample'?dateOf(e.time):new Date();
+ return expiry&&expiry<=at?'Expired':expiry?'Within validity period':'No expiry configured';
+}
+function provenanceLabel(e){return e.provenance==='sample'?'SAMPLE SNAPSHOT':'CURRENT LEASE · NOT HISTORICAL';}
+function selectedEvent(){return state.selected;}
+function renderExecution(){
+ const e=selectedEvent();
+ const parts=e?[
+  ['01 / Agent',e.agent,e.raw.tenant?`Tenant · ${e.raw.tenant}`:'Identity as recorded'],
+  ['02 / Task',e.task||UNKNOWN,e.gateway?'Recorded task binding':e.provenance==='sample'?'Task-bound authority':e.lease?'From current lease':'No task in audit payload'],
+  ['03 / AuthorityLease',e.leaseId||UNKNOWN,e.lease?leaseValidity(e):state.leaseStatus||'No lease evidence'],
+  ['04 / Proposed Action',e.action,e.target],
+  ['05 / Decision',badge(e.decision),'Runtime authorization']
+ ]:[['01 / Agent','—',''],['02 / Task','—',''],['03 / AuthorityLease','—',''],['04 / Proposed Action','—',''],['05 / Decision','—','']];
+ $('execution').innerHTML=parts.map(([label,value,caption],i)=>`<div class="chain-step"><div class="eyebrow">${esc(label)}</div><div class="chain-value">${i===4&&e?value:esc(value)}</div><div class="chain-caption">${esc(caption)}</div></div>`).join('');
+ $('decision-summary').className=`decision-summary ${e?stateClass(e.decision):''}`;
+ $('decision-summary').innerHTML=e?`${badge(e.decision)}<div><p class="summary-text">${esc(reasonText[e.reason]||'Inspect the recorded decision and its supporting evidence.')}</p><p class="summary-code">${esc(e.reason)}</p></div><div class="decision-id"><span>${esc(e.id)}</span><span class="muted">${esc(timeOf(e.time))} UTC</span></div>`:'<span class="summary-text">Select a runtime event to inspect its authority and decision.</span>';
+}
+const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
+const graphActivity={snapshot:null,animations:[],timer:null,motion:!motionPreference.matches};
+const activityBar=document.createElement('div');
+activityBar.className='graph-activity';
+activityBar.innerHTML='<div class="graph-activity-status"><span class="activity-dot" aria-hidden="true"></span><span id="graph-activity-text" role="status">Selected authority path</span></div><button class="quiet-btn" id="replay-graph" title="Replay the selected evidence path; no action is executed">Replay path</button><button class="quiet-btn" id="graph-motion" aria-pressed="true">Motion on</button>';
+$('graph-canvas').before(activityBar);
+function stopGraphMotion(){
+ clearTimeout(graphActivity.timer);graphActivity.animations.forEach(animation=>animation.cancel());graphActivity.animations=[];
+ document.querySelectorAll('.graph-pulse').forEach(path=>path.remove());
+}
+function syncGraphMotion(){
+ const enabled=graphActivity.motion&&!motionPreference.matches;
+ $('graph-motion').textContent=motionPreference.matches?'Reduced motion':enabled?'Motion on':'Motion off';
+ $('graph-motion').setAttribute('aria-pressed',String(enabled));
+ $('graph-motion').disabled=motionPreference.matches;
+ if(!enabled)stopGraphMotion();
+}
+function highlightGraph(previous, replay=false){
+ stopGraphMotion();
+ const e=selectedEvent();if(!e)return;
+ const old=previous?.nodes||{}, nodes=state.nodes;
+ const added=Object.keys(nodes).filter(key=>!old[key]);
+ const changed=Object.keys(nodes).filter(key=>old[key]&&JSON.stringify(old[key])!==JSON.stringify(nodes[key]));
+ const removed=Object.keys(old).filter(key=>!nodes[key]);
+ const switched=previous?.id!==e.id;
+ const changes=[added.length&&`${added.length} added`,changed.length&&`${changed.length} updated`,removed.length&&`${removed.length} removed`].filter(Boolean);
+ $('graph-activity-text').textContent=`${e.provenance==='sample'?'Sample':'Evidence'} ${replay?'path replay':switched?'decision selected':'context updated'}${!replay&&previous&&changes.length?' · '+changes.join(' / '):''} · no execution implied`;
+ document.querySelectorAll('[data-node]').forEach(node=>{
+  const key=node.dataset.node;delete node.dataset.change;
+  if(!replay&&previous&&(added.includes(key)||changed.includes(key)))node.dataset.change=added.includes(key)?'added':'updated';
+ });
+ if(!graphActivity.motion||motionPreference.matches||document.hidden)return;
+ const animate=(element,frames,options)=>graphActivity.animations.push(element.animate(frames,options));
+ animate(document.querySelector('.activity-dot'),[{opacity:.35},{opacity:1},{opacity:.35},{opacity:1}],{duration:1400});
+ const boundary=document.querySelector('.scope-boundary'), priorBoundary=previous?.boundary;
+ if(boundary&&!replay){
+  const width=Number(boundary.getAttribute('width'));
+  if(priorBoundary&&priorBoundary!==width)animate(boundary,[{width:`${priorBoundary}px`},{width:`${width}px`}],{duration:650,easing:'ease-out'});
+  else if(previous&&!priorBoundary)animate(boundary,[{opacity:0},{opacity:1}],{duration:900});
+ }
+ document.querySelectorAll('[data-node]').forEach((node,index)=>{
+  const key=node.dataset.node, current=nodes[key], prior=old[key];
+  if(replay||switched||added.includes(key)||changed.includes(key)){
+   animate(node.querySelector('rect'),[{strokeWidth:1},{strokeWidth:2.5},{strokeWidth:1}],{duration:1600,delay:index*45,easing:'ease-out'});
+   if(!replay&&prior&&(prior.x!==current.x||prior.y!==current.y))animate(node,[{transform:`translate(${prior.x}px, ${prior.y}px)`},{transform:`translate(${current.x}px, ${current.y}px)`}],{duration:650,easing:'cubic-bezier(.2,.7,.2,1)'});
+   if(!replay&&previous&&!prior)animate(node,[{opacity:0},{opacity:1}],{duration:650,delay:index*45,fill:'backwards'});
   }
+ });
+ document.querySelectorAll('.graph-edge').forEach((edge,index)=>{
+  const pulse=document.createElementNS('http://www.w3.org/2000/svg','path');
+  pulse.setAttribute('d',edge.getAttribute('d'));pulse.setAttribute('pathLength','100');pulse.setAttribute('aria-hidden','true');
+  pulse.setAttribute('class',`graph-pulse ${edge.classList.contains('selected-edge')?'selected-edge':''}`);
+  pulse.style.strokeDasharray='9 100';pulse.style.opacity='0';edge.after(pulse);
+  animate(pulse,[{strokeDashoffset:9,opacity:0},{opacity:1,offset:.15},{opacity:1,offset:.8},{strokeDashoffset:-100,opacity:0}],{duration:1100,delay:index*90,easing:'linear'});
+ });
+ graphActivity.timer=setTimeout(stopGraphMotion,2600);
 }
-
-function renderFeed(events){
-  $("feedcount").textContent = events.length ? events.length+" recent" : "";
-  if(!events.length){ $("feed").innerHTML='<span class="mut">no decisions yet - call an edge and watch it appear</span>'; return; }
-  $("feed").innerHTML=events.map(e=>{
-    const ek=edgeKey(e.model_requested);
-    const who=`${esc(e.user_id)}${e.agent_id?'<span class="small"> / '+esc(e.agent_id)+'</span>':''}`;
-    return `<div class="ev">
-      <div class="t">${esc((e.created_at||'').slice(11,19))}</div>
-      <div class="who">${who} <span class="tag">${ek}</span> <code>${esc(e.model_requested)}</code>
-        ${e.reason?`<div class="small">${esc(e.reason)}</div>`:''}</div>
-      <div><span class="badge ${esc(e.decision)}">${esc(e.decision)}</span> ${e.signature?'<span title="signed" style="margin-left:6px">🔒</span>':''}</div>
-    </div>`;
-  }).join("");
+function graphNode(key,x,y,w,type,title,sub,detail,extra=''){
+ state.nodes[key]={title,detail,type,sub,x,y,w};
+ return `<g class="graph-node ${extra} ${state.node===key?'selected':''}" role="button" tabindex="0" aria-label="${esc(type+': '+title)}" aria-pressed="${state.node===key}" data-node="${key}" transform="translate(${x} ${y})"><title>${esc(title+' — '+detail)}</title><rect width="${w}" height="58"/><text class="node-type" x="12" y="16">${esc(type.toUpperCase())}</text><text class="node-title" x="12" y="33">${esc(shorten(title,Math.floor((w-22)/6.6)))}</text><text class="node-sub" x="12" y="47">${esc(shorten(sub,Math.floor((w-22)/5)))}</text><path class="node-icon" d="M${w-20} 10h7v7h-7z"/></g>`;
 }
-
-async function refreshAll(){
-  const h=await jget("/healthz");
-  $("hdot").className="dot "+(h.ok?"ok":"bad");
-  $("hub-pv").textContent="policy "+(h.body.policy_version||"-");
-
-  // policies
-  if(admin()){
-    const p=await jget("/admin/policies",{"X-Admin-Token":admin()});
-    $("policies").innerHTML = p.ok
-      ? `<div class="rule"><span class="mut">version</span><code>${esc(p.body.policy_version)}</code></div>`+
-        p.body.rules.map(n=>`<div class="rule"><span>${esc(n)}</span><span class="mut">rule</span></div>`).join("")
-      : `<span class="err">${p.status} - check token</span>`;
-  }
-
-  // usage (caller tenant)
-  if(bearer()){
-    const u=await jget("/v1/usage",{"Authorization":"Bearer "+bearer()});
-    if(u.ok){ const it=u.body.items||[];
-      $("usage").innerHTML = it.length
-        ? it.map(i=>`<div class="rule"><span>${esc(i.edge)} · <span class="mut">${esc(i.resource)}</span></span><span>${i.calls} calls</span></div>`).join("")+
-          `<div class="dimhint" style="margin-top:8px">tenant ${esc(u.body.tenant)}</div>`
-        : '<span class="mut">no usage for this tenant yet</span>';
-    } else $("usage").innerHTML=`<span class="err">${u.status}</span>`;
-  }
-
-  // audit -> stats + topo + feed (global, admin-only)
-  let counts={}, total=0, allow=0, deny=0, appr=0; const tenants=new Set();
-  let events=[];
-  if(admin()){
-    const a=await jget("/v1/audit?limit=50",{"X-Admin-Token":admin()});
-    if(a.ok){
-      events=a.body.events||[];
-      for(const e of events){
-        total++; tenants.add(e.tenant);
-        if(e.decision==="allow")allow++; else if(e.decision==="deny")deny++; else if(e.decision==="approval_required")appr++;
-        const k=edgeKey(e.model_requested); counts[k]=(counts[k]||0)+1;
-      }
-      $("topohint").textContent="decisions across edges (last "+events.length+", from the signed audit chain)";
-    } else { $("topohint").textContent="audit is admin-only - enter the token"; }
-  }
-  setStats({total:admin()?total:"-",allow:admin()?allow:"-",deny:admin()?deny:"-",appr:admin()?appr:"-",
-            tenants:admin()?tenants.size:"-", pv:h.body.policy_version||"-"});
-  paintTopo(counts);
-  renderFeed(events);
+function renderGraph(){
+ const focusedNode=document.activeElement?.getAttribute('data-node');
+ const e=selectedEvent();state.nodes={};
+ $('replay-graph').disabled=!e;
+ if(!e){stopGraphMotion();graphActivity.snapshot=null;$('graph-activity-text').textContent='Awaiting selected evidence';$('graph-canvas').innerHTML='<div class="empty"><strong>No event selected</strong>Connect to a runtime or switch to Demo to explore an authority path.</div>';$('relationship-list').innerHTML='<li>No recorded relationships.</li>';$('graph-details').textContent='Authority evidence appears here.';return;}
+ const sample=e.provenance==='sample', lease=e.lease, excluded=['RESOURCE_PROTECTED','RESOURCE_OUTSIDE_DELEGATED_SCOPE'].includes(e.reason);
+ const scope=lease?.resources?.join(', ')||UNKNOWN, actions=lease?.actions?.join(', ')||UNKNOWN;
+ const targetLabel=e.target===UNKNOWN?UNKNOWN:e.target.split('/').filter(Boolean).slice(-2).join('/');
+ const relationships=[];
+ if(sample)relationships.push(`${e.human} authorizes ${e.parent?.subject||e.agent}; ${e.policy} constrains the lease.`);
+ if(e.parent)relationships.push(`${e.parent.id} delegates a subset to ${e.leaseId}.`);
+ relationships.push(`Recorded actor ${e.agent} proposes ${e.action} on ${e.target}.`);
+ if(lease)relationships.push(`${e.leaseId} binds ${lease.subject} to ${lease.task} (${e.leaseSource}).`,`${e.leaseId} grants ${actions} within ${scope}.`);
+ if(lease?.protected_resources?.length)relationships.push(`Protected resources: ${lease.protected_resources.join(', ')}.`);
+ relationships.push(`Recorded outcome: ${states[e.decision]||e.decision}. ${reasonText[e.reason]||e.reason}`);
+ if(!sample)relationships.push('Approver, capability manifest, and service relationships are not recorded. Current lease context does not reconstruct the historical authorization.');
+ const edge=(d,label='',x=0,y=0,selected=false)=>`<path class="graph-edge ${selected?'selected-edge':''}" d="${d}"/>${label?`<text class="edge-text" x="${x}" y="${y}">${esc(label)}</text>`:''}`;
+ let edges='';
+ if(sample&&e.parent)edges+=edge('M216 57H298','issues',242,48)+edge('M393 86V116H670V147','delegates subset',426,108)+edge('M670 86V116','constrains',680,102);
+ else if(sample)edges+=edge('M215 86V115H126V147','authorizes',134,111)+edge('M595 86V116H670V147','constrains',678,119);
+ if(lease)edges+=edge('M216 176H298','task',245,167)+edge('M488 176H570','bound to',509,167)+edge('M670 205V231H422V271','delegated permissions',453,225);
+ if(sample)edges+=edge('M143 329V350','via tool',153,343)+edge('M249 379H315','calls',269,369);
+ if(lease)edges+=edge('M315 300H249','scoped to',263,290);
+ edges+=edge('M540 300H682V350',excluded?'boundary enforced':e.decision==='approval_required'?'approval checkpoint':'proposed target',573,324,true);
+ const nodes=[
+ graphNode('human',e.parent?36:110,28,e.parent?180:210,'Human authority',e.human||UNKNOWN,sample?'Platform security · approver':'Approver evidence unavailable',sample?`${e.human} is the illustrative human source of the task authority. Approval of this task does not authorize every possible action.`:UNKNOWN),
+ ...(e.parent?[graphNode('parent',298,28,190,'Parent AuthorityLease',e.parent.id,e.parent.subject,`Parent lease held by ${e.parent.subject}. The child only receives ${actions} and cannot redelegate.`)]:[]),
+ graphNode('policy',e.parent?570:490,28,e.parent?200:210,'Organisational policy',e.policy||UNKNOWN,sample?'Illustrative policy reference':e.policy?'Recorded bundle reference':'Policy version unavailable',sample?e.policy:e.policy?`Recorded policy version: ${e.policy}. Current policy listing is separate context.`:UNKNOWN),
+ graphNode('agent',36,147,180,'Agent identity',e.agent,sample?'Capability ≠ authority':'Actor as recorded',e.capabilities?`Capability manifest: ${e.capabilities.join(', ')}. These capabilities do not themselves grant task authority.`:`Recorded actor: ${e.agent}. Capability manifest: ${UNKNOWN}.`),
+ graphNode('task',298,147,190,'Task',e.task||UNKNOWN,sample?'Human-directed objective':e.gateway?'Recorded task binding':lease?'From current lease':'Task not in audit payload',e.task?`${e.task} · ${sample?'sample snapshot':e.gateway?'recorded at gateway admission':'current lease context; historical task not recorded'}`:UNKNOWN),
+ graphNode('lease',570,147,200,'AuthorityLease',e.leaseId||UNKNOWN,lease?leaseValidity(e):state.leaseStatus||'Lease evidence unavailable',lease?`${e.leaseId}: ${scope}. Permitted actions: ${actions}. ${provenanceLabel(e)}.`:e.leaseId?`Recorded lease reference: ${e.leaseId}. ${state.leaseStatus||UNKNOWN}.`:UNKNOWN),
+ graphNode('resources',40,271,209,'Delegated resources',lease?.resources?.[0]||UNKNOWN,lease?`${lease.resources.length} resource pattern${lease.resources.length===1?'':'s'}`:'Scope evidence unavailable',`Resource scope: ${scope}. Protected: ${lease?.protected_resources?.join(', ')||UNKNOWN}.`),
+ graphNode('capabilities',315,271,225,'Permitted actions',e.action,lease?`${lease.actions.length} action${lease.actions.length===1?'':'s'} in lease`:'Permissions unavailable',`Proposed: ${e.action}. Lease permissions: ${actions}.`),
+ graphNode('tool',40,350,209,'Tool',e.tool||UNKNOWN,sample?'Capability-bearing adapter':e.gateway?'Recorded gateway mapping':'Tool mapping not recorded',e.tool?`${sample?'Illustrative execution adapter':'Recorded gateway tool'}: ${e.tool}.`:UNKNOWN),
+ graphNode('service',315,350,225,'Service',e.service||UNKNOWN,sample?'Target service':'Service mapping not recorded',e.service?`Illustrative service: ${e.service}. No execution is implied by authorization.`:UNKNOWN),
+ graphNode('target',587,350,190,excluded?'Outside authority':'Proposed target',targetLabel,states[e.decision]||e.decision,`${e.target}. ${reasonText[e.reason]||e.reason} ${sample?'Conditional effects are illustrative.':'This event does not confirm execution.'}`,'target')
+ ].join('');
+ state.nodes.lease.evidence=lease||null;
+ const previous=graphActivity.snapshot;
+ const snapshot={id:e.id,mode:state.mode,nodes:state.nodes,lease:lease||null,edges,decision:e.decision,reason:e.reason,boundary:lease?(excluded?530:760):0};
+ if(previous&&JSON.stringify(previous)===JSON.stringify(snapshot)){
+  document.querySelectorAll('[data-node]').forEach(node=>{node.classList.toggle('selected',node.dataset.node===state.node);node.setAttribute('aria-pressed',String(node.dataset.node===state.node));});
+  renderNodeDetail();return;
+ }
+ graphActivity.snapshot=snapshot;
+ $('graph-canvas').innerHTML=`<svg class="authority-svg ${stateClass(e.decision)}" viewBox="0 0 800 434" aria-label="Authority relationships for ${esc(e.id)}"><defs><marker id="arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 6 3 0 6" fill="var(--graphite)"/></marker><marker id="state-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 6 3 0 6" fill="var(--state,var(--graphite))"/></marker><pattern id="graph-dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".55" fill="#c8cbc1"/></pattern></defs><rect width="800" height="434" fill="url(#graph-dots)"/>${lease?`<rect class="scope-boundary" x="26" y="247" width="${excluded?530:760}" height="174"/><rect x="39" y="241" width="${sample?178:254}" height="13" fill="var(--paper)"/><text class="scope-label" x="44" y="250">${sample?'TASK AUTHORITY BOUNDARY':'CURRENT LEASE SCOPE · NOT HISTORICAL'}</text>`:''}${edges}${nodes}</svg>`;
+ $('graph-provenance').textContent=sample?'Illustrative relationships':'Recorded event + current context';
+ $('relationship-list').innerHTML=relationships.map(r=>`<li>${esc(r)}</li>`).join('');
+ renderNodeDetail();
+ highlightGraph(previous?.mode===state.mode?previous:null);
+ if(focusedNode)Array.from($('graph-canvas').querySelectorAll('[data-node]')).find(node=>node.dataset.node===focusedNode)?.focus({preventScroll:true});
 }
-
-async function tryEdge(path, body, label){
-  if(!bearer()){ $("trystatus").innerHTML='<span class="err">paste a Bearer token in the header first</span>'; return; }
-  $("trystatus").textContent="sending "+label+"…";
-  let r, j={};
-  try{ r=await fetch(path,{method:"POST",headers:{"Authorization":"Bearer "+bearer(),"Content-Type":"application/json"},body:JSON.stringify(body)});
-       j=await r.json().catch(()=>({})); }catch(e){ $("trystatus").innerHTML='<span class="err">network error</span>'; return; }
-  const cp=j.x_control_plane||{}, det=j.detail||{};
-  const cls = r.ok?"allow":(r.status===202?"approval_required":"deny");
-  const extra = cp.filtered_by_authorization!==undefined ? ` · filtered ${cp.filtered_by_authorization}`
-              : det.error ? ` · ${esc(det.error)}` : "";
-  $("trystatus").innerHTML=`<b>${esc(label)}</b> → <span class="badge ${cls}">${r.status}</span>${extra}`;
-  refreshAll();
+function renderNodeDetail(){
+ const detail=state.nodes[state.node],e=selectedEvent();
+ $('graph-details').innerHTML=detail?`<strong>${esc(detail.title)}</strong><span>${esc(detail.detail)}</span>`:`<strong>${e?.decision==='deny'?'Authority boundary':e?.decision==='approval_required'?'Approval checkpoint':'Explicit authority'}</strong><span>${esc(e?reasonText[e.reason]||e.reason:'Select a node to inspect its evidence.')} Select a node for details.</span>`;
 }
-
-let timer=null;
-function tick(){ if($("auto").checked) refreshAll(); }
-$("auto").addEventListener("change",()=>{ if($("auto").checked && !timer) timer=setInterval(tick,4000); });
-timer=setInterval(tick,4000);
-refreshAll();
+function renderStream(){
+ const focusId=document.activeElement?.closest?.('[data-event]')?.dataset.event;
+ const scroll=$('stream-feed').scrollTop;
+ const events=state.events.filter(e=>(state.filter==='all'||e.decision===state.filter)&&`${e.id} ${e.agent} ${e.action} ${e.target} ${e.reason}`.toLowerCase().includes(state.query.toLowerCase()));
+ $('stream-feed').innerHTML=events.length?events.map(e=>`<button class="event-row" data-event="${esc(e.id)}" aria-pressed="${state.selected?.id===e.id}" aria-label="${esc(`${timeOf(e.time)} ${e.agent} ${e.action} ${states[e.decision]||e.decision}`)}"><time class="event-time" datetime="${esc(e.time)}">${esc(timeOf(e.time))}</time><div class="event-body"><div class="event-top"><span class="event-agent">${esc(e.agent)}</span>${badge(e.decision)}</div><div class="event-action">${esc(e.action)}</div><div class="event-reason">${esc(reasonText[e.reason]||e.reason)}</div></div></button>`).join(''):`<div class="empty"><strong>${state.events.length?'No matching decisions':state.mode==='live'?'No runtime events':'No sample events'}</strong>${state.events.length?'Adjust the search or decision filter.':state.connection==='connected'?'The audit stream is empty. New decisions will appear here.':'Connect to your runtime to inspect recorded decisions.'}</div>`;
+ $('stream-feed').scrollTop=scroll;
+ if(focusId){const button=Array.from($('stream-feed').querySelectorAll('[data-event]')).find(b=>b.dataset.event===focusId);button?.focus({preventScroll:true});}
+ $('stream-count').textContent=`${String(events.length).padStart(2,'0')} of ${String(state.events.length).padStart(2,'0')} events`;
+ $('stream-state').textContent=state.mode==='demo'?'FIXED DEMO':state.paused?'POLLING PAUSED':state.connection==='connected'?'POLLING · 4 SEC':state.connection.toUpperCase();
+}
+function leaseInspector(e){
+ const l=e.lease;
+ if(!l)return `<div class="empty"><strong>${esc(e.leaseId||'No lease reference recorded')}</strong>${esc(state.leaseStatus||'The audit event does not include a lease snapshot.')}<br>Historical task, resource scope, and lease validity: ${UNKNOWN}.</div>`;
+ const configured=Object.entries(l.max_uses||{}).map(([action,cap])=>`${action} ≤ ${cap} uses`);
+ return `<div class="inspector-meta"><span class="meta-title">${esc(l.id)}</span><span class="provenance">${provenanceLabel(e)}</span></div><div class="detail-grid"><div class="detail-column"><div class="detail-title">Identity & validity</div>${row('Subject',l.subject)}${row('Task',l.task)}${row(e.provenance==='sample'?'At event time':'Current validity',leaseValidity(e))}${row('Expires',l.expires_at?fullDate(l.expires_at):'No expiry configured')}</div><div class="detail-column"><div class="detail-title">Delegated resource scope</div>${list(l.resources)}<div class="detail-title">Protected resources</div>${l.protected_resources?.length?list(l.protected_resources):'<p class="muted" style="font-size:11px;margin-top:8px">None configured</p>'}<div class="detail-title">Permitted actions</div>${list(l.actions)}</div><div class="detail-column"><div class="detail-title">Constraints</div>${row('Delegation',l.child_authority)}${row('Maximum impact',l.maximum_impact)}<div class="detail-title">Approval required for</div>${l.require_approval?.length?list(l.require_approval):'<p class="muted" style="font-size:11px;margin-top:8px">None configured</p>'}<div class="detail-title">Configured use caps</div>${configured.length?list(configured):'<p class="muted" style="font-size:11px;margin-top:8px">No caps configured</p>'}</div></div><p class="inspector-note">${e.provenance==='sample'?'Illustrative lease snapshot at the selected event.':'Fetched lease describes current configuration. It does not prove what was granted at the event timestamp.'} Consumed uses are not recorded. Maximum impact is informational; the console does not enforce it.</p>`;
+}
+function grantInspector(e){
+ const sample=e.provenance==='sample',l=e.lease;
+ const reason=reasonText[e.reason]||e.reason;
+ const rows=[
+ ['Proposed action',`${e.action} → ${e.target}`,'Recorded proposal'],
+ ['Capability manifest',e.capabilities?.join(', ')||UNKNOWN,sample?'Illustrative manifest':'Not included in audit event'],
+ ['Task authority',l?`${l.subject} / ${l.task}`:UNKNOWN,l?sample?'Sample snapshot':'Current lease context':UNKNOWN],
+ ['Permitted actions',l?.actions?.join(', ')||UNKNOWN,l?'Lease configuration':'Not recorded'],
+ ['Resource boundary',l?.resources?.join(', ')||UNKNOWN,e.reason==='RESOURCE_OUTSIDE_DELEGATED_SCOPE'?'Recorded denial: outside delegated scope':l?'Lease configuration':UNKNOWN],
+ ['Protected resources',l?l.protected_resources?.join(', ')||'None configured':UNKNOWN,e.reason==='RESOURCE_PROTECTED'?'Recorded denial: protected resource':l?'Lease configuration':UNKNOWN],
+ ['Validity / approval',l?`${leaseValidity(e)} / ${l.require_approval?.join(', ')||'No approval actions configured'}`:UNKNOWN,l?sample?'At sample event time':'Current configuration only':UNKNOWN],
+ ['Policy / rule evidence',e.raw.policy_version||((e.raw.rules_matched||[]).filter(r=>r!==e.leaseId).join(', '))||UNKNOWN,e.raw.policy_version?'Recorded policy bundle':'Lease IDs are not policy rule IDs']
+ ];
+ return `<div class="inspector-meta"><span class="meta-title">Action × task authority</span><span class="provenance">${sample?'ILLUSTRATIVE CHECKS':'RECORDED OUTCOME · CURRENT CONTEXT'}</span></div><div class="table-scroll" tabindex="0" role="region" aria-label="Action-grant evidence"><table class="grants"><thead><tr><th>Check</th><th>Evidence</th><th>Interpretation</th></tr></thead><tbody>${rows.map(([a,b,c])=>`<tr><td>${esc(a)}</td><td>${esc(b)}</td><td>${esc(c)}</td></tr>`).join('')}</tbody></table></div><div class="checkpoint">${badge(e.decision)}<span>${esc(reason)}</span></div><p class="inspector-note">${esc(e.reason)} · The recorded outcome is authoritative. Missing check evidence is not a pass. Authorization alone does not confirm execution.</p>`;
+}
+function consequenceInspector(e){
+ const steps=[['01 / Agent',e.agent,'Proposing identity'],['02 / Proposed Action',e.action,'Authorization precedes execution'],['03 / Target System',e.service||e.target,e.provenance==='sample'?e.target:'Service mapping not recorded'],['04 / Immediate Effect',e.consequence?.[0]||UNKNOWN,e.consequence?'If the action executes':'No effect evidence'],['05 / Downstream Consequence',e.consequence?.[1]||UNKNOWN,e.consequence?'Potential propagation':'No consequence evidence'],['06 / Risk / Impact',e.consequence?.[2]||UNKNOWN,e.consequence?'Illustrative assessment':'No risk assessment recorded']];
+ const checkpoint=e.decision==='deny'?'Authorization denied. Effects shown are conditional; execution is not recorded.':e.decision==='approval_required'?'Approval checkpoint: human approval is required. Approval and execution are not recorded.':'Authorization allowed. Whether the proposed action executed is not recorded.';
+ return `<div class="inspector-meta"><span class="meta-title">Dynamic Consequence Map</span><span class="provenance">${e.consequence?'ILLUSTRATIVE · CONDITIONAL EFFECTS':'RECORDED PROPOSAL · EFFECTS UNKNOWN'}</span></div><div class="consequence-scroll" tabindex="0" role="region" aria-label="Consequence chain"><div class="consequence-chain">${steps.map(([label,title,note])=>`<div class="consequence-step"><div class="eyebrow">${esc(label)}</div><strong>${esc(title)}</strong><p>${esc(note)}</p></div>`).join('')}</div></div><div class="checkpoint">${badge(e.decision)}<span>${esc(checkpoint)}</span></div><p class="inspector-note">Authority answers whether an action may proceed. This map describes what could happen if it does; it is not an execution trace or a consequence prediction engine.</p>`;
+}
+function delegationInspector(e){
+ const sample=e.provenance==='sample';
+ // Lease delegation audit events explicitly identify parent and child. Never infer ancestry from a similar name.
+ const related=[e,...state.events.filter(item=>item.id!==e.id)].filter(item=>item.raw.decision==='allow'&&String(item.raw.model_requested||'').startsWith('lease-delegate:')&&(item.id===e.id||(e.leaseId&&(item.raw.model_used===e.leaseId||item.raw.model_requested===`lease-delegate:${e.leaseId}`))));
+ if(!sample&&!related.length)return `<div class="empty"><strong>Delegation ancestry not recorded</strong>This event does not contain an approver or parent lease. The current lease’s delegation setting is <code>${esc(e.lease?.child_authority||UNKNOWN)}</code>; this setting is not evidence of an actual delegation.</div>`;
+ const paths=sample?[[
+ ['Human authority',e.human,'Illustrative source of authority'],
+ ...(e.parent?[['Parent lease',e.parent.id,`${e.parent.subject} · ${e.parent.actions.join(', ')}`]]:[]),
+ [e.parent?'Child lease':'Task authority',e.leaseId,`${e.agent} · ${e.lease.actions.join(', ')}`],
+ ['Delegation boundary',e.lease.child_authority,e.lease.child_authority==='none'?'No further delegation permitted':'Any child must stay within parent scope']
+ ]]:related.map(item=>[['Recorded parent lease',item.raw.model_requested.slice(15),item.id],['Recorded child lease',item.raw.model_used||UNKNOWN,fullDate(item.time)]]);
+ return `<div class="inspector-meta"><span class="meta-title">Authority lineage</span><span class="provenance">${sample?'ILLUSTRATIVE LINEAGE':'AVAILABLE DELEGATION RECORDS'}</span></div>${paths.map(nodes=>`<div class="tree" tabindex="0" role="region" aria-label="Authority lineage">${nodes.map(([kind,title,note])=>`<div class="tree-node"><div class="eyebrow">${esc(kind)}</div><strong>${esc(title)}</strong><p>${esc(note)}</p></div>`).join('')}</div>`).join('')}<p class="inspector-note">${sample&&e.parent?'Child authority is narrowed to branch.list, scoped branch resources, an earlier expiry, and no further delegation.':sample?'Task approval defines a boundary; it does not authorize actions outside that boundary.':'Only explicit successful lease-delegate references in the available audit window are shown. Scope snapshots and a complete ancestry are not recorded.'}</p>`;
+}
+function auditInspector(e){
+ const related=state.events.filter(item=>item.id!==e.id&&e.leaseId&&item.leaseId===e.leaseId);
+ const available=[e,...related].sort((a,b)=>(dateOf(b.time)?.getTime()||0)-(dateOf(a.time)?.getTime()||0));
+ return `<div class="inspector-meta"><span class="meta-title">Decision evidence</span><span class="provenance">${e.provenance==='sample'?'SAMPLE EVENTS · NOT SIGNED':e.raw.signature?'SIGNATURE PRESENT':'SIGNATURE NOT RECORDED'}</span></div><div class="timeline"><div>${available.map(item=>`<div class="timeline-item"><time>${esc(fullDate(item.time))}</time><p>${esc(item.action)} · <span class="${stateClass(item.decision)}">${esc(states[item.decision]||item.decision)}</span>${item.id===e.id?' · selected':''}</p><code>${esc(item.id)} / ${esc(item.reason)}</code></div>`).join('')}</div><dl class="evidence-dl">${[['Decision ID',e.id],['Recorded policy version',e.raw.policy_version||UNKNOWN],['Recorded rules / lease references',(e.raw.rules_matched||[]).join(', ')||UNKNOWN],['Event hash',e.raw.event_hash||UNKNOWN],['Previous hash',e.raw.prev_hash||UNKNOWN],['Signature',e.raw.signature||UNKNOWN],['Obligations',(e.raw.obligations_applied||[]).map(v=>typeof v==='string'?v:JSON.stringify(v)).join(', ')||UNKNOWN]].map(([label,value])=>`<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`).join('')}</dl></div><p class="inspector-note">Related records share an explicit lease reference within the available window. A signature’s presence is not cryptographic verification. Unrecorded issuance, approval, and execution milestones are not reconstructed.</p>`;
+}
+function renderInspector(){
+ const e=selectedEvent();
+ $('inspector-event-id').textContent=e?.id||'No event selected';
+ $('copy-id').disabled=!e;$('export-evidence').disabled=!e;
+ document.querySelectorAll('[data-tab]').forEach(button=>{const active=button.dataset.tab===state.tab;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;});
+ $('inspector-content').setAttribute('aria-labelledby',`tab-${state.tab}`);
+ const inspectors={lease:leaseInspector,grant:grantInspector,consequence:consequenceInspector,delegation:delegationInspector,audit:auditInspector};
+ $('inspector-content').innerHTML=e?inspectors[state.tab](e)+gatewayEvidence(e):'<div class="empty"><strong>No event selected</strong>Select a decision in the stream to inspect its evidence.</div>';
+}
+function renderChrome(){
+ $('demo-mode').setAttribute('aria-pressed',String(state.mode==='demo'));$('live-mode').setAttribute('aria-pressed',String(state.mode==='live'));
+ $('source-label').textContent=state.mode==='demo'?'SAMPLE EVIDENCE':'LIVE AUDIT EVIDENCE';
+ $('connection-label').innerHTML=`<span class="square"></span>${esc(state.mode==='demo'?'LOCAL DEMO':state.connection.toUpperCase())}`;
+ $('stream-subtitle').textContent=state.mode==='demo'?'Sample runtime events':'Recorded decisions · newest first';
+ $('pause-button').disabled=state.mode!=='live';$('pause-button').setAttribute('aria-pressed',String(state.paused));$('pause-button').textContent=state.paused?'▷ Resume':'Ⅱ Pause';$('pause-button').setAttribute('aria-label',state.paused?'Resume live polling':'Pause live polling');
+ $('refresh-button').disabled=state.busy;
+ const retained=state.selected&&!state.events.some(e=>e.id===state.selected.id);
+ const filtered=state.selected&&((state.filter!=='all'&&state.selected.decision!==state.filter)||!`${state.selected.id} ${state.selected.agent} ${state.selected.action} ${state.selected.target} ${state.selected.reason}`.toLowerCase().includes(state.query.toLowerCase()));
+ const notices=[state.notice,retained?'Selected evidence retained outside the latest polling window.':filtered?'Selected event remains open; it is hidden by the stream filter.':''];
+ $('status-message').textContent=notices.filter(Boolean).join(' ');$('status-message').hidden=!notices.some(Boolean);
+}
+function renderAll(){syncGatewayEvidence();renderChrome();renderExecution();renderGraph();renderStream();renderInspector();}
+function renderSelected(){syncGatewayEvidence();renderChrome();renderExecution();renderGraph();renderInspector();}
+function notify(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(notify.timer);notify.timer=setTimeout(()=>$('toast').hidden=true,3000);}
+function invalidateRequests(){state.generation++;state.controller?.abort();state.detailController?.abort();state.detailVersion++;state.busy=false;state.controller=null;state.detailController=null;}
+function setMode(mode){
+ if(mode===state.mode)return;
+ invalidateRequests();state.mode=mode;state.node=null;state.notice='';state.leaseStatus='';state.policies=null;state.health=null;state.lastUpdated=null;
+ state.events=mode==='demo'?DEMO_EVENTS:[];state.selected=state.events[0]||null;state.connection=mode==='demo'?'demo':'disconnected';
+ state.query='';state.filter='all';$('event-search').value='';$('decision-filter').value='all';
+ renderAll();
+ if(mode==='live'){if(state.token)refreshLive();else openConnection();}
+}
+function openConnection(){ $('runtime-origin').value=location.origin;$('admin-token').value='';$('connection-dialog').showModal();$('admin-token').focus(); }
+function closeConnection(){ $('admin-token').value='';$('connection-dialog').close(); }
+async function getJSON(path,signal){
+ const headers=path==='/healthz'?{}:{'X-Admin-Token':state.token};
+ const response=await fetch(path,{headers,signal,cache:'no-store',credentials:'same-origin'});
+ if(!response.ok){const error=new Error(`HTTP ${response.status}`);error.status=response.status;throw error;}
+ try{return await response.json();}catch{throw new Error('Invalid JSON response');}
+}
+function networkMessage(error){return error.status===401||error.status===403?'Authentication failed. Update the admin token in Connection.':error.status===404?'The runtime endpoint is unavailable. Check that the admin API is enabled.':error.name==='AbortError'?'Request timed out. Refresh to retry.':'Runtime unavailable. Check the connection and refresh to retry.';}
+async function refreshLive(){
+ if(state.mode!=='live'||state.busy)return;
+ if(!state.token){state.connection='disconnected';state.notice='Connect with an admin token to read runtime evidence.';renderChrome();renderStream();return;}
+ const generation=state.generation, controller=new AbortController();state.controller=controller;state.busy=true;
+ renderChrome();
+ const timeout=setTimeout(()=>controller.abort(),10000);
+ try{
+  const results=await Promise.allSettled([getJSON('/v1/audit?limit=50',controller.signal),getJSON('/healthz',controller.signal),getJSON('/admin/policies',controller.signal)]);
+  if(generation!==state.generation)return;
+  const [audit,health,policies]=results;
+  if(audit.status==='rejected')throw audit.reason;
+  if(!Array.isArray(audit.value.events))throw new Error('Invalid audit response');
+  state.rawRecords=audit.value.events.filter(raw=>raw&&typeof raw.decision_id==='string');
+  state.events=state.rawRecords.filter(raw=>gatewayContext(raw)?.phase!=='execution').map(adaptLive);
+  state.health=health.status==='fulfilled'?health.value:null;state.policies=policies.status==='fulfilled'?policies.value:null;
+  state.connection='connected';state.lastUpdated=new Date().toISOString();state.notice=health.status==='rejected'||policies.status==='rejected'?'Audit connected. Some current health or policy context is unavailable.':'';
+  if(!state.selected&&state.events.length){state.selected=state.events[0];state.node=null;}
+  // Preserve the selected event snapshot even when it falls out of the server window.
+  renderAll();
+  if(state.selected?.leaseId)loadSelectedLease();
+ }catch(error){if(generation!==state.generation)return;state.connection=state.events.length||state.selected?'stale':error.status===401||error.status===403?'unauthorized':'unavailable';state.notice=`${networkMessage(error)}${state.connection==='stale'?' Displaying previously fetched evidence.':''}`;renderChrome();renderStream();}
+ finally{clearTimeout(timeout);if(generation===state.generation){state.busy=false;state.controller=null;renderChrome();}}
+}
+async function loadSelectedLease(){
+ const e=state.selected;if(state.mode!=='live'||!e?.leaseId)return;
+ state.detailController?.abort();const version=++state.detailVersion,generation=state.generation,controller=new AbortController();state.detailController=controller;
+ state.leaseStatus=e.lease?'Refreshing current lease…':'Loading current lease…';
+ if(!e.lease)renderSelected();
+ const timeout=setTimeout(()=>controller.abort(),10000);
+ try{
+  const lease=await getJSON(`/v1/leases/${encodeURIComponent(e.leaseId)}`,controller.signal);
+  if(generation!==state.generation||version!==state.detailVersion||state.selected?.id!==e.id)return;
+  if(!lease||lease.id!==e.leaseId||!Array.isArray(lease.actions)||!Array.isArray(lease.resources))throw new Error('Invalid lease response');
+  e.lease=lease;e.task=e.gateway?.task||lease.task||null;e.leaseSource='current lease';e.leaseFetchedAt=new Date().toISOString();state.leaseStatus='';renderSelected();
+ }catch(error){
+  if(generation!==state.generation||version!==state.detailVersion||state.selected?.id!==e.id)return;
+  e.lease=null;e.task=e.gateway?.task||null;e.leaseSource=null;e.leaseFetchedAt=null;state.leaseStatus=error.status===404?'Referenced lease is unavailable (404).':`Current lease unavailable. ${networkMessage(error)}`;renderSelected();
+ }finally{clearTimeout(timeout);if(version===state.detailVersion)state.detailController=null;}
+}
+function selectEvent(id){
+ const event=state.events.find(e=>e.id===id);if(!event)return;
+ state.detailController?.abort();state.detailVersion++;state.selected=event;state.node=null;state.leaseStatus='';renderAll();
+ if(state.mode==='live')loadSelectedLease();
+}
+function exportEvidence(){
+ const e=selectedEvent();if(!e)return;
+ const payload={format:'agent-plane.console-evidence.v1',provenance:e.provenance==='sample'?'illustrative sample; not signed runtime evidence':'recorded audit event',exported_at:new Date().toISOString(),original_evidence:e.raw,related_execution_evidence:e.receipts||[],supplemental_context:{lease:e.lease,lease_provenance:e.leaseSource,lease_fetched_at:e.leaseFetchedAt||null,current_policy_listing:state.mode==='live'?state.policies:null,illustrative_relationships:e.provenance==='sample'?{human:e.human,policy:e.policy,capabilities:e.capabilities,parent_lease:e.parent,service:e.service,tool:e.tool}:null,illustrative_conditional_consequences:e.consequence,signature_verification:'not performed',execution_status:e.executionStatus||'not recorded'}};
+ const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})),a=document.createElement('a');
+ a.href=url;a.download=`agent-plane-${e.id.replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,80)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notify('Evidence exported');
+}
+$('demo-mode').addEventListener('click',()=>setMode('demo'));
+$('live-mode').addEventListener('click',()=>setMode('live'));
+$('connection-button').addEventListener('click',openConnection);
+$('cancel-connection').addEventListener('click',closeConnection);
+$('connection-dialog').addEventListener('cancel',()=>$('admin-token').value='');
+$('connection-form').addEventListener('submit',event=>{event.preventDefault();const token=$('admin-token').value.trim();if(!token){$('admin-token').focus();return;}invalidateRequests();state.token=token;closeConnection();if(state.mode!=='live')setMode('live');else{state.events=[];state.selected=null;state.policies=null;state.health=null;state.leaseStatus='';state.notice='';state.connection='connecting';renderAll();refreshLive();}});
+$('disconnect-button').addEventListener('click',()=>{invalidateRequests();state.token='';state.events=state.mode==='demo'?DEMO_EVENTS:[];state.selected=state.events[0]||null;state.policies=null;state.health=null;state.node=null;state.leaseStatus='';state.connection=state.mode==='demo'?'demo':'disconnected';state.notice=state.mode==='demo'?'':'Disconnected. Runtime credentials and evidence cleared.';closeConnection();renderAll();});
+$('refresh-button').addEventListener('click',()=>state.mode==='live'?refreshLive():notify('Sample evidence is fixed · 8 runtime events'));
+$('pause-button').addEventListener('click',()=>{state.paused=!state.paused;renderChrome();renderStream();if(!state.paused)refreshLive();});
+$('event-search').addEventListener('input',event=>{state.query=event.target.value;renderStream();renderChrome();});
+$('decision-filter').addEventListener('change',event=>{state.filter=event.target.value;renderStream();renderChrome();});
+$('stream-feed').addEventListener('click',event=>{const button=event.target.closest('[data-event]');if(button)selectEvent(button.dataset.event);});
+function selectNode(key){if(!state.nodes[key])return;state.node=key;document.querySelectorAll('[data-node]').forEach(node=>{node.classList.toggle('selected',node.dataset.node===key);node.setAttribute('aria-pressed',String(node.dataset.node===key));});renderNodeDetail();}
+$('graph-canvas').addEventListener('click',event=>{const node=event.target.closest('[data-node]');if(node)selectNode(node.dataset.node);});
+$('graph-canvas').addEventListener('keydown',event=>{const node=event.target.closest('[data-node]');if(node&&(event.key==='Enter'||event.key===' ')){event.preventDefault();selectNode(node.dataset.node);}});
+$('fit-graph').addEventListener('click',()=>{const canvas=$('graph-canvas');canvas.scrollTo({left:0,top:0,behavior:'instant'});state.node=null;renderGraph();if(canvas.clientWidth<710)notify('Graph at readable scale · scroll to explore');});
+function selectTab(key){state.tab=key;renderInspector();}
+document.querySelector('.tabs').addEventListener('click',event=>{const tab=event.target.closest('[data-tab]');if(tab)selectTab(tab.dataset.tab);});
+document.querySelector('.tabs').addEventListener('keydown',event=>{const buttons=Array.from(document.querySelectorAll('[data-tab]'));let index=buttons.indexOf(document.activeElement);if(index<0)return;if(event.key==='ArrowRight')index=(index+1)%buttons.length;else if(event.key==='ArrowLeft')index=(index+buttons.length-1)%buttons.length;else if(event.key==='Home')index=0;else if(event.key==='End')index=buttons.length-1;else return;event.preventDefault();selectTab(buttons[index].dataset.tab);buttons[index].focus();});
+$('copy-id').addEventListener('click',async()=>{if(!state.selected)return;try{await navigator.clipboard.writeText(state.selected.id);notify('Decision ID copied');}catch{notify('Clipboard unavailable. Select the decision ID to copy it.');}});
+$('export-evidence').addEventListener('click',exportEvidence);
+$('replay-graph').addEventListener('click',()=>highlightGraph(graphActivity.snapshot,true));
+$('graph-motion').addEventListener('click',()=>{graphActivity.motion=!graphActivity.motion;syncGraphMotion();});
+motionPreference.addEventListener('change',syncGraphMotion);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopGraphMotion();});
+syncGraphMotion();
+setInterval(()=>{if(state.mode==='live'&&!state.paused&&!document.hidden)refreshLive();},4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.mode==='live'&&!state.paused)refreshLive();});
+renderAll();
 </script>
 </body>
 </html>
