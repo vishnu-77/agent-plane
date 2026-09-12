@@ -67,5 +67,5 @@ automatic client rewrite.
 
 ```bash
 python examples/mcp_gateway_demo.py            # real MCP client, gateway, mock upstream
-python examples/mcp_gateway_demo.py --serve    # then open /flow and /console
+python examples/mcp_gateway_demo.py --serve    # then open /console and connect with the printed token
 ```

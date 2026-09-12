@@ -7,6 +7,7 @@ touching call sites.
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from sqlalchemy import create_engine, select, text
@@ -44,6 +45,11 @@ class AuditStore(Protocol):
     def record(self, event: dict[str, Any]) -> None: ...
 
     def recent(self, limit: int = 50) -> list[dict[str, Any]]: ...
+
+    def get(self, decision_id: str) -> dict[str, Any] | None: ...
+
+    def query(self, *, tenant: str | None = None, limit: int = 50,
+              since: datetime | None = None) -> list[dict[str, Any]]: ...
 
 
 class SqlAuditStore:
@@ -90,6 +96,26 @@ class SqlAuditStore:
             rows = session.scalars(
                 select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)
             ).all()
+            return [self._to_dict(r) for r in rows]
+
+    def get(self, decision_id: str) -> dict[str, Any] | None:
+        with self._session_factory() as session:
+            row = session.scalars(
+                select(AuditEvent).where(AuditEvent.decision_id == decision_id)
+                .order_by(AuditEvent.id.asc()).limit(1)
+            ).first()
+            return self._to_dict(row) if row else None
+
+    def query(self, *, tenant: str | None = None, limit: int = 50,
+              since: datetime | None = None) -> list[dict[str, Any]]:
+        stmt = select(AuditEvent).order_by(AuditEvent.id.desc())
+        if tenant:
+            stmt = stmt.where(AuditEvent.tenant == tenant)
+        if since is not None:
+            naive = since.astimezone(UTC).replace(tzinfo=None) if since.tzinfo else since
+            stmt = stmt.where(AuditEvent.created_at >= naive)
+        with self._session_factory() as session:
+            rows = session.scalars(stmt.limit(limit)).all()
             return [self._to_dict(r) for r in rows]
 
     @staticmethod

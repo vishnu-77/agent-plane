@@ -162,10 +162,10 @@ def main():
             assert {r['decision'] for r in events if r['model_requested'].startswith('authorize:')} == {'allow', 'deny', 'approval_required'}
         (directory / "results.json").write_text(json.dumps({"results": results, "upstream": stats}, indent=2), encoding="utf-8")
         print("PASS: real MCP discovery, ALLOW forwarded once, APPROVAL and DENY never forwarded", flush=True)
-        print(f"Console: {url}/console\nUser flow: {url}/flow\nEvidence: {directory / 'results.json'}", flush=True)
+        print(f"Console: {url}/console\nEvidence: {directory / 'results.json'}", flush=True)
         if args.serve:
             print(f"Local console ADMIN_TOKEN: {env['ADMIN_TOKEN']}", flush=True)
-            print("Choose Live, enter this token. Ctrl+C stops both demo processes.", flush=True)
+            print("Connect operator access with this token; open Decisions and Timeline. Ctrl+C stops both demo processes.", flush=True)
             while all(p.poll() is None for p in processes):
                 time.sleep(1)
     finally:

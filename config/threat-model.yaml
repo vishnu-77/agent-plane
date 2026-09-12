@@ -4,9 +4,27 @@
 # underneath it via config/instructions. `capability_manifest_version` pins
 # which version of config/capability-manifest.yaml this review covers -
 # `agentplane authority check-freshness` fails CI if they drift apart.
-capability_manifest_version: "3"
+capability_manifest_version: "4"
 
-last_reviewed: "2026-09-01"
+last_reviewed: "2026-09-12"
+
+# 0.6 review (manifest 4): consequence modelling, the agent registry,
+# quarantine, observe mode, lineage, and the hosted demo.
+#   - output_consequences: the consequence catalog is operator-declared YAML;
+#     an unlisted resource gets an inferred profile (environment from its
+#     prefix, effect from the verb) which errs towards "medium/mutating" but
+#     is not authoritative. Keep production-critical resources listed.
+#   - identity: the registry is derived from traffic and is a *view*; it never
+#     grants. Under jwt_claims a caller can assert agent_id/tenant, so registry
+#     entries are only as trustworthy as the identity mode.
+#   - observe mode: SIMULATE lets everything through by design. Enable it
+#     per tenant during onboarding only; the console shows the mode lamp and
+#     the SDK exposes `enforced`/`would_be` so an executor cannot mistake a
+#     simulate for an ALLOW without noticing.
+#   - quarantine: an operator hold; not tenant-scoped beyond the admin token.
+#   - demo: the demo tenant is isolated and reads are scoped by X-Demo-Token;
+#     runs are unauthenticated and rate-limited; set DEMO_ENABLED=false on
+#     production deployments that are not the hosted demo.
 
 # AI-TM's refresh triggers this review considered (see the OWASP page): tool
 # and action capabilities, identity/authorization changes, instruction/policy

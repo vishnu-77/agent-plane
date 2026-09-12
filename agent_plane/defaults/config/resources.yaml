@@ -1,0 +1,163 @@
+# Resource and action catalog (config-driven). This is what turns an action
+# into a *consequence*: the same verb against a sandbox, a staging workload,
+# or a customer-facing production service produces radically different effects.
+#
+# Every AuthorityLease can bound consequences (see `permitted_consequence`),
+# and every decision explains which profile each dimension came from.
+#
+# Resource patterns are globs over the canonical resource string; the most
+# specific (longest) match wins. `dependents` are resources that break or
+# change downstream if this one changes; `depends_on` is the inverse edge.
+resources:
+  - pattern: "staging/*"
+    environment: staging
+    criticality: low
+    customer_facing: false
+    reversibility: reversible
+    persistence: transient
+    description: staging workloads
+    business: pre-production verification
+
+  - pattern: "staging/checkout"
+    environment: staging
+    criticality: low
+    customer_facing: false
+    reversibility: reversible
+    persistence: transient
+    dependents: ["staging/orders"]
+    description: staging checkout service
+
+  - pattern: "staging/orders"
+    environment: staging
+    criticality: low
+    description: staging order pipeline
+
+  - pattern: "production/*"
+    environment: production
+    criticality: critical
+    customer_facing: true
+    reversibility: recoverable
+    persistence: durable
+    description: production workloads
+    business: live customer traffic
+
+  - pattern: "production/checkout"
+    environment: production
+    criticality: critical
+    customer_facing: true
+    reversibility: recoverable
+    persistence: durable
+    dependents: ["production/orders", "production/payments"]
+    description: production checkout service
+    business: every purchase flows through this service
+
+  - pattern: "production/payments"
+    environment: production
+    criticality: critical
+    customer_facing: true
+    reversibility: irreversible
+    persistence: permanent
+    description: payment capture
+    business: money movement; chargebacks are not reversible
+
+  - pattern: "production/orders"
+    environment: production
+    criticality: high
+    customer_facing: true
+    description: order pipeline
+
+  - pattern: "github://*/branches/main"
+    environment: source
+    criticality: critical
+    reversibility: recoverable
+    persistence: durable
+    protected: true
+    dependents: ["ci://*", "production/*"]
+    description: default branch
+    business: CI/CD and every deployment derive from it
+
+  - pattern: "github://*/branches/*"
+    environment: source
+    criticality: low
+    reversibility: recoverable
+    persistence: durable
+    description: feature or stale branch
+
+  - pattern: "github://*"
+    environment: source
+    criticality: medium
+    description: repository
+
+  - pattern: "ci://*"
+    environment: ci
+    criticality: high
+    description: continuous integration pipelines
+
+  - pattern: "tickets/*"
+    environment: support
+    criticality: medium
+    customer_facing: false
+    description: support tickets (contain customer PII)
+
+  - pattern: "customers/*"
+    environment: data
+    criticality: critical
+    customer_facing: true
+    reversibility: irreversible
+    persistence: permanent
+    description: customer records
+    business: regulated personal data
+
+  - pattern: "email/*"
+    environment: external
+    criticality: high
+    customer_facing: true
+    reversibility: irreversible
+    persistence: permanent
+    description: outbound email
+    business: cannot be unsent
+
+actions:
+  - pattern: "*.read"
+    effect: read
+  - pattern: "*.list"
+    effect: list
+  - pattern: "logs.read"
+    effect: read
+    direct_effect: "reads log lines; no state change"
+  - pattern: "metrics.read"
+    effect: read
+    direct_effect: "reads metrics; no state change"
+  - pattern: "deployment.restart"
+    effect: restart
+    severity: medium
+    direct_effect: "workload restarts; in-flight requests are dropped"
+  - pattern: "deployment.delete"
+    effect: delete
+    severity: high
+    reversibility: recoverable
+    direct_effect: "workload is removed and stops serving"
+  - pattern: "deployment.scale"
+    effect: mutate
+    severity: medium
+    direct_effect: "replica count changes"
+  - pattern: "branch.delete"
+    effect: delete
+    severity: medium
+    reversibility: recoverable
+    direct_effect: "branch ref is removed; commits stay reachable for a while"
+  - pattern: "branch.write"
+    effect: mutate
+    severity: low
+    direct_effect: "commits are pushed to the branch"
+  - pattern: "customer.export"
+    effect: export
+    severity: high
+    reversibility: irreversible
+    direct_effect: "customer data leaves the system"
+  - pattern: "email.send"
+    effect: send
+    severity: high
+    reversibility: irreversible
+    persistence: permanent
+    direct_effect: "an email is delivered to an external recipient"

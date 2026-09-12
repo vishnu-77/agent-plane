@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from agent_plane.approvals.store import ApprovalRequest
-from agent_plane.gateway.authz import require_admin
+from agent_plane.gateway.authz import require_admin, resolve_operator
 from agent_plane.gateway.identity import IdentityError, resolve_identity
 
 approvals_router = APIRouter(tags=["approvals"])
@@ -66,8 +66,11 @@ async def list_approvals(
     tenant: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     x_admin_token: str | None = Header(default=None),
+    x_demo_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
+    # Operators see every tenant; the demo viewer sees the demo tenant only.
+    scope = resolve_operator(request, x_admin_token, x_demo_token)
+    tenant = scope.restrict(tenant)
     if status == "all":
         status = None
     items = request.app.state.approvals.list(status=status, tenant=tenant, limit=limit)

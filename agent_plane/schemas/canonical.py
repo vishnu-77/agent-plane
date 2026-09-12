@@ -40,6 +40,11 @@ class DecisionAction(str, Enum):
     ALLOW = "allow"
     DENY = "deny"
     APPROVAL_REQUIRED = "approval_required"
+    # The agent is held: an operator quarantined it, so nothing proceeds.
+    QUARANTINE = "quarantine"
+    # Observe mode: the decision was computed and recorded but not enforced;
+    # `would_be` carries the outcome enforce mode would have returned.
+    SIMULATE = "simulate"
 
 
 class LogLevel(str, Enum):

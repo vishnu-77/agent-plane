@@ -23,10 +23,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from agent_plane.approvals.notify import ApprovalNotifier
 from agent_plane.approvals.store import build_approval_store
 from agent_plane.audit.store import build_audit_store
+from agent_plane.authority.service import AuthorityService
 from agent_plane.authority.store import build_lease_store
 from agent_plane.authority.templates import build_template_catalog
 from agent_plane.cache.store import build_cache_store
 from agent_plane.config import Settings, get_settings
+from agent_plane.consequence import build_consequence_catalog
+from agent_plane.demo.harness import DemoHarness
+from agent_plane.demo.router import demo_router
 from agent_plane.gateway.a2a import a2a_router
 from agent_plane.gateway.admin import admin_router
 from agent_plane.gateway.approvals import approvals_router
@@ -38,6 +42,8 @@ from agent_plane.gateway.usage_api import usage_router
 from agent_plane.observability import Metrics, configure_logging
 from agent_plane.policy.engine import YamlPolicyEngine
 from agent_plane.policy.loader import load_bundle
+from agent_plane.registry import build_registry
+from agent_plane.registry.router import registry_router
 from agent_plane.routing.knowledge import build_knowledge_store
 from agent_plane.routing.registry import ModelRegistry
 from agent_plane.routing.tools import build_tool_registry
@@ -100,9 +106,13 @@ async def lifespan(app: FastAPI):
     app.state.approval_notifier = ApprovalNotifier(
         settings.approval_webhook_url, settings.audit_signing_key
     )
+    app.state.catalog = build_consequence_catalog(settings)
+    app.state.agent_registry = build_registry(settings)
     app.state.cache = build_cache_store(settings)
     app.state.audit = build_audit_store(settings)
     app.state.usage = build_usage_store(settings)
+    app.state.authority = AuthorityService(app.state)
+    app.state.demo = DemoHarness(app.state) if settings.demo_enabled else None
     if not hasattr(app.state, "metrics"):
         app.state.metrics = Metrics()
     # Runtime revocation set, mutated live by the admin API.
@@ -197,23 +207,46 @@ def create_app() -> FastAPI:
     async def root() -> RedirectResponse:
         return RedirectResponse("/console")
 
+    @app.get("/brand/{name}", include_in_schema=False)
+    async def brand(name: str) -> Response:
+        if name not in ("mark.svg", "logo.svg", "favicon.svg", "logo-dark.svg"):
+            raise HTTPException(status_code=404, detail="not found")
+        return Response((files("agent_plane.console") / "brand" / name).read_bytes(), media_type="image/svg+xml")
+
+    dist = files("agent_plane.console") / "dist"
+    dist_index = dist / "index.html"
+
     @app.get("/console", include_in_schema=False)
     async def console() -> HTMLResponse:
-        html = (files("agent_plane.console") / "index.html").read_text(encoding="utf-8")
-        return HTMLResponse(html)
+        # The built Vite console (agent_plane/console/dist). It is committed and
+        # shipped in the wheel; `npm --prefix console run build` regenerates it.
+        if dist_index.is_file():
+            return HTMLResponse(dist_index.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            "<!doctype html><title>agent-plane</title><p>The console is not built. "
+            "Run <code>npm --prefix console install &amp;&amp; npm --prefix console run build</code> "
+            "or install a release wheel.</p>", status_code=503)
 
-    @app.get("/console/assets/{name}", include_in_schema=False)
-    async def console_asset(name: str) -> Response:
-        media_types = {"console.css": "text/css", "console.js": "text/javascript"}
-        if name not in media_types:
+    @app.get("/console/{path:path}", include_in_schema=False)
+    async def console_asset(path: str) -> Response:
+        media_types = {".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml",
+                       ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2",
+                       ".woff": "font/woff", ".json": "application/json", ".map": "application/json",
+                       ".html": "text/html", ".txt": "text/plain", ".webmanifest": "application/manifest+json"}
+        if ".." in path or path.startswith("/"):
             raise HTTPException(status_code=404, detail="not found")
-        content = (files("agent_plane.console") / name).read_text(encoding="utf-8")
-        return Response(content, media_type=media_types[name])
-    @app.get("/flow", include_in_schema=False)
-    async def integration_flow() -> HTMLResponse:
-        html = (files("agent_plane.console") / "flow.html").read_text(encoding="utf-8")
-        return HTMLResponse(html)
-
+        candidates = [dist / path] if dist_index.is_file() else []
+        for candidate in candidates:
+            if candidate.is_file():
+                suffix = "." + path.rsplit(".", 1)[-1] if "." in path else ""
+                media = media_types.get(suffix, "application/octet-stream")
+                headers = ({"Cache-Control": "public, max-age=31536000, immutable"}
+                           if path.startswith("assets/") and dist_index.is_file() else {})
+                return Response(candidate.read_bytes(), media_type=media, headers=headers)
+        # SPA fallback: client-side routes render the app shell.
+        if dist_index.is_file() and "." not in path.rsplit("/", 1)[-1]:
+            return HTMLResponse(dist_index.read_text(encoding="utf-8"))
+        raise HTTPException(status_code=404, detail="not found")
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
         # Ready only if the audit and authority stores are reachable.
@@ -236,6 +269,8 @@ def create_app() -> FastAPI:
     app.include_router(a2a_router)
     app.include_router(authority_router)
     app.include_router(approvals_router)
+    app.include_router(registry_router)
+    app.include_router(demo_router)
     app.include_router(usage_router)
     app.include_router(admin_router)
     if settings.mcp_gateway_file:

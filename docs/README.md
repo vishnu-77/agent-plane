@@ -4,7 +4,10 @@ Start here. Each page is written for one job.
 
 | I want to… | Read |
 | --- | --- |
-| See it work in five minutes | [Quickstart](quickstart.md) |
+| Understand the product in five minutes | [Concepts](concepts.md) |
+| See it work in the console | [Hosted demo](demo.md) |
+| See it work in five minutes with code | [Quickstart](quickstart.md) |
+| Roll it out without blocking anyone first | [Observe → Enforce](integration/observe-enforce.md) |
 | Understand which integration edge fits my stack | [Integration overview](integration/README.md) |
 | Gate side-effecting actions on task authority | [Task authorization](integration/authorization.md) |
 | Put a human in the loop for risky actions | [Approvals](integration/approvals.md) |

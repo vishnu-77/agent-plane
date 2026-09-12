@@ -43,7 +43,7 @@ def exercise_runtime(base_url: str, admin: str, secret: str) -> dict:
         assert http.get("/healthz").status_code == 200
         console = http.get("/console")
         assert console.status_code == 200
-        assert "agent-plane" in console.text and "Authority leases" in console.text
+        assert "agent-plane" in console.text and "id=\"root\"" in console.text
         assert http.get("/v1/audit").status_code == 401
         policies = http.get("/admin/policies", headers=admin_headers)
         assert policies.status_code == 200 and policies.json()["rules"]

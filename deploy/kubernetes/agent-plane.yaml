@@ -62,7 +62,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-plane
-          image: ghcr.io/vishnu-77/agent-plane:0.4.0
+          image: ghcr.io/vishnu-77/agent-plane:0.6.0
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

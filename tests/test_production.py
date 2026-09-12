@@ -146,12 +146,21 @@ def test_console_and_root_redirect(client):
     root = client.get("/", follow_redirects=False)
     assert root.status_code in (307, 308)
     assert root.headers["location"].endswith("/console")
-    for asset, content_type in (("console.css", "text/css"), ("console.js", "text/javascript")):
+    # The built Vite bundle is served from /console/assets/* with immutable caching.
+    import re
+
+    assets = re.findall(r'/console/assets/([^"\']+)', page.text)
+    assert assets, "the console shell must reference its built assets"
+    for asset in assets:
         response = client.get(f"/console/assets/{asset}")
         assert response.status_code == 200
-        assert content_type in response.headers["content-type"]
-        assert len(response.content) > 100
-    assert client.get("/console/assets/__init__.py").status_code == 404
+        assert response.headers["content-type"].startswith(("text/css", "text/javascript"))
+        assert "immutable" in response.headers.get("cache-control", "")
+    assert client.get("/console/assets/../__init__.py").status_code == 404
+    # Client-side routes render the shell; unknown files do not.
+    assert client.get("/console/decisions").status_code == 200
+    assert client.get("/console/assets/missing.js").status_code == 404
+    assert client.get("/brand/mark.svg").headers["content-type"].startswith("image/svg+xml")
 
 
 def test_production_startup_fails_closed_on_empty_policy_bundle(tmp_path, monkeypatch):

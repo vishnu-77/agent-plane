@@ -22,6 +22,8 @@
 !/INTEGRATION.md
 !/Dockerfile.alpine
 !/deploy/
+!/console/
+/console/node_modules/
 !/EDGES.md
 !/CONFIGURATION.md
 !/ARCHITECTURE.md
@@ -50,6 +52,7 @@
 !/docs/assets/
 /docs/assets/*
 !/docs/assets/hero.png
+!/docs/assets/console-live.png
 
 # Internal planning documents stay local, including within public directories.
 ROADMAP.md

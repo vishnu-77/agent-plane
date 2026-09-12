@@ -1,6 +1,6 @@
 [project]
 name = "agent-plane"
-version = "0.5.0"
+version = "0.6.0"
 description = "Runtime authority for AI agents: task-scoped authorization, policy enforcement, and MCP gateway"
 readme = "README.md"
 license = { text = "MIT" }
@@ -70,7 +70,7 @@ build-backend = "setuptools.build_meta"
 include = ["agent_plane*"]
 
 [tool.setuptools.package-data]
-agent_plane = ["defaults/policies/*.yaml", "defaults/config/*.yaml", "console/*.html", "console/*.css", "console/*.js"]
+agent_plane = ["defaults/policies/*.yaml", "defaults/config/*.yaml", "console/dist/*", "console/dist/assets/*", "console/brand/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

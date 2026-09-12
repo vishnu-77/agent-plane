@@ -6,9 +6,32 @@
 #
 # This is deliberately separate from any one agent's AuthorityLease: a lease
 # grants task-scoped authority *within* what's declared possible here.
-version: "3"
+version: "4"
 
 capabilities:
+  - edge: consequence
+    description: >-
+      every authorize/MCP decision derives a structured consequence (effect, environment,
+      customer-facing, reversibility, persistence, downstream dependents, blast radius,
+      impact) from config/resources.yaml; a lease's permitted_consequence bounds it
+      (CONSEQUENCE_OUTSIDE_TASK_BOUNDARY)
+  - edge: registry
+    description: >-
+      agents, sessions, and tasks are discovered from governed traffic (GET /v1/agents,
+      /v1/tasks, /v1/resources); declared vs granted vs observed drift and a suggested
+      lease drive Observe -> Enforce; POST /v1/tasks records prompt/event provenance
+  - edge: quarantine
+    description: an operator holds an agent (POST /v1/agents/{id}/quarantine); every action returns QUARANTINE
+  - edge: observe-mode
+    description: >-
+      ENFORCEMENT_MODE=observe (or PUT /admin/mode per tenant) returns SIMULATE with would_be
+      instead of DENY/APPROVAL; nothing is blocked, everything is recorded
+  - edge: lineage
+    description: child leases carry parent_lease and origin; GET /v1/lineage/{id} and every decision trace show the chain
+  - edge: demo
+    description: >-
+      DEMO_ENABLED runs deterministic scenarios through the real engine in the isolated
+      demo tenant against simulated targets (POST /demo/scenarios/{name}/run)
   - edge: model
     description: OpenAI-compatible chat completions, routed/redacted/audited (POST /v1/chat/completions)
   - edge: tool

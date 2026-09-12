@@ -19,15 +19,14 @@ The demo starts two local processes, creates a task lease and trusted mapping,
 mints separate agent and upstream credentials, and makes three requests using the
 official MCP client. It does not contact GitHub or change a real repository.
 
-1. Open **http://127.0.0.1:8780/flow**.
-2. Enter the **Local console ADMIN_TOKEN** printed by the command.
-3. Select each of the five steps: Connect, Bind, Request, Decide, Inspect.
-4. Switch between the recorded ALLOW, APPROVAL REQUIRED, and DENY outcomes.
-5. Open **http://127.0.0.1:8780/console**, choose Live, and enter the same token.
-   Select the ALLOW event and inspect its correlated execution receipts.
+1. Open **http://127.0.0.1:8780/console** and connect operator access with the
+   **Local console ADMIN_TOKEN** printed by the command.
+2. **LIVE** shows the latest decision's chain; **Decisions** lists the three MCP
+   admissions with their traces; the ALLOW's evidence drawer groups its
+   execution receipts.
 
-The browser makes read-only requests. Neither page issues authority or executes
-tools. The command-line MCP client generated the evidence before the pages read it.
+The browser makes read-only requests unless you approve, revoke, or quarantine.
+The command-line MCP client generated the evidence before the page read it.
 
 | Client request | Authority result | Actual mock upstream calls |
 | --- | --- | --- |
@@ -70,10 +69,9 @@ stops after verification. Use `--port` and `--upstream-port` if the defaults are
 - Request sizes, upstream response bytes, deadlines, active HTTP requests, and
   execution concurrency are bounded. Compressed upstream responses are rejected
   so the response-byte bound cannot be bypassed by decompression.
-- `/flow` presents real evidence through five steps. The existing console groups
-  execution receipts under the selected decision, preserves the recorded task,
-  shows admission-time lease scope separately from fetched current context, and
-  includes original receipts in JSON exports.
+- The console groups execution receipts under the selected decision, keeps the
+  admission-time lease snapshot separate from the current lease, and exports
+  original receipts with the audit chain.
 
 Gateway records use a versioned `agent-plane.gateway.v1` envelope inside the
 existing audit JSON field. This adds no SQL columns and preserves old audit rows.
@@ -148,7 +146,5 @@ authority ordering, non-consuming preview, concurrent caps, protected/expired/
 revoked/out-of-scope authority, binding and argument checks, policy denial, audit
 failure, deduplication, cancellation, protocol metadata, origin and body limits.
 
-With Playwright installed as external tooling, for the live demo pages set `GATEWAY_ADMIN_TOKEN` to the token printed by
-`--serve`, then run `node tests/gateway.browser.cjs`. It checks five steps, three
-real outcomes, receipt grouping, mobile overflow, read-only requests, and
-credential-free exports. Screenshots are written to the OS temporary directory.
+The console is a Vite application under `console/`; `npm --prefix console run build`
+regenerates `agent_plane/console/dist`, which is committed and shipped in the wheel.

@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --paper: #f4f4ef;
+    --surface: #fafaf6;
+    --ink: #11110f;
+    --secondary: #66665f;
+    --hairline: #d7d7cf;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-paper text-ink font-sans text-base antialiased;
+    font-feature-settings: "ss01", "cv11", "tnum";
+  }
+  ::selection {
+    background: #11110f;
+    color: #f4f4ef;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #b9b9b0 transparent;
+  }
+  code,
+  kbd,
+  .mono {
+    @apply font-mono;
+  }
+}
+
+@layer components {
+  /* dot-matrix telemetry: sparse, uppercase, tabular */
+  .dot {
+    @apply font-dot uppercase tracking-[0.18em] text-ink;
+    font-variant-numeric: tabular-nums;
+  }
+  .eyebrow {
+    @apply text-2xs uppercase tracking-[0.14em] text-ink-2 font-medium;
+  }
+  .hairline-b {
+    box-shadow: inset 0 -1px 0 #d7d7cf;
+  }
+  .panel {
+    @apply bg-paper-raised border border-hairline rounded-md;
+  }
+  .lamp {
+    @apply inline-block h-[7px] w-[7px] rounded-full bg-ink-3 align-middle;
+  }
+  .lamp-on {
+    @apply bg-ink;
+  }
+  .lamp-allow {
+    @apply bg-allow;
+  }
+  .lamp-deny {
+    @apply bg-deny;
+  }
+  .lamp-approval {
+    @apply bg-approval;
+  }
+  .lamp-hold {
+    @apply bg-hold;
+  }
+  .ticker {
+    @apply font-mono text-2xs text-ink-2 whitespace-nowrap overflow-hidden;
+  }
+  .row-hover:hover {
+    background: #efefe9;
+  }
+  .edge-live {
+    stroke-dasharray: 4 4;
+    animation: dash 1.2s linear infinite;
+  }
+}

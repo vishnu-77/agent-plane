@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 132" width="520" height="132" role="img" aria-labelledby="t">
+  <title id="t">agent-plane: runtime authority and consequence governance for autonomous agents</title>
+  <defs>
+    <pattern id="hatch" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="3" stroke="#11110F" stroke-width="0.5" stroke-opacity="0.35"/>
+    </pattern>
+    <pattern id="dots" width="2.4" height="2.4" patternUnits="userSpaceOnUse">
+      <circle cx="1.2" cy="1.2" r="0.42" fill="#11110F" fill-opacity="0.5"/>
+    </pattern>
+  </defs>
+  <g transform="translate(6 6)">
+    <g stroke="#11110F" stroke-width="0.6" stroke-dasharray="1.4 2.2" stroke-opacity="0.55" fill="none">
+      <line x1="60" y1="8" x2="60" y2="112"/>
+      <line x1="14" y1="33.5" x2="106" y2="86.5"/>
+      <line x1="106" y1="33.5" x2="14" y2="86.5"/>
+    </g>
+    <g fill="#11110F">
+      <circle cx="60" cy="6" r="1.5"/><circle cx="60" cy="114" r="1.5"/>
+      <circle cx="12" cy="32.5" r="1.5"/><circle cx="108" cy="32.5" r="1.5"/>
+      <circle cx="12" cy="87.5" r="1.5"/><circle cx="108" cy="87.5" r="1.5"/>
+    </g>
+    <g stroke="#11110F" stroke-width="0.7" stroke-opacity="0.7">
+      <polygon points="24,22 60,40 60,102 24,84" fill="#11110F" fill-opacity="0.045"/>
+      <polygon points="96,22 60,40 60,102 96,84" fill="#11110F" fill-opacity="0.045"/>
+    </g>
+    <g stroke="#11110F" stroke-width="1.35" stroke-linejoin="round" fill="none">
+      <polygon points="60,28 88,44 60,60 32,44" fill="#FAFAF6"/>
+      <polygon points="32,44 60,60 60,92 32,76" fill="url(#hatch)"/>
+      <polygon points="60,60 88,44 88,76 60,92" fill="url(#dots)"/>
+    </g>
+    <g stroke="#11110F" stroke-width="0.6" stroke-dasharray="1.2 1.6" stroke-opacity="0.6" fill="none">
+      <line x1="60" y1="28" x2="60" y2="60"/>
+      <line x1="32" y1="76" x2="60" y2="60"/>
+      <line x1="88" y1="76" x2="60" y2="60"/>
+    </g>
+  </g>
+  <g fill="#11110F" font-family="Geist, Inter, 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">
+    <text x="150" y="70" font-size="44" font-weight="500" letter-spacing="6">agent-plane</text>
+    <text x="153" y="100" font-size="11.5" font-weight="500" letter-spacing="3.2" fill-opacity="0.62">RUNTIME AUTHORITY · CONSEQUENCE GOVERNANCE</text>
+  </g>
+</svg>

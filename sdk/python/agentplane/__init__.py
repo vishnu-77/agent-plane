@@ -56,17 +56,26 @@ class ApprovalTimeout(TimeoutError):
     """``wait_for_approval`` gave up before the request was decided."""
 
 
-_EXPECTED = {200: "allow", 202: "approval_required", 403: "deny"}
+_EXPECTED: dict[int, tuple[str, ...]] = {
+    200: ("allow", "simulate"),      # simulate = observe mode: recorded, not enforced
+    202: ("approval_required",),
+    403: ("deny",),
+    423: ("quarantine",),            # the agent is held by an operator
+}
 
 
 @dataclass(frozen=True)
 class AuthorityDecision:
-    decision: str          # "allow" | "deny" | "approval_required"
+    decision: str          # "allow" | "deny" | "approval_required" | "quarantine" | "simulate"
     reason: str             # machine-readable reason code, e.g. RESOURCE_PROTECTED
     lease: str | None
     evidence_id: str        # id of the signed audit record backing this decision
     approval_id: str | None = None   # set on approval_required (and on resumed decisions)
     context: dict[str, str] = field(default_factory=dict)
+    enforced: bool = True             # False only for simulate (observe mode)
+    would_be: str | None = None       # simulate: what enforce mode would have returned
+    consequence: dict[str, Any] = field(default_factory=dict)  # impact, environment, reversibility, ...
+    explanation: list[str] = field(default_factory=list)      # plain-English chain
     task: str = ""
     action: str = ""
     resource: str = ""
@@ -78,6 +87,17 @@ class AuthorityDecision:
     @property
     def needs_approval(self) -> bool:
         return self.decision == "approval_required"
+
+    @property
+    def quarantined(self) -> bool:
+        return self.decision == "quarantine"
+
+    @property
+    def proceed(self) -> bool:
+        """True when the executor may run the action: an explicit ALLOW, or an
+        observe-mode SIMULATE (nothing is enforced in observe mode). Adapters use
+        this; `allowed` stays strict for callers that want ALLOW only."""
+        return self.decision == "allow" or (self.decision == "simulate" and not self.enforced)
 
 
 @dataclass(frozen=True)
@@ -159,7 +179,7 @@ def _parse_decision(resp: httpx.Response, *, task: str, action: str, resource: s
     payload = body.get("detail", body) if isinstance(body, dict) else None
     if (
         not isinstance(payload, dict)
-        or payload.get("decision") != _EXPECTED[resp.status_code]
+        or payload.get("decision") not in _EXPECTED[resp.status_code]
         or not isinstance(payload.get("reason"), str)
         or not payload["reason"]
         or not isinstance(payload.get("evidence_id"), str)
@@ -176,11 +196,20 @@ def _parse_decision(resp: httpx.Response, *, task: str, action: str, resource: s
     context = payload.get("context") or {}
     if not isinstance(context, dict):
         raise AuthorizationProtocolError("Inconsistent authorization context")
+    enforced = payload.get("enforced", True)
+    if payload["decision"] == "simulate" and enforced is not False:
+        raise AuthorizationProtocolError("Inconsistent simulate decision")
+    consequence = payload.get("consequence") or {}
+    explanation = payload.get("explanation") or []
+    if not isinstance(consequence, dict) or not isinstance(explanation, list):
+        raise AuthorizationProtocolError("Inconsistent decision detail")
     return AuthorityDecision(
         decision=payload["decision"], reason=payload["reason"], lease=payload.get("lease"),
         evidence_id=payload["evidence_id"], approval_id=approval_id,
         context={str(k): str(v) for k, v in context.items()},
         task=task, action=action, resource=resource,
+        enforced=bool(enforced), would_be=payload.get("would_be"),
+        consequence=consequence, explanation=[str(x) for x in explanation],
     )
 
 
@@ -201,7 +230,7 @@ class AgentPlane:
 
     # -- authorization ---------------------------------------------------------- #
     def authorize(self, *, task: str, action: str, resource: str,
-                  approval: str | None = None,
+                  approval: str | None = None, impact: str | None = None,
                   context: dict[str, str] | None = None) -> AuthorityDecision:
         """Ask whether ``action`` on ``resource`` is authorised for ``task``.
 
@@ -213,6 +242,8 @@ class AgentPlane:
         body: dict[str, Any] = {"task": task, "action": action, "resource": resource}
         if approval:
             body["approval"] = approval
+        if impact:
+            body["impact"] = impact
         if context:
             body["context"] = dict(context)
         resp = self._client.post("/v1/authorize", json=body)
@@ -244,6 +275,14 @@ class AgentPlane:
             if time.monotonic() >= deadline:
                 raise ApprovalTimeout(f"approval {decision.approval_id} still pending after {timeout}s")
             time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
+
+    # -- intent / task provenance ------------------------------------------------ #
+    def register_task(self, task: str, *, origin: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Record where a task came from (prompt, event, human, parent agent).
+        Prompts are provenance, never permission: this grants nothing."""
+        resp = self._client.post("/v1/tasks", json={"task": task, "origin": origin or {}})
+        resp.raise_for_status()
+        return _json(resp).get("task") or {}
 
     # -- delegation --------------------------------------------------------------- #
     def delegate(self, lease_id: str, *, agent: str, **narrowing: Any) -> Lease:
@@ -352,6 +391,75 @@ class AgentPlaneAdmin:
         resp = self._client.post(f"/v1/approvals/{approval_id}/{verb}", json=body)
         resp.raise_for_status()
         return ApprovalRequest.from_json(_json(resp).get("approval"))
+
+    # -- registry: agents, tasks, resources, decisions ------------------------------- #
+    def agents(self, *, tenant: str | None = None) -> list[dict[str, Any]]:
+        resp = self._client.get("/v1/agents", params={"tenant": tenant} if tenant else None)
+        resp.raise_for_status()
+        return list(_json(resp).get("agents") or [])
+
+    def agent(self, agent_id: str, *, tenant: str | None = None) -> dict[str, Any]:
+        resp = self._client.get(f"/v1/agents/{agent_id}", params={"tenant": tenant} if tenant else None)
+        resp.raise_for_status()
+        return _json(resp)
+
+    def quarantine(self, agent_id: str, *, tenant: str = "default", note: str | None = None,
+                   on: bool = True) -> dict[str, Any]:
+        if on:
+            resp = self._client.post(f"/v1/agents/{agent_id}/quarantine", params={"tenant": tenant},
+                                     json={"note": note} if note else {})
+        else:
+            resp = self._client.delete(f"/v1/agents/{agent_id}/quarantine", params={"tenant": tenant})
+        resp.raise_for_status()
+        return _json(resp).get("agent") or {}
+
+    def register_task(self, task: str, *, tenant: str = "default", agent: str | None = None,
+                      origin: dict[str, Any] | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {"task": task, "tenant": tenant, "origin": origin or {}}
+        if agent:
+            body["agent"] = agent
+        resp = self._client.post("/v1/tasks", json=body)
+        resp.raise_for_status()
+        return _json(resp).get("task") or {}
+
+    def tasks(self, *, tenant: str | None = None) -> list[dict[str, Any]]:
+        resp = self._client.get("/v1/tasks", params={"tenant": tenant} if tenant else None)
+        resp.raise_for_status()
+        return list(_json(resp).get("tasks") or [])
+
+    def decisions(self, *, tenant: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"limit": limit}
+        if tenant:
+            params["tenant"] = tenant
+        resp = self._client.get("/v1/decisions", params=params)
+        resp.raise_for_status()
+        return list(_json(resp).get("decisions") or [])
+
+    def decision(self, decision_id: str) -> dict[str, Any]:
+        """The full trace: identity -> task -> authority lineage -> action -> resource
+        -> consequence -> decision -> explanation."""
+        resp = self._client.get(f"/v1/decisions/{decision_id}")
+        resp.raise_for_status()
+        return _json(resp)
+
+    def lineage(self, lease_id: str) -> list[dict[str, Any]]:
+        resp = self._client.get(f"/v1/lineage/{lease_id}")
+        resp.raise_for_status()
+        return list(_json(resp).get("lineage") or [])
+
+    def system(self, *, tenant: str | None = None) -> dict[str, Any]:
+        resp = self._client.get("/v1/system", params={"tenant": tenant} if tenant else None)
+        resp.raise_for_status()
+        return _json(resp)
+
+    def set_mode(self, mode: str, *, tenant: str | None = None) -> dict[str, Any]:
+        """observe (record, never block) or enforce."""
+        body: dict[str, Any] = {"mode": mode}
+        if tenant:
+            body["tenant"] = tenant
+        resp = self._client.put("/admin/mode", json=body)
+        resp.raise_for_status()
+        return _json(resp)
 
     # -- evidence -------------------------------------------------------------------- #
     def audit(self, *, limit: int = 50) -> list[dict[str, Any]]:

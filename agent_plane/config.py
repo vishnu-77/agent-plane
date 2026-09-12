@@ -146,6 +146,26 @@ class Settings(BaseSettings):
     # events (HMAC-SHA256 with AUDIT_SIGNING_KEY in X-AgentPlane-Signature).
     approval_webhook_url: str | None = None
 
+    # --- Resource / consequence catalog ---
+    # YAML resource + action profiles that turn an action into a consequence.
+    # Unset -> config/resources.yaml if present, else the packaged defaults.
+    resources_file: str | None = None
+
+    # --- Observe -> Enforce ---
+    # "enforce": DENY / APPROVAL / QUARANTINE are returned as such.
+    # "observe": nothing is blocked; a would-be DENY or APPROVAL comes back as
+    #            SIMULATE with `would_be`, and the registry records what the
+    #            agent tried so a lease can be inferred. Per-tenant override
+    #            via PUT /admin/mode.
+    enforcement_mode: Literal["enforce", "observe"] = "enforce"
+
+    # --- Hosted demo ---
+    # Enables /demo/* (deterministic scenarios against simulated targets in the
+    # isolated "demo" tenant) and lets the console read that tenant with
+    # X-Demo-Token instead of the admin token.
+    demo_enabled: bool = True
+    demo_token: str = "demo"
+
     # --- Observability ---
     # "text" (default) or "json" (one JSON object per line, for log shippers).
     log_format: Literal["text", "json"] = "text"

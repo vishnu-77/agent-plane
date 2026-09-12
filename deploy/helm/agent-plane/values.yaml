@@ -95,6 +95,11 @@ env:
   RATE_LIMIT_PER_MINUTE: "600"
   TRUST_FORWARDED_FOR: "true"
   APPROVAL_TTL_SECONDS: "3600"
+  # observe = record everything, block nothing (onboarding); enforce = real decisions.
+  ENFORCEMENT_MODE: enforce
+  # The hosted demo runs real decisions in an isolated tenant against simulated
+  # targets. Keep it off unless this deployment is the public demo.
+  DEMO_ENABLED: "false"
   # APPROVAL_WEBHOOK_URL: https://hooks.example.com/agent-plane
   # MCP_GATEWAY_FILE: /app/config/mcp-gateway.yaml   (mount it via extraVolumes)
 extraEnv: []            # raw env entries (valueFrom etc.)

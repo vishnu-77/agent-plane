@@ -41,6 +41,11 @@ class AuthorityReason(str, Enum):
     ACTION_LIMIT_EXCEEDED = "ACTION_LIMIT_EXCEEDED"
     ACTION_WITHIN_TASK_AUTHORITY = "ACTION_WITHIN_TASK_AUTHORITY"
     ACTION_REQUIRES_APPROVAL = "ACTION_REQUIRES_APPROVAL"
+    # Consequence boundary (agent_plane.consequence): the action is in scope but
+    # what it would cause exceeds what the task's lease permits.
+    CONSEQUENCE_OUTSIDE_TASK_BOUNDARY = "CONSEQUENCE_OUTSIDE_TASK_BOUNDARY"
+    # An operator quarantined the agent; nothing proceeds until lifted.
+    AGENT_QUARANTINED = "AGENT_QUARANTINED"
     # Approval resume path (POST /v1/authorize with "approval": "<id>")
     ACTION_APPROVED = "ACTION_APPROVED"
     APPROVAL_PENDING = "APPROVAL_PENDING"

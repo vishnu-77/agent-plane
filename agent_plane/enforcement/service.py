@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from agent_plane.approvals.store import new_request
 from agent_plane.authority.evaluator import evaluate_authority
+from agent_plane.authority.service import consequence_violations
 from agent_plane.enforcement.mapping import GatewayConfig
 from agent_plane.guardrails import scanner
 from agent_plane.guardrails.classifier import derive_classification
@@ -168,6 +169,17 @@ class EnforcementService:
                     decision, reason = policy.decision.value, policy.reason or "TOOL_POLICY_REQUIRES_APPROVAL"
                 lease = self.app.state.leases.get(binding.lease)
                 context["lease_snapshot"] = lease.model_dump(mode="json") if lease else None
+                catalog = getattr(self.app.state, "catalog", None)
+                if catalog is not None and lease is not None and decision in ("allow", "approval_required"):
+                    consequence = catalog.evaluate(tool.action, resource)
+                    violations = consequence_violations(lease, consequence)
+                    context["consequence"] = consequence.model_dump(mode="json")
+                    if violations:
+                        decision, reason = "deny", "CONSEQUENCE_OUTSIDE_TASK_BOUNDARY"
+                        context["consequence_violations"] = violations
+                registry = getattr(self.app.state, "agent_registry", None)
+                if registry is not None and registry.is_quarantined(actor.tenant, actor.agent_id or actor.user_id):
+                    decision, reason = "quarantine", "AGENT_QUARANTINED"
                 if approval_id and decision != "deny":
                     # Resume: a granted approval stands in for the approval gate, never for a dead lease.
                     decision, reason = self._resume_approval(actor, approval_id, context)
@@ -205,6 +217,13 @@ class EnforcementService:
                     result = {"decision": decision, "reason": "UPSTREAM_OUTCOME_UNKNOWN", "evidence": data, "result": None}
             if key:
                 ledger.request_complete(key, digest, result)
+            registry = getattr(self.app.state, "agent_registry", None)
+            if registry is not None:
+                registry.observe(tenant=actor.tenant, agent=actor.agent_id or actor.user_id, application=actor.app_id,
+                                 declared=list(actor.allowed_tools), task=binding.task, action=tool.action,
+                                 resource=resource, outcome=decision, decision_id=context["admission_id"],
+                                 context={"framework": "mcp"}, edge="mcp",
+                                 executed=result.get("result") is not None if decision == "allow" else None)
             return result
         finally:
             self.active -= 1

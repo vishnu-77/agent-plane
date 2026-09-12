@@ -75,8 +75,8 @@ def test_protected_call_returns_decision_without_contacting_upstream(gateway):
     assert 'main' not in json.dumps(response.json().get('error', {}))
 
 
-def test_walkthrough_is_served_read_only(gateway):
+def test_console_is_served_read_only(gateway):
     client, _ = gateway
-    assert client.get('/flow').status_code == 200
-    assert 'Integration walkthrough' in client.get('/flow').text
-    assert client.post('/flow').status_code == 405
+    assert client.get('/console').status_code == 200
+    assert 'agent-plane' in client.get('/console').text
+    assert client.post('/console').status_code == 405

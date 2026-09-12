@@ -31,6 +31,42 @@ Approval-related reasons: `ACTION_REQUIRES_APPROVAL`, `APPROVAL_PENDING`,
 `ACTION_APPROVED`, `APPROVAL_REJECTED`, `APPROVAL_EXPIRED`,
 `APPROVAL_ALREADY_USED`, `APPROVAL_MISMATCH`, `APPROVAL_NOT_FOUND`.
 
+Every decision response also carries `enforced` (false only for `simulate`),
+`would_be` (simulate only), `consequence` (impact, environment,
+reversibility, customer_facing, blast_radius, summary), and `explanation`
+(plain-English lines). Outcomes: `allow` 200, `simulate` 200, `approval_required`
+202, `deny` 403, `quarantine` 423.
+
+## System: registry, lineage, decisions
+
+Readable with the operator token (every tenant) or the demo viewer token
+(`X-Demo-Token`, demo tenant only).
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| GET | `/v1/system?tenant=` | operator/demo | LIVE telemetry: mode, counts, pending approvals, audit head. |
+| GET | `/v1/agents?tenant=` | operator/demo | The authority registry: discovered agents with declared, granted, exercised, denied authority. |
+| GET | `/v1/agents/{id}?tenant=` | operator/demo | One agent with leases, lineage, drift, children, recent decisions. |
+| POST / DELETE | `/v1/agents/{id}/quarantine?tenant=` | admin | Hold / release an agent; held agents get `quarantine` (423). |
+| GET | `/v1/agents/{id}/drift` | operator/demo | declared vs granted vs observed. |
+| GET | `/v1/agents/{id}/suggested-lease` | operator/demo | A lease inferred from observed behaviour (Observe → Enforce). |
+| GET | `/v1/tasks`, `/v1/tasks/{id}` | operator/demo | Tasks with origin, agents, leases, observed actions. |
+| POST | `/v1/tasks` | agent or admin | Register an intent: `{task, origin: {kind, ref, text, created_by, parent_task, parent_agent}}`. Provenance, not permission. |
+| GET | `/v1/resources` | operator/demo | Resources touched, their consequence profiles, and the catalog. |
+| GET | `/v1/lineage/{lease_id}` | operator/demo | Root-first chain of leases and their origins. |
+| GET | `/v1/decisions?tenant=&limit=` | operator/demo | Decision summaries newest first. |
+| GET | `/v1/decisions/{id}` | operator/demo | The full `agent-plane.trace.v1` plus the audit event, approval, and receipts. |
+| GET / PUT | `/admin/mode` | admin | Read / set `observe` or `enforce`, globally or per tenant. |
+
+## Demo
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/demo/scenarios` | Scenarios and the demo viewer token (when `DEMO_ENABLED`). |
+| POST | `/demo/reset` | Clear the demo tenant and simulated targets. |
+| POST | `/demo/scenarios/{name}/run` | Run all steps or `{"steps": [i]}`; returns real decision ids. |
+| GET | `/demo/targets` | Simulated target state. |
+
 ## Approvals
 
 | Method | Path | Auth | Purpose |
@@ -61,7 +97,7 @@ Approval-related reasons: `ACTION_REQUIRES_APPROVAL`, `APPROVAL_PENDING`,
 | `/healthz` | liveness |
 | `/readyz` | readiness: audit and authority stores reachable |
 | `/metrics` | Prometheus text (unauthenticated; `METRICS_ENABLED=false` to disable) |
-| `/console`, `/flow` | read-only console and guided MCP flow |
+| `/console` | the operator console (LIVE / DEMO); `/brand/*.svg` the mark |
 
 ## Webhook
 

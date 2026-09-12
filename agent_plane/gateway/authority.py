@@ -37,73 +37,13 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import ValidationError
 
-from agent_plane.approvals.store import new_request
-from agent_plane.authority.evaluator import (
-    AuthorityDecision,
-    AuthorityReason,
-    evaluate_authority,
-)
 from agent_plane.authority.lease import AuthorityLease, lease_attenuation_errors, parse_lease
-from agent_plane.authority.provenance import provenance_record, validate_context
+from agent_plane.authority.provenance import validate_context
 from agent_plane.config import Settings
 from agent_plane.gateway.authz import require_admin
 from agent_plane.gateway.identity import IdentityError, resolve_identity
-from agent_plane.schemas.canonical import Actor, DecisionAction
 
 authority_router = APIRouter()
-
-_STATUS = {
-    DecisionAction.ALLOW: 200,
-    DecisionAction.APPROVAL_REQUIRED: 202,
-    DecisionAction.DENY: 403,
-}
-
-
-def _resume_from_approval(
-    request: Request, actor: Actor, approval_id: str, *, task: str, action: str, resource: str,
-    impact: str,
-) -> tuple[AuthorityDecision, str | None]:
-    """Turn an approved request into a one-shot ALLOW, re-checking the lease first."""
-    store = request.app.state.approvals
-    decision_id = f"az_{uuid.uuid4().hex[:12]}"
-    req = store.get(approval_id)
-    subject = actor.agent_id or actor.user_id
-    if req is None or req.subject != subject or req.tenant != actor.tenant:
-        return AuthorityDecision(decision=DecisionAction.DENY,
-                                 reason=AuthorityReason.APPROVAL_NOT_FOUND,
-                                 decision_id=decision_id), None
-    if (req.task, req.action, req.resource) != (task, action, resource):
-        return AuthorityDecision(decision=DecisionAction.DENY,
-                                 reason=AuthorityReason.APPROVAL_MISMATCH,
-                                 lease_id=req.lease_id, decision_id=decision_id), req.id
-    if req.status == "pending":
-        return AuthorityDecision(decision=DecisionAction.APPROVAL_REQUIRED,
-                                 reason=AuthorityReason.APPROVAL_PENDING,
-                                 lease_id=req.lease_id, decision_id=decision_id), req.id
-    if req.status != "approved":
-        reason = {
-            "rejected": AuthorityReason.APPROVAL_REJECTED,
-            "expired": AuthorityReason.APPROVAL_EXPIRED,
-            "consumed": AuthorityReason.APPROVAL_ALREADY_USED,
-        }[req.status]
-        return AuthorityDecision(decision=DecisionAction.DENY, reason=reason,
-                                 lease_id=req.lease_id, decision_id=decision_id), req.id
-    # Approved: the lease must still be live (a revocation or expiry wins), and
-    # the approval is spent atomically so it cannot authorise two executions.
-    with request.app.state.leases.transaction():
-        current = evaluate_authority(
-            request.app.state.leases, actor, task=task, action=action, resource=resource,
-            impact=impact, consume=False,
-            lease_ids=frozenset([req.lease_id]) if req.lease_id else None,
-        )
-        if current.decision == DecisionAction.DENY:
-            return current, req.id
-        if not store.consume(req.id):
-            return AuthorityDecision(decision=DecisionAction.DENY,
-                                     reason=AuthorityReason.APPROVAL_ALREADY_USED,
-                                     lease_id=req.lease_id, decision_id=decision_id), req.id
-    return AuthorityDecision(decision=DecisionAction.ALLOW, reason=AuthorityReason.ACTION_APPROVED,
-                             lease_id=req.lease_id, decision_id=decision_id), req.id
 
 
 @authority_router.post("/v1/authorize")
@@ -112,19 +52,20 @@ async def authorize(
     body: dict[str, Any],
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
+    """One governed decision. The full chain (identity -> task -> authority
+    lineage -> action -> resource -> consequence -> decision -> explanation) is
+    computed by :class:`agent_plane.authority.service.AuthorityService`,
+    recorded on the audit chain, and readable at ``GET /v1/decisions/{id}``."""
     settings: Settings = request.app.state.settings
-    audit = request.app.state.audit
-
-    started = time.perf_counter()
     body = body or {}
     task = body.get("task")
     action = body.get("action")
     resource = body.get("resource")
     if not task or not action or not resource:
         raise HTTPException(status_code=400, detail="'task', 'action', and 'resource' are required")
-    # Caller-declared, like action/resource - the evaluator enforces it against
-    # the lease's `maximum_impact` ceiling, it doesn't independently verify it.
     impact = body.get("impact") or "reversible"
+    if impact not in ("reversible", "irreversible"):
+        raise HTTPException(status_code=400, detail="'impact' must be reversible or irreversible")
     approval_id = body.get("approval")
     if approval_id is not None and (not isinstance(approval_id, str) or not approval_id):
         raise HTTPException(status_code=400, detail="'approval' must be an approval id")
@@ -138,75 +79,13 @@ async def authorize(
     except IdentityError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    if approval_id:
-        decision, approval_ref = _resume_from_approval(
-            request, actor, approval_id, task=task, action=action, resource=resource,
-            impact=impact)
-    else:
-        decision = evaluate_authority(
-            request.app.state.leases, actor, task=task, action=action, resource=resource,
-            impact=impact,
-        )
-        approval_ref = None
-        if decision.decision == DecisionAction.APPROVAL_REQUIRED:
-            lease = request.app.state.leases.get(decision.lease_id) if decision.lease_id else None
-            req = new_request(
-                tenant=actor.tenant, subject=actor.agent_id or actor.user_id, task=task,
-                action=action, resource=resource, lease_id=decision.lease_id,
-                evidence_id=decision.decision_id, ttl_seconds=settings.approval_ttl_seconds,
-                context=context, lease_expires_at=lease.expires_at if lease else None,
-            )
-            request.app.state.approvals.create(req)
-            approval_ref = req.id
-
-    obligations: list[Any] = []
-    if context:
-        obligations.append(provenance_record(context))
-    if approval_ref:
-        obligations.append({"schema": "agent-plane.approval.v1", "approval_id": approval_ref})
-
-    audit.record({
-        "decision_id": decision.decision_id,
-        "user_id": actor.user_id,
-        "tenant": actor.tenant,
-        "department": actor.department,
-        "app_id": actor.app_id,
-        "agent_id": actor.agent_id,
-        "model_requested": f"authorize:{action}",
-        "model_used": resource,
-        "data_classification": "",
-        "decision": decision.decision.value,
-        "reason": decision.reason.value,
-        "rules_matched": [decision.lease_id] if decision.lease_id else [],
-        "obligations_applied": obligations,
-        "latency_ms": int((time.perf_counter() - started) * 1000),
-        "prompt_hash": hashlib.sha256(f"{task}:{action}:{resource}".encode()).hexdigest(),
-    })
-    request.app.state.usage.record({
-        "tenant": actor.tenant, "user_id": actor.user_id, "edge": "authorize",
-        "resource": action, "units": 1, "calls": 1, "decision_id": decision.decision_id,
-    })
-    request.app.state.metrics.observe_decision("authorize", decision.decision.value, decision.reason.value)
-
-    if approval_ref and not approval_id and decision.decision == DecisionAction.APPROVAL_REQUIRED:
-        req = request.app.state.approvals.get(approval_ref)
-        if req is not None:
-            request.app.state.approval_notifier.emit("approval.requested", req.model_dump(mode="json"))
-
-    payload: dict[str, Any] = {
-        "decision": decision.decision.value,
-        "reason": decision.reason.value,
-        "lease": decision.lease_id,
-        "evidence_id": decision.decision_id,
-    }
-    if approval_ref:
-        payload["approval_id"] = approval_ref
-    if context:
-        payload["context"] = context
-    status = _STATUS[decision.decision]
-    if status != 200:
-        raise HTTPException(status_code=status, detail=payload)
-    return payload
+    result = request.app.state.authority.decide(
+        actor, task=task, action=action, resource=resource, impact=impact,
+        approval=approval_id, context=context, edge="authorize",
+    )
+    if result.http_status != 200:
+        raise HTTPException(status_code=result.http_status, detail=result.payload)
+    return result.payload
 
 
 # --------------------------------------------------------------------------- #
@@ -223,7 +102,10 @@ async def issue_lease(
         lease = parse_lease(body or {})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid lease: {exc}") from exc
+    if not lease.origin:
+        lease = lease.model_copy(update={"origin": {"kind": "api", "created_by": "admin"}})
     request.app.state.leases.add(lease)
+    _attach(request, lease)
     _audit_admin(request, decision="allow", reason="LEASE_ISSUED", lease_id=lease.id)
     return {"issued": True, "lease": lease.model_dump(mode="json")}
 
@@ -270,7 +152,10 @@ async def issue_lease_from_template(
         raise HTTPException(status_code=400, detail=f"invalid template variables: {exc}") from exc
     if lease_id and request.app.state.leases.get(lease_id) is not None:
         raise HTTPException(status_code=409, detail="lease id already exists")
+    origin = body.get("origin") if isinstance(body.get("origin"), dict) else {"kind": "api", "created_by": "admin"}
+    lease = lease.model_copy(update={"origin": {**origin, "template": name}})
     request.app.state.leases.add(lease)
+    _attach(request, lease)
     _audit_admin(request, decision="allow", reason=f"LEASE_ISSUED_FROM_TEMPLATE:{name}",
                  lease_id=lease.id)
     return {"issued": True, "template": name, "lease": lease.model_dump(mode="json")}
@@ -330,6 +215,9 @@ async def delegate_lease(
             maximum_impact=(body or {}).get("maximum_impact") or parent.maximum_impact,
             # A child cannot re-delegate unless explicitly granted - default "none".
             child_authority=(body or {}).get("child_authority") or "none",
+            parent_lease=parent.id,
+            origin={"kind": "parent", "ref": parent.id, "created_by": parent.subject},
+            permitted_consequence=dict((body or {}).get("permitted_consequence") or parent.permitted_consequence),
         )
     except ValidationError as exc:
         raise HTTPException(
@@ -364,6 +252,7 @@ async def delegate_lease(
             "decision_id": decision_id})
 
     store.add(child)
+    _attach(request, child, parent_agent=parent.subject)
     record("allow", "ACTION_WITHIN_TASK_AUTHORITY")
     request.app.state.usage.record({
         "tenant": actor.tenant, "user_id": actor.user_id, "edge": "lease-delegate",
@@ -430,7 +319,7 @@ async def shrink_lease(
         merged.update({
             k: body[k] for k in (
                 "resources", "actions", "protected_resources", "max_uses",
-                "require_approval", "expires_at", "maximum_impact",
+                "require_approval", "expires_at", "maximum_impact", "permitted_consequence",
             ) if k in body
         })
         try:
@@ -452,6 +341,13 @@ async def shrink_lease(
         store.add(shrunk)
         _audit_admin(request, decision="allow", reason="LEASE_SHRUNK", lease_id=lease_id)
         return {"shrunk": True, "lease": shrunk.model_dump(mode="json")}
+
+
+def _attach(request: Request, lease: AuthorityLease, parent_agent: str | None = None) -> None:
+    registry = getattr(request.app.state, "agent_registry", None)
+    if registry is not None:
+        registry.attach_lease(tenant=lease.tenant, task=lease.task, agent=lease.subject,
+                              lease_id=lease.id, parent_agent=parent_agent)
 
 
 def _audit_admin(request: Request, *, decision: str, reason: str, lease_id: str) -> None:

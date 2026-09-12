@@ -5,6 +5,62 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-12
+
+The product is rebuilt around one narrative: an autonomous agent should only
+be able to cause consequences that are authorised for the task it performs.
+Every surface now answers the same question - does this agent have authority
+to cause this consequence, for this task, and where did that authority come
+from?
+
+### Added
+- **Consequence model** (`agent_plane/consequence`, `config/resources.yaml`):
+  every decision derives a structured consequence (effect, environment,
+  criticality, customer-facing, reversibility, persistence, downstream
+  dependents, blast radius, impact) from an operator-declared resource and
+  action catalog. Leases bound it with `permitted_consequence` (max impact,
+  environments, customer-facing, reversibility, blast radius) and delegation
+  can only narrow it. `CONSEQUENCE_OUTSIDE_TASK_BOUNDARY` denies an in-scope
+  action whose effect exceeds the task; the derived consequence also overrides
+  the caller-declared `impact`.
+- **Decision trace** (`agent-plane.trace.v1`, `GET /v1/decisions/{id}`): identity ->
+  task (with origin prompt) -> authority (with full lineage) -> action -> resource
+  -> consequence -> decision -> plain-English explanation, recorded on every
+  signed audit event and returned in the response (`explanation`, `consequence`).
+- **Agent Registry** (`agent_plane/registry`): agents, sessions, and tasks are
+  discovered from governed traffic. `GET /v1/agents`, `/v1/agents/{id}` (drift,
+  lineage, children, recent decisions), `/v1/tasks`, `POST /v1/tasks` (record an
+  intent's origin: prompt/event/human/parent), `/v1/resources`, `/v1/lineage/{id}`,
+  `/v1/system`.
+- **Authority lineage**: leases carry `parent_lease` and `origin`; delegation
+  sets both; decisions explain "No authority lineage permits X" with the chain.
+- **Outcomes QUARANTINE and SIMULATE**: `POST /v1/agents/{id}/quarantine` holds an
+  agent (HTTP 423); `ENFORCEMENT_MODE=observe` (or `PUT /admin/mode` per tenant)
+  returns SIMULATE with `would_be` instead of blocking, feeding
+  declared-vs-observed drift and `GET /v1/agents/{id}/suggested-lease` for
+  Observe -> Enforce onboarding.
+- **Hosted DEMO mode** (`DEMO_ENABLED`, `/demo/*`): three deterministic scenarios
+  (staging incident, GitHub maintenance, multi-agent delegation) run through the
+  real engine in the isolated `demo` tenant against simulated targets, with
+  execution receipts; the console reads the demo tenant with `X-Demo-Token`.
+- **New console** (`console/`, Vite + React + Tailwind + Radix, built into
+  `agent_plane/console/dist`): LIVE with the Authority–Consequence Graph, Agents
+  registry with inspector, Tasks, Resources, Authority × Consequence explorer,
+  Decisions with the Decision Inspector, Policies, Timeline, Audit, Integrations,
+  Gateway, Runtime, Settings; LIVE/DEMO switch; e-ink instrument visual system.
+- **Brand**: vector mark, logo, dark logo, and favicon under `agent_plane/console/brand`.
+- SDKs understand `simulate`/`quarantine`, expose `enforced`, `would_be`,
+  `consequence`, `explanation`, `proceed`, `register_task`, registry and decision
+  reads, and `set_mode`.
+
+### Changed
+- `POST /v1/authorize` is now a thin route over `AuthorityService.decide`; the
+  MCP gateway uses the same consequence and quarantine checks and feeds the registry.
+- The previous operator console, its assets, the `/flow` page, and the browser
+  tests are removed in favour of the new console.
+- README rewritten around the product narrative; docs gain concepts,
+  observe -> enforce, and demo pages.
+
 ## [0.5.0] - 2026-09-12
 
 ### Added

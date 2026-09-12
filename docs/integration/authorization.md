@@ -14,7 +14,7 @@ or install a framework plugin.
 ## 1. Where it fits
 
 For the new gateway path, see the [MCP enforcement preview](../../spec/mcp-gateway-preview.md).
-It includes a runnable MCP client/upstream demonstration and `/flow` walkthrough.
+It includes a runnable MCP client/upstream demonstration.
 The direct-HTTP integration below remains supported; the preview does not
 automatically intercept existing model or REST tool calls.
 
@@ -395,11 +395,9 @@ Repository checks:
 python -m pytest tests/test_authority.py tests/test_admin.py tests/test_production.py -q
 ```
 
-The optional `tests/gateway.browser.cjs` uses Playwright installed as external
-test tooling against `examples/mcp_gateway_demo.py --serve`; set
-`GATEWAY_ADMIN_TOKEN` to the printed token and run
-`node tests/gateway.browser.cjs`. The console itself has no JavaScript runtime
-dependencies or frontend build step.
+The console is a Vite + React application under `console/`. Its built bundle
+(`agent_plane/console/dist`) is committed and shipped in the wheel, so a
+runtime install needs no Node; `npm --prefix console run build` regenerates it.
 
 ## 10. Distribute and release
 

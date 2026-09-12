@@ -16,7 +16,7 @@
  * Uses the global `fetch` (Node 18+, browsers, edge runtimes). No dependencies.
  */
 
-export type DecisionKind = "allow" | "deny" | "approval_required";
+export type DecisionKind = "allow" | "deny" | "approval_required" | "quarantine" | "simulate";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "consumed" | "expired";
 
 export class AuthorizationProtocolError extends Error {
@@ -59,6 +59,15 @@ export interface AuthorityDecision {
   /** true only for an explicit ALLOW */
   allowed: boolean;
   needsApproval: boolean;
+  quarantined: boolean;
+  /** false only for observe-mode SIMULATE */
+  enforced: boolean;
+  /** simulate: what enforce mode would have returned */
+  wouldBe: string | null;
+  /** ALLOW, or an observe-mode SIMULATE: the executor may proceed */
+  proceed: boolean;
+  consequence: Record<string, unknown>;
+  explanation: string[];
 }
 
 export interface ApprovalRequest {
@@ -101,6 +110,8 @@ export interface AuthorizeInput {
   resource: string;
   /** resume a previously raised approval request */
   approval?: string;
+  /** caller-declared impact; the server derives its own from the resource catalog */
+  impact?: "reversible" | "irreversible";
   /** provenance attached to the audit record (parent_evidence_id, conversation_id, ...) */
   context?: Record<string, string>;
 }
@@ -112,7 +123,9 @@ export interface ClientOptions {
   timeoutMs?: number;
 }
 
-const EXPECTED: Record<number, DecisionKind> = { 200: "allow", 202: "approval_required", 403: "deny" };
+const EXPECTED: Record<number, DecisionKind[]> = {
+  200: ["allow", "simulate"], 202: ["approval_required"], 403: ["deny"], 423: ["quarantine"],
+};
 
 type Json = Record<string, unknown>;
 
@@ -133,7 +146,7 @@ function parseDecision(status: number, text: string, input: AuthorizeInput): Aut
   const payload = isRecord(body) && isRecord(body.detail) ? body.detail : body;
   if (
     !isRecord(payload) ||
-    payload.decision !== expected ||
+    !expected.includes(payload.decision as DecisionKind) ||
     typeof payload.reason !== "string" || !payload.reason ||
     typeof payload.evidence_id !== "string" || !payload.evidence_id ||
     (payload.lease != null && typeof payload.lease !== "string") ||
@@ -148,6 +161,10 @@ function parseDecision(status: number, text: string, input: AuthorizeInput): Aut
   const context: Record<string, string> = {};
   for (const [k, v] of Object.entries(rawContext ?? {})) context[k] = String(v);
   const decision = payload.decision as DecisionKind;
+  const enforced = payload.enforced === undefined ? true : payload.enforced === true;
+  if (decision === "simulate" && enforced) throw new AuthorizationProtocolError("Inconsistent simulate decision");
+  const consequence = isRecord(payload.consequence) ? payload.consequence : {};
+  const explanation = Array.isArray(payload.explanation) ? payload.explanation.map(String) : [];
   return {
     decision,
     reason: payload.reason,
@@ -160,6 +177,12 @@ function parseDecision(status: number, text: string, input: AuthorizeInput): Aut
     resource: input.resource,
     allowed: decision === "allow",
     needsApproval: decision === "approval_required",
+    quarantined: decision === "quarantine",
+    enforced,
+    wouldBe: (payload.would_be as string | undefined) ?? null,
+    proceed: decision === "allow" || (decision === "simulate" && !enforced),
+    consequence,
+    explanation,
   };
 }
 
@@ -233,6 +256,7 @@ export class AgentPlane extends BaseClient {
   async authorize(input: AuthorizeInput): Promise<AuthorityDecision> {
     const body: Json = { task: input.task, action: input.action, resource: input.resource };
     if (input.approval) body.approval = input.approval;
+    if (input.impact) body.impact = input.impact;
     if (input.context && Object.keys(input.context).length) body.context = input.context;
     const { status, text } = await this.call("POST", "/v1/authorize", body);
     return parseDecision(status, text, input);
@@ -241,6 +265,12 @@ export class AgentPlane extends BaseClient {
   async getApproval(approvalId: string): Promise<ApprovalRequest> {
     const { status, text } = await this.call("GET", `/v1/approvals/${encodeURIComponent(approvalId)}`);
     return asApproval(parseJson(status, text));
+  }
+
+  /** Record where a task came from. Prompts are provenance, never permission. */
+  async registerTask(task: string, origin: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const { status, text } = await this.call("POST", "/v1/tasks", { task, origin });
+    return (parseJson(status, text).task as Record<string, unknown>) ?? {};
   }
 
   /**
@@ -358,6 +388,29 @@ export class AgentPlaneAdmin extends BaseClient {
     return asApproval(parseJson(status, text).approval);
   }
 
+  async agents(opts: { tenant?: string } = {}): Promise<Array<Record<string, unknown>>> {
+    const q = opts.tenant ? `?tenant=${encodeURIComponent(opts.tenant)}` : "";
+    const { status, text } = await this.call("GET", `/v1/agents${q}`);
+    return (parseJson(status, text).agents as Array<Record<string, unknown>>) ?? [];
+  }
+
+  async decisions(opts: { tenant?: string; limit?: number } = {}): Promise<Array<Record<string, unknown>>> {
+    const params = new URLSearchParams({ limit: String(opts.limit ?? 50) });
+    if (opts.tenant) params.set("tenant", opts.tenant);
+    const { status, text } = await this.call("GET", `/v1/decisions?${params}`);
+    return (parseJson(status, text).decisions as Array<Record<string, unknown>>) ?? [];
+  }
+
+  async decision(decisionId: string): Promise<Record<string, unknown>> {
+    const { status, text } = await this.call("GET", `/v1/decisions/${encodeURIComponent(decisionId)}`);
+    return parseJson(status, text);
+  }
+
+  async setMode(mode: "observe" | "enforce", tenant?: string): Promise<Record<string, unknown>> {
+    const { status, text } = await this.call("PUT", "/admin/mode", tenant ? { mode, tenant } : { mode });
+    return parseJson(status, text);
+  }
+
   async audit(opts: { limit?: number } = {}): Promise<Array<Record<string, unknown>>> {
     const { status, text } = await this.call("GET", `/v1/audit?limit=${opts.limit ?? 50}`);
     return (parseJson(status, text).events as Array<Record<string, unknown>>) ?? [];
@@ -380,7 +433,7 @@ export function govern<A extends unknown[], R>(
     if (decision.needsApproval && spec.waitForApprovalMs) {
       decision = await plane.waitForApproval(decision, { timeoutMs: spec.waitForApprovalMs });
     }
-    if (!decision.allowed) {
+    if (!decision.proceed) {
       const err = new NotAuthorized(decision);
       throw err;
     }

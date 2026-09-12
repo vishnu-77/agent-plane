@@ -34,6 +34,23 @@ jobs:
       - name: Committed OpenAPI export is current
         run: python examples/export_openapi.py --check
 
+  console:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - name: Build the console (type-check + Vite)
+        working-directory: console
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Committed bundle is current
+        run: git diff --stat --exit-code -- agent_plane/console/dist || (echo "agent_plane/console/dist is stale; run 'npm --prefix console run build' and commit" && exit 1)
+
   sdk-typescript:
     runs-on: ubuntu-latest
     steps:

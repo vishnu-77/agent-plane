@@ -105,7 +105,7 @@ def authorize_call(
             decision = plane.wait_for_approval(decision, timeout=wait_for_approval)
         except ApprovalTimeout:
             raise ApprovalRequired(decision) from None
-    if decision.allowed:
+    if decision.proceed:
         return decision
     if decision.needs_approval:
         raise ApprovalRequired(decision)

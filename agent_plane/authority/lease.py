@@ -37,6 +37,21 @@ class AuthorityLease(BaseModel):
     child_authority: str = "subset_only"       # "subset_only" | "none"
     revoked: bool = False
 
+    # --- lineage and consequence (0.6) ---
+    # The lease this one was attenuated from (set by delegation). Walking
+    # parent_lease upwards yields the authority lineage back to its origin.
+    parent_lease: str | None = None
+    # Where the authority came from: {"kind": "human"|"prompt"|"event"|"parent"|"api",
+    # "ref": "...", "created_by": "...", "text": "..."}. Provenance, not permission.
+    origin: dict[str, Any] = Field(default_factory=dict)
+    # Bounds on what an authorised action may *cause* (see agent_plane.consequence):
+    #   max_impact: none|low|medium|high|critical   (default: follows maximum_impact)
+    #   environments: [..]        only these environments may be mutated
+    #   customer_facing: bool     may mutate customer-facing resources (default true)
+    #   max_reversibility: reversible|recoverable|irreversible (default irreversible)
+    #   max_blast_radius: int     max resources affected incl. downstream
+    permitted_consequence: dict[str, Any] = Field(default_factory=dict)
+
     @field_validator("expires_at")
     @classmethod
     def _tz_aware(cls, value: datetime | None) -> datetime | None:
@@ -97,6 +112,35 @@ def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> l
     unprotected = [p for p in parent.protected_resources if p not in child.protected_resources]
     if unprotected:
         errors.append(f"removes protected resources: {unprotected}")
+    errors.extend(consequence_attenuation_errors(parent.permitted_consequence, child.permitted_consequence))
+    return errors
+
+
+_CONSEQUENCE_IMPACT = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+_CONSEQUENCE_REVERSIBILITY = {"reversible": 0, "recoverable": 1, "irreversible": 2}
+
+
+def consequence_attenuation_errors(parent: dict[str, Any], child: dict[str, Any]) -> list[str]:
+    """A child's permitted consequence may only be narrower than its parent's."""
+    errors: list[str] = []
+    if "max_impact" in parent:
+        child_impact = child.get("max_impact", "critical")
+        if _CONSEQUENCE_IMPACT.get(child_impact, 4) > _CONSEQUENCE_IMPACT.get(parent["max_impact"], 4):
+            errors.append(f"permitted_consequence.max_impact {child_impact} exceeds parent {parent['max_impact']}")
+    if "environments" in parent:
+        child_envs = child.get("environments")
+        if child_envs is None or any(e not in parent["environments"] for e in child_envs):
+            errors.append("permitted_consequence.environments widens the parent's environments")
+    if parent.get("customer_facing") is False and child.get("customer_facing", True) is not False:
+        errors.append("permitted_consequence.customer_facing widens the parent's")
+    if "max_reversibility" in parent:
+        child_rev = child.get("max_reversibility", "irreversible")
+        if _CONSEQUENCE_REVERSIBILITY.get(child_rev, 2) > _CONSEQUENCE_REVERSIBILITY.get(parent["max_reversibility"], 2):
+            errors.append("permitted_consequence.max_reversibility widens the parent's")
+    if "max_blast_radius" in parent:
+        child_blast = child.get("max_blast_radius")
+        if child_blast is None or int(child_blast) > int(parent["max_blast_radius"]):
+            errors.append("permitted_consequence.max_blast_radius widens the parent's")
     return errors
 
 
@@ -149,4 +193,9 @@ def parse_lease(doc: dict[str, Any]) -> AuthorityLease:
         or doc.get("maximum_impact") or "reversible",
         child_authority=delegation.get("child_authority")
         or doc.get("child_authority") or "subset_only",
+        parent_lease=delegation.get("parent_lease") or doc.get("parent_lease"),
+        origin=dict(meta.get("origin") or doc.get("origin") or {}),
+        permitted_consequence=dict(
+            consequence.get("permitted") or doc.get("permitted_consequence") or {}
+        ),
     )
