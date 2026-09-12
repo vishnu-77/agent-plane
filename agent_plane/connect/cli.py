@@ -185,7 +185,7 @@ def _status(args: argparse.Namespace) -> int:
 
 
 def _disconnect(args: argparse.Namespace) -> int:
-    kind = KIND_OF.get(args.target, args.target)
+    kind = KIND_OF.get(args.integration, args.integration)
     removed = forget(kind, args.url)
     _say("Disconnected." if removed else "Nothing to disconnect.",
          "Remove the hook entry from your agent's settings file to stop reporting entirely.")
@@ -209,8 +209,14 @@ def main(argv: list[str] | None = None) -> int:
     status = sub.add_parser("status", help="show the current connection")
     status.add_argument("--url", default=os.environ.get("AGENTPLANE_URL", DEFAULT_URL))
     disconnect = sub.add_parser("disconnect", help="forget a stored credential")
-    disconnect.add_argument("target", choices=TARGETS)
-    disconnect.add_argument("--url", default=os.environ.get("AGENTPLANE_URL", DEFAULT_URL))
+    # Not "target": the subparser already owns that name, and a positional of
+    # the same name overwrites it, which sent `disconnect claude` down the
+    # connect path looking for a --key that this subcommand does not have.
+    disconnect.add_argument("integration", choices=TARGETS)
+    # No default: disconnecting an integration disconnects it, and --url only
+    # narrows that to one control plane.
+    disconnect.add_argument("--url", default=None,
+                            help="only forget the credential for this control plane")
 
     args = parser.parse_args(argv)
     if args.target == "status":

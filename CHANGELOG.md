@@ -100,6 +100,12 @@ developer has to know before it starts working for them.
   serialised payload, before redaction, and both spellings are accepted.
 - `examples` is a real package, so an unrelated installed distribution shipping a
   top-level `examples` module can no longer shadow the repository's own.
+- `agentplane connect disconnect <target>` crashed instead of running: its
+  positional argument shadowed the subcommand name, so the call fell through to
+  the connect path and failed looking for a `--key` it does not take. It also
+  only forgot a credential stored under the default URL, and reported "nothing
+  to disconnect" while the credential was still on disk; it now forgets the
+  integration, with `--url` narrowing that to one control plane.
 
 ## [0.6.0] - 2026-09-12
 

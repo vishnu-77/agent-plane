@@ -70,6 +70,28 @@ def test_credentials_are_stored_outside_anything_committable(home):
     assert load_credentials("codex") is None
 
 
+def test_status_and_disconnect_need_no_key(home, capsys):
+    """Neither reads a credential from the command line, and both must run.
+
+    `disconnect` took a positional named `target`, which is also the name the
+    subparser gives the chosen subcommand: the positional overwrote it, so the
+    call fell through to the connect path and died looking for --key.
+    """
+    from agent_plane.connect import cli
+
+    assert cli.main(["status"]) == 1                   # nothing to report
+    assert "Not connected" in capsys.readouterr().out
+
+    save_credentials(Credentials(url="http://localhost:8000", key="ap_live_secret123456789",
+                                 integration="claude-code", project="prj_1"))
+    assert cli.main(["disconnect", "claude"]) == 0
+    assert "Disconnected" in capsys.readouterr().out
+    assert load_credentials("claude-code") is None
+
+    assert cli.main(["disconnect", "claude"]) == 0      # already gone, still fine
+    assert "Nothing to disconnect" in capsys.readouterr().out
+
+
 def test_environment_beats_the_credentials_file(home, monkeypatch):
     save_credentials(Credentials(url="http://file", key="ap_live_fromfile0000000", integration="claude-code"))
     monkeypatch.setenv("AGENTPLANE_API_KEY", "ap_live_fromenv00000000")

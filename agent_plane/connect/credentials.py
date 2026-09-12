@@ -81,10 +81,21 @@ def load_credentials(integration: str | None = None, url: str | None = None) -> 
     return None
 
 
-def forget(integration: str, url: str) -> bool:
+def forget(integration: str, url: str | None = None) -> bool:
+    """Forget an integration's stored credential.
+
+    ``url`` narrows it to one control plane. Without it every entry for the
+    integration goes: someone who connected to a non-default URL and then runs
+    `disconnect` must not be told there was nothing to disconnect while the
+    credential is still on disk.
+    """
     path = credentials_path()
     entries = _read_all(path)
-    if entries.pop(f"{url}#{integration}", None) is None:
+    doomed = [name for name, entry in entries.items()
+              if entry.get("integration") == integration and (url is None or entry.get("url") == url)]
+    if not doomed:
         return False
-    path.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
+    for name in doomed:
+        entries.pop(name, None)
+    path.write_text(json.dumps(entries, indent=2) + chr(10), encoding="utf-8")
     return True
