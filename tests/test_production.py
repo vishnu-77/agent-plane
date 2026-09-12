@@ -65,6 +65,40 @@ def test_blank_secrets_do_not_bypass_production_checks(monkeypatch):
     assert any("AUDIT_SIGNING_KEY" in error for error in errors)
 
 
+@pytest.mark.parametrize("workers", ["0", "-1"])
+def test_cli_rejects_nonpositive_worker_counts(workers, capsys):
+    from agent_plane.cli import main
+
+    with pytest.raises(SystemExit) as error:
+        main(["serve", "--workers", workers])
+    assert error.value.code == 2
+    assert "at least 1" in capsys.readouterr().err
+
+
+def test_cli_rejects_multiple_workers_with_memory_store(monkeypatch, capsys):
+    from agent_plane.cli import main
+    from agent_plane.config import get_settings
+
+    monkeypatch.setenv("AUTHORITY_STORE", "memory")
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(SystemExit) as error:
+            main(["serve", "--workers", "2"])
+    finally:
+        get_settings.cache_clear()
+    assert error.value.code == 2
+    assert "process-local" in capsys.readouterr().err
+
+
+def test_memory_store_is_refused_in_production():
+    s = Settings(environment="production", jwt_secret="x" * 40, audit_signing_key="y" * 40,
+                 authority_store="memory")
+    assert any("AUTHORITY_STORE=memory" in e for e in s.production_errors())
+    s = Settings(environment="production", jwt_secret="x" * 40, audit_signing_key="y" * 40,
+                 mcp_gateway_file="config/mcp.yaml")
+    assert s.production_errors() == []  # the gateway is no longer refused in production
+
+
 def test_load_bundle_falls_back_to_packaged_defaults(tmp_path):
     # A fresh install with no policies in CWD must still be governed (not allow-all).
     bundle = load_bundle(str(tmp_path / "does-not-exist"))

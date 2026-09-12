@@ -5,12 +5,12 @@ plane around it - not the whole architecture at once.
 
 **Milestones are not package versions.** The rows below are capability
 milestones (M1, M2, ...); the shipped package version is in `pyproject.toml`
-and `CHANGELOG.md`. Milestones M1-M5 are all present in package 0.4.0.
+and `CHANGELOG.md`. Milestones M1-M5 are present in package 0.5.0.
 
 | Milestone | Primary capability                      | Status |
 | -------- | ---------------------------------------- | ------ |
 | **M1** | Runtime task-authority decisions (`AuthorityLease`, `POST /v1/authorize`, capability-manifest gate, tamper-evident evidence) | ✅ shipped |
-| **M2** | TypeScript SDK, MCP adapter, gateway/proxy mode | planned |
+| **M2** | TypeScript SDK, MCP adapter, gateway/proxy mode | ✅ shipped in 0.5.0: `/mcp` gateway with lease-gated admission and upstream credential separation, `@agent-plane/sdk`, Python adapters for LangChain / CrewAI / OpenAI Agents / custom loops, approval loop, durable shared authority store |
 | **M3** | Lease delegation + child authority (attenuated sub-leases, mirroring the A2A identity edge) | ✅ shipped |
 | **M4** | Dynamic authority shrinking/revocation for active leases | ✅ shipped |
 | **M5** | Consequence-aware decisions (`maximum_impact` actually gates, not just informational) | ✅ shipped: `POST /v1/authorize` takes a caller-declared `impact`, denied outright if it outranks the matched lease's ceiling. Caller-declared, not independently classified - no per-action impact registry yet. |
@@ -34,8 +34,10 @@ unsolved problem, not a backlog item. Three candidate paths:
 3. **Stay a decision point** and position accordingly, leaning on the audit
    chain as the product.
 
-Durability (leases/revocations in memory) has to be solved before 1 or 2 is
-meaningful — a chokepoint that forgets its revocations on restart is not one.
+Durability is solved as of 0.5.0: leases, use counters, approvals, and the MCP
+request ledger live in the shared SQL authority store, so path 1 is now real
+for MCP-speaking agents. Runtime *credential* revocations (`/admin/revocations`)
+are still per process; path 2 (per-lease credential minting) is open.
 
 v0.1 lives in `agent_plane/authority/` + `POST /v1/authorize` /
 `POST /v1/leases`; see [`spec/authority-lease.md`](spec/authority-lease.md) for

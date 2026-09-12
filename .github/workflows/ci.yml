@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -20,13 +25,91 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,mcp]"
+          pip install -e ./sdk/python
       - name: Test
         run: python -m pytest -q
-      - name: Build wheel
+      - name: Exercise MCP client through the gateway and mock upstream
+        run: python examples/mcp_gateway_demo.py
+      - name: Committed OpenAPI export is current
+        run: python examples/export_openapi.py --check
+
+  sdk-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test the TypeScript SDK (no build step; Node strips types)
+        working-directory: sdk/typescript
+        run: node --experimental-strip-types --test test/
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint and render the chart
         run: |
-          pip install build
-          python -m build --wheel
+          helm lint deploy/helm/agent-plane
+          helm template ci deploy/helm/agent-plane \
+            --set secrets.JWT_SECRET=ci --set postgres.url=postgresql+psycopg://ci@db/ci > /dev/null
+          helm template ci deploy/helm/agent-plane --set existingSecret=s --set autoscaling.enabled=true \
+            --set ingress.enabled=true > /dev/null
+  distributions:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check versions and build both distributions
+        run: |
+          python -m pip install build twine
+          python examples/check_release_version.py
+          python -m build --outdir dist/release/server
+          python -m build sdk/python --outdir dist/release/sdk
+          python -m twine check --strict dist/release/server/* dist/release/sdk/*
+      - name: Smoke-test wheels in a clean environment
+        run: python examples/smoke_distribution.py --dist-dir dist/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-distributions
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  container:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install smoke-test client
+        run: python -m pip install httpx pyjwt ./sdk/python
+      - name: Build and validate Compose configuration
+        run: |
+          docker compose config --quiet
+          docker build --tag agent-plane:ci .
+      - name: Smoke-test the image and save release candidates
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* || "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            python examples/smoke_container.py --image agent-plane:ci --save artifacts/image.tar
+          else
+            python examples/smoke_container.py --image agent-plane:ci
+          fi
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        with:
+          name: tested-container
+          path: artifacts/image.tar
+          if-no-files-found: error
+          retention-days: 3
 
   lint:
     runs-on: ubuntu-latest

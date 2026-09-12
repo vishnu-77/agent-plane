@@ -1,0 +1,131 @@
+# Plain-manifest equivalent of the Helm chart's defaults, for clusters that do
+# not use Helm. Replace the placeholder secret values and the Postgres URL,
+# then: kubectl apply -f deploy/kubernetes/agent-plane.yaml
+#
+# Every replica must share the same Postgres so leases, approvals, use counts,
+# and audit evidence are consistent; revocation then reaches every pod.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-plane
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-plane
+  namespace: agent-plane
+type: Opaque
+stringData:
+  JWT_SECRET: "replace-with-32-plus-random-bytes"
+  ADMIN_TOKEN: "replace-with-32-plus-random-bytes"
+  AUDIT_SIGNING_KEY: "replace-with-32-plus-random-bytes"
+  POSTGRES_URL: "postgresql+psycopg://agentplane:agentplane@postgres.agent-plane.svc:5432/agentplane"
+  REDIS_URL: "redis://redis.agent-plane.svc:6379/0"
+  # DELEGATION_PUBLIC_KEY: |
+  #   -----BEGIN PUBLIC KEY-----
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-plane
+  namespace: agent-plane
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-plane
+  namespace: agent-plane
+  labels:
+    app.kubernetes.io/name: agent-plane
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-plane
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8000"
+    spec:
+      serviceAccountName: agent-plane
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent-plane
+          image: ghcr.io/vishnu-77/agent-plane:0.4.0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: LOG_FORMAT
+              value: json
+            - name: IDENTITY_MODE
+              value: jwt_claims   # switch to delegation with DELEGATION_PUBLIC_KEY set
+            - name: STORAGE_BACKEND
+              value: postgres
+            - name: AUTHORITY_STORE
+              value: sql
+            - name: TRUST_FORWARDED_FOR
+              value: "true"
+          envFrom:
+            - secretRef:
+                name: agent-plane
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-plane
+  namespace: agent-plane
+spec:
+  selector:
+    app.kubernetes.io/name: agent-plane
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agent-plane
+  namespace: agent-plane
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-plane

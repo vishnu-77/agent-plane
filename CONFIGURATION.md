@@ -38,8 +38,18 @@ Same config-driven, default-deny pattern as models - see
 
 - `config/tools.yaml` (or `TOOLS_FILE`) - the tool broker's catalog.
 - `config/knowledge.yaml` (or `KNOWLEDGE_FILE`) - RAG sources + access metadata.
-- `config/leases.yaml` (or `LEASES_FILE`) - `AuthorityLease` grants; also issuable
-  at runtime via `POST /v1/leases`.
+- `config/leases.yaml` (or `LEASES_FILE`) - `AuthorityLease` grants seeded on
+  first start; also issuable at runtime via `POST /v1/leases`. Stored copies win
+  over the YAML on restart, so a revocation or shrink is never undone by a
+  redeploy.
+- `config/lease-templates.yaml` (or `LEASE_TEMPLATES_FILE`) - named lease shapes
+  for `POST /v1/leases/from-template`; variables fill `{placeholders}` in
+  resources and may not contain globs or traversal.
+- `APPROVAL_TTL_SECONDS`, `APPROVAL_WEBHOOK_URL` - approval-request lifetime and
+  the signed webhook for `approval.*` events.
+- `AUTHORITY_STORE` (`sql` default, `memory`) - where leases, use counters,
+  approvals, and the MCP request ledger live.
+- `LOG_FORMAT` (`text`/`json`), `METRICS_ENABLED` - observability.
 - `config/capability-manifest.yaml` + `config/threat-model.yaml` - kept in sync by
   `agentplane authority check-freshness` (CI-enforced).
 
@@ -73,15 +83,11 @@ signing secrets still fail the production startup checks.
 - Provider calls require the corresponding provider keys. The shipped mock
   tools can be exercised without provider credentials.
 
-The local-storage profile is for demonstrations: audit and usage history can
-disappear on cold starts, and instances do not share them. Leases, their use
-counters, and runtime revocations are also in memory. Postgres/Redis can persist
-audit, usage, and cache/quota data (install the corresponding optional extras),
-but do not make lease state shared or durable. Do not use this serverless demo
-for enforcement that depends on durable revocation or global lease-use limits.
-
-The in-memory lease constraint is not specific to serverless — it applies to
-any multi-worker deployment. See
+The local-storage profile is for demonstrations: with `/tmp` SQLite, audit,
+usage, leases, and approvals disappear on cold starts and instances do not
+share them. Point `STORAGE_BACKEND=postgres` at a shared database (install the
+`postgres` extra) to make audit and authority state durable and shared across
+instances; runtime credential revocations remain per instance. See
 [SECURITY.md § Known limitations](SECURITY.md#known-limitations-read-before-relying-on-it).
 
 Check the preview before merging:

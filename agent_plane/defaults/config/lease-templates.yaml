@@ -1,0 +1,41 @@
+# Lease templates (config-driven). A template fixes the shape of a task lease -
+# actions, protected resources, approval requirements, use limits, impact,
+# TTL - so the trusted backend only supplies the subject, task id, and a few
+# resource variables:
+#
+#   POST /v1/leases/from-template   (X-Admin-Token)
+#   {"template": "repair-service", "subject": "devops-agent",
+#    "task": "fix-staging-checkout", "variables": {"env": "staging", "service": "checkout"}}
+#
+# Variables substitute into {placeholders} in resources / protected_resources.
+# Values may not contain globs or traversal, so a caller cannot widen scope.
+templates:
+  - name: repair-service
+    description: Read and restart one service in one environment; production stays protected.
+    resources: ["{env}/{service}"]
+    actions: ["deployment.read", "deployment.restart"]
+    protected_resources: ["production/*"]
+    require_approval: ["deployment.restart"]
+    ttl_seconds: 1800
+    maximum_impact: reversible
+    child_authority: none
+
+  - name: clean-branches
+    description: List and delete stale branches in one repository, never the default branch.
+    resources: ["github://{owner}/{repo}", "github://{owner}/{repo}/*"]
+    actions: ["repository.read", "branch.list", "branch.delete"]
+    protected_resources: ["github://{owner}/{repo}/branches/main"]
+    max_uses:
+      branch.delete: 5
+    ttl_seconds: 3600
+    maximum_impact: reversible
+    child_authority: subset_only
+
+  - name: inspect-deployment
+    description: Read-only inspection of one environment for a short window.
+    resources: ["{env}/*"]
+    actions: ["deployment.read"]
+    protected_resources: ["production/*"]
+    ttl_seconds: 900
+    maximum_impact: reversible
+    child_authority: none

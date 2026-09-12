@@ -7,10 +7,10 @@ Two independent gates, in order:
    cover this action's namespace at all? This is the identity layer's static
    grant, same one the tool broker enforces.
 2. **Task authority** - do any of the actor's active :class:`AuthorityLease`
-   grants for this *task* cover this *resource* and *action*, under their
-   constraints (protected resources, use limits, expiry, and the proposed
-   action's declared ``impact`` against the lease's ``maximum_impact``
-   ceiling)?
+   grants for this *task* (in this *tenant*) cover this *resource* and
+   *action*, under their constraints (protected resources, use limits, expiry,
+   and the proposed action's declared ``impact`` against the lease's
+   ``maximum_impact`` ceiling)?
 
 Capability without task authority is exactly the "agent holds
 github.delete_repository but this task only authorises branch cleanup on one
@@ -41,6 +41,14 @@ class AuthorityReason(str, Enum):
     ACTION_LIMIT_EXCEEDED = "ACTION_LIMIT_EXCEEDED"
     ACTION_WITHIN_TASK_AUTHORITY = "ACTION_WITHIN_TASK_AUTHORITY"
     ACTION_REQUIRES_APPROVAL = "ACTION_REQUIRES_APPROVAL"
+    # Approval resume path (POST /v1/authorize with "approval": "<id>")
+    ACTION_APPROVED = "ACTION_APPROVED"
+    APPROVAL_PENDING = "APPROVAL_PENDING"
+    APPROVAL_REJECTED = "APPROVAL_REJECTED"
+    APPROVAL_EXPIRED = "APPROVAL_EXPIRED"
+    APPROVAL_ALREADY_USED = "APPROVAL_ALREADY_USED"
+    APPROVAL_MISMATCH = "APPROVAL_MISMATCH"
+    APPROVAL_NOT_FOUND = "APPROVAL_NOT_FOUND"
 
 
 class AuthorityDecision(BaseModel):
@@ -66,7 +74,24 @@ def _capability_covers(actor: Actor, action: str) -> bool:
 
 def evaluate_authority(
     store: LeaseStore, actor: Actor, *, task: str, action: str, resource: str,
-    impact: str = "reversible",
+    impact: str = "reversible", consume: bool = True,
+    lease_ids: frozenset[str] | None = None,
+) -> AuthorityDecision:
+    """Evaluate atomically under the store's admission lock.
+
+    ``impact`` is caller-declared and checked against the lease's
+    ``maximum_impact`` ceiling before any use is spent. ``consume=False`` is a
+    non-consuming preview (the MCP gateway reserves a use itself only on an
+    admitted ALLOW); ``lease_ids`` restricts evaluation to a trusted binding.
+    """
+    with store.transaction():
+        return _evaluate_authority(store, actor, task=task, action=action, resource=resource,
+                                   impact=impact, consume=consume, lease_ids=lease_ids)
+
+
+def _evaluate_authority(
+    store: LeaseStore, actor: Actor, *, task: str, action: str, resource: str,
+    impact: str, consume: bool, lease_ids: frozenset[str] | None,
 ) -> AuthorityDecision:
     decision_id = f"az_{uuid.uuid4().hex[:12]}"
 
@@ -79,6 +104,8 @@ def evaluate_authority(
 
     subject = actor.agent_id or actor.user_id
     leases = store.for_subject_task(subject, task, actor.tenant)
+    if lease_ids is not None:
+        leases = [lease for lease in leases if lease.id in lease_ids]
     if not leases:
         return AuthorityDecision(
             decision=DecisionAction.DENY, reason=AuthorityReason.NO_ACTIVE_LEASE,
@@ -100,26 +127,30 @@ def evaluate_authority(
             decision_id=decision_id,
         )
 
+    # Protection is a deny override across all active matching grants, independent
+    # of insertion order. No use may be consumed before checking this override.
+    for lease in active:
+        if resource_matches(lease.resources, resource) and resource_matches(lease.protected_resources, resource):
+            return AuthorityDecision(decision=DecisionAction.DENY,
+                                     reason=AuthorityReason.RESOURCE_PROTECTED,
+                                     lease_id=lease.id, decision_id=decision_id)
+
     best_reason = AuthorityReason.RESOURCE_OUTSIDE_DELEGATED_SCOPE
     for lease in active:
         if not resource_matches(lease.resources, resource):
             continue
-        # A protected resource is denied outright - it cannot be reached via a
-        # different, more permissive lease for the same task.
-        if resource_matches(lease.protected_resources, resource):
-            return AuthorityDecision(
-                decision=DecisionAction.DENY, reason=AuthorityReason.RESOURCE_PROTECTED,
-                lease_id=lease.id, decision_id=decision_id,
-            )
         if action not in lease.actions:
             best_reason = AuthorityReason.ACTION_NOT_AUTHORIZED
             continue
         # Unknown impact values rank as irreversible (fail closed), same
-        # convention as lease_attenuation_errors.
+        # convention as lease_attenuation_errors. Checked before a use is spent.
         if IMPACT_RANK.get(impact, 1) > IMPACT_RANK.get(lease.maximum_impact, 1):
             best_reason = AuthorityReason.ACTION_IMPACT_EXCEEDS_LEASE
             continue
-        if not store.try_consume(lease.id, action, lease.max_uses.get(action)):
+        limit = lease.max_uses.get(action)
+        available = (store.try_consume(lease.id, action, limit) if consume else
+                     limit is None or store.use_count(lease.id, action) < limit)
+        if not available:
             best_reason = AuthorityReason.ACTION_LIMIT_EXCEEDED
             continue
 

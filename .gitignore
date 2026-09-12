@@ -17,9 +17,11 @@
 !/examples/
 !/pyproject.toml
 !/vercel.json
+!/MANIFEST.in
 !/README.md
-!/ROADMAP.md
 !/INTEGRATION.md
+!/Dockerfile.alpine
+!/deploy/
 !/EDGES.md
 !/CONFIGURATION.md
 !/ARCHITECTURE.md
@@ -34,6 +36,30 @@
 !/.gitignore
 !/.github/
 
+# Public docs (docs/README.md, quickstart, integration guides, API reference,
+# deployment) and the README hero asset; the Medium series and capstone drafts
+# stay local.
+!/docs/
+/docs/*
+!/docs/README.md
+!/docs/quickstart.md
+!/docs/api-reference.md
+!/docs/deployment.md
+!/docs/openapi.json
+!/docs/integration/
+!/docs/assets/
+/docs/assets/*
+!/docs/assets/hero.png
+
+# Internal planning documents stay local, including within public directories.
+ROADMAP.md
+GATEWAY_PLAN.md
+spec/authority-provenance.md
+**/*PLAN*.md
+**/*ROADMAP*.md
+**/*plan*.md
+**/*roadmap*.md
+
 # 3) Strip build/runtime artifacts that live *inside* the re-included dirs.
 __pycache__/
 *.py[cod]
@@ -44,3 +70,9 @@ audit.db
 *.sqlite
 .vercel
 .env*
+sdk/python/build/
+sdk/python/dist/
+sdk/typescript/dist/
+node_modules/
+.playwright-mcp/
+.ruff_cache/

@@ -1,0 +1,27 @@
+agent-plane {{ .Chart.AppVersion }} is deploying as release "{{ .Release.Name }}".
+
+Service:  {{ include "agent-plane.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+Health:   GET /healthz   Readiness: GET /readyz   Metrics: GET /metrics
+Console:  port-forward and open http://127.0.0.1:8000/console
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "agent-plane.fullname" . }} 8000:{{ .Values.service.port }}
+
+{{- if not .Values.existingSecret }}
+{{- if not .Values.secrets.JWT_SECRET }}
+
+WARNING: secrets.JWT_SECRET is empty. In ENVIRONMENT=production the pod refuses
+to start with default secrets. Set existingSecret or secrets.* values.
+{{- end }}
+{{- end }}
+{{- if and (eq (index .Values.env "STORAGE_BACKEND") "postgres") (not .Values.postgres.url) (not .Values.existingSecret) }}
+
+WARNING: STORAGE_BACKEND=postgres but no postgres.url and no existingSecret with
+POSTGRES_URL. Every replica must share one database for leases, approvals, and
+audit evidence to be consistent.
+{{- end }}
+
+Next steps:
+  1. Issue a lease:   POST /v1/leases/from-template   (X-Admin-Token)
+  2. Authorize:       POST /v1/authorize              (agent bearer token)
+  3. Work approvals:  GET  /v1/approvals?status=pending
+Docs: https://github.com/vishnu-77/agent-plane/tree/main/docs

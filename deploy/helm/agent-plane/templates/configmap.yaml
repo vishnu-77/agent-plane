@@ -1,0 +1,27 @@
+{{- if .Values.policies }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent-plane.fullname" . }}-policies
+  labels:
+    {{- include "agent-plane.labels" . | nindent 4 }}
+data:
+  {{- range $name, $body := .Values.policies }}
+  {{ $name }}: |
+    {{- $body | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if .Values.config }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent-plane.fullname" . }}-config
+  labels:
+    {{- include "agent-plane.labels" . | nindent 4 }}
+data:
+  {{- range $name, $body := .Values.config }}
+  {{ $name }}: |
+    {{- $body | nindent 4 }}
+  {{- end }}
+{{- end }}

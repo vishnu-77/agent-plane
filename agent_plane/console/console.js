@@ -12,6 +12,7 @@ const names = {
   overview: "Overview",
   gateway: "Gateway",
   authority: "Authority leases",
+  approvals: "Approvals",
   decisions: "Decisions",
   policies: "Policies",
   usage: "Usage",
@@ -115,6 +116,7 @@ async function api(path, role = "admin", method = "GET", body) {
 const reads = {
   gateway: "/admin/gateway",
   leases: "/admin/leases",
+  approvals: "/v1/approvals?status=pending&limit=200",
   audit: "/v1/audit?limit=50",
   policies: "/admin/policies",
   revocations: "/admin/revocations",
@@ -356,7 +358,7 @@ function authority() {
         "primary",
       ),
     ) +
-    `<div class="banner neutral"><div><b>Authority is scoped to this running instance</b><p>Leases, revocations and use counts are in memory. They are not shared across serverless instances or retained after restart.</p></div></div>` +
+    `<div class="banner neutral"><div><b>${state.data.leases?.storage === "sql" ? "Authority state is durable and shared" : "Authority is scoped to this running instance"}</b><p>${state.data.leases?.storage === "sql" ? "Leases, use counts and approvals live in the configured database; every replica pointed at it sees the same state, and a revocation applies to all of them." : "Leases, revocations and use counts are in memory (AUTHORITY_STORE=memory). They are not shared across instances or retained after restart."}</p></div></div>` +
     panel(
       "Lease inventory",
       guard("leases") ||
@@ -367,6 +369,31 @@ function authority() {
               "Issue a lease to authorize a specific agent and task.",
             )),
       "Operator inventory across all tenants.",
+    )
+  );
+}
+function approvals() {
+  const items = state.data.approvals?.approvals || [];
+  const rows = items.length
+    ? `<div class="table-wrap"><table><thead><tr><th>Request</th><th>Agent / tenant</th><th>Action → resource</th><th>Lease</th><th>Expires</th><th></th></tr></thead><tbody>${items
+        .map(
+          (a) =>
+            `<tr><td><b>${esc(a.id)}</b><small>${esc(a.task)} · raised ${esc(date(a.created_at))}</small></td><td>${esc(a.subject)}<small>${esc(a.tenant)}</small></td><td><b>${esc(a.action)}</b><small>${esc(a.resource)}</small></td><td>${esc(a.lease_id || "—")}</td><td><small>${esc(a.expires_at ? date(a.expires_at) : "with lease")}</small></td><td>${button("Approve", "approve", idattr(a.id), "small primary")} ${button("Reject", "reject", idattr(a.id), "small")}</td></tr>`,
+        )
+        .join("")}</tbody></table></div>`
+    : empty(
+        "No pending approvals",
+        "APPROVAL REQUIRED decisions appear here until an operator approves or rejects them.",
+      );
+  return (
+    head(
+      "Approvals",
+      "Actions inside a lease that still need a human. Approving lets the executor resume that exact action once.",
+    ) +
+    panel(
+      "Pending requests",
+      guard("approvals", "Connect operator access to work the approval queue.") || rows,
+      "Across all tenants. A revoked or expired lease overrides a granted approval.",
     )
   );
 }
@@ -599,6 +626,7 @@ function render() {
     overview,
     gateway,
     authority,
+    approvals,
     decisions,
     policies,
     usage,
@@ -763,6 +791,25 @@ document.addEventListener("click", (event) => {
         toast("Policy bundle reloaded.");
       },
     );
+  if (action === "approve" || action === "reject") {
+    const verb = action;
+    dialog(
+      `${verb === "approve" ? "Approve" : "Reject"} ${id}`,
+      `<p>${verb === "approve" ? "The executor may resume this exact action once. A revoked or expired lease still wins." : "The executor will be denied when it resumes with this approval."}</p><form id="approval-form" class="section-gap">${field("note", "Note for the audit record", "", "text", false)}<div class="inline-error" id="mutation-error" role="alert"></div><div class="dialog-actions">${button("Cancel", "close")}<button type="submit" class="button primary">${verb === "approve" ? "Approve" : "Reject"}</button></div></form>`,
+    );
+    $("#approval-form").onsubmit = async (e) => {
+      e.preventDefault();
+      const note = new FormData(e.target).get("note") || undefined;
+      try {
+        await mutate(`/v1/approvals/${encodeURIComponent(id)}/${verb}`, "POST", { note, decided_by: "console" });
+        $("#dialog").close();
+        toast(verb === "approve" ? "Approval granted." : "Approval rejected.");
+        await refresh();
+      } catch (error) {
+        $("#mutation-error").textContent = error.message;
+      }
+    };
+  }
   if (action === "revoke-lease")
     confirmAction(
       "Revoke " + id,

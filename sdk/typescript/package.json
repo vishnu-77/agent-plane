@@ -1,0 +1,30 @@
+{
+  "name": "@agent-plane/sdk",
+  "version": "0.4.0",
+  "description": "TypeScript client for agent-plane runtime task authorization",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --experimental-strip-types --test test/"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vishnu-77/agent-plane.git",
+    "directory": "sdk/typescript"
+  },
+  "keywords": ["ai-agents", "authorization", "agent-security", "least-privilege", "agent-plane"]
+}

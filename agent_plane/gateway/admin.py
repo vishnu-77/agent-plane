@@ -116,7 +116,7 @@ async def gateway_catalog(
         "environment": settings.environment,
         "identity_mode": settings.identity_mode,
         "storage_backend": settings.storage_backend,
-        "lease_storage": "in_memory",
+        "lease_storage": "sql" if getattr(state.leases, "durable", False) else "in_memory",
         "models": models,
         "tools": tools,
         "knowledge": [
@@ -147,7 +147,7 @@ async def list_leases(
             **lease.model_dump(mode="json"), "status": status,
             "uses": {action: store.use_count(lease.id, action) for action in lease.actions},
         })
-    return {"items": items, "storage": "in_memory"}
+    return {"items": items, "storage": "sql" if getattr(store, "durable", False) else "in_memory"}
 
 
 @admin_router.post("/policies/reload")

@@ -26,6 +26,15 @@ start with default secrets). Before exposing it:
       the app now refuses to start in production (warns and runs allow-all
       outside production).
 - [ ] Treat the audit log as evidence: ship it to durable, append-only storage.
+- [ ] Keep `AUTHORITY_STORE=sql` (the default) and point every replica at one
+      shared Postgres, so leases, use counters, approvals, and revocations are
+      consistent across workers. `memory` is refused in production.
+- [ ] Restrict `/metrics` at the ingress (or set `METRICS_ENABLED=false`); it
+      is unauthenticated by design.
+- [ ] If you set `APPROVAL_WEBHOOK_URL`, verify `X-AgentPlane-Signature` on the
+      receiver before acting on an event.
+- [ ] Review any `agentplane mcp discover` output before enabling the MCP
+      gateway: every generated `action`/`resource` mapping is a grant surface.
 
 ## Built-in abuse protection
 
@@ -52,12 +61,20 @@ update.
   executes. An agent that never calls it, or ignores a deny, is not
   constrained. Task authority governs an orchestrator you trust to ask — it is
   not a sandbox and does not contain a compromised or prompt-injected agent
-  holding its own credentials. The tool broker and model proxy *are* binding,
-  because the credential lives server-side.
+  holding its own credentials. The tool broker, the model proxy, and the MCP
+  gateway *are* binding, because the credential lives server-side.
+- **Authorization is not execution.** An ALLOW, or a consumed approval, proves
+  a decision was made, not that the side effect happened or was the only one.
+  The executor owns idempotency and outcome logging; the MCP gateway records
+  dispatch/completion receipts but cannot prove a timed-out call had no effect.
 - **`impact` is caller-declared.** `maximum_impact` gates a value supplied by
   the party being governed, and an omitted `impact` currently defaults to the
   permissive `reversible`. There is no server-side action→impact registry to
   cross-check against yet. It stops an honest agent, not a lying one.
+- **Approvals bind an action, not an outcome.** A granted approval authorises
+  exactly one resume of the identical task/action/resource (and, on the MCP
+  path, the identical argument digest). Notifying the right human is the
+  webhook receiver's job; the runtime only tracks and expires the request.
 
 ### Identity and tenancy
 
@@ -67,16 +84,21 @@ update.
   `IDENTITY_MODE=delegation`**. Use delegation in production (the server warns
   otherwise).
 - **The admin plane is not tenant-scoped.** One `ADMIN_TOKEN` covers every
-  tenant's leases, and `GET /v1/audit` is deliberately cross-tenant.
+  tenant's leases and approvals, and `GET /v1/audit` is deliberately
+  cross-tenant.
 
 ### Durability
 
-- **Leases, use counters and runtime revocations are in-process memory.** They
-  do not survive a restart and are not shared between workers or replicas: two
-  workers means a `max_uses: 5` cap is effectively 10, and a revocation applies
-  only to the process that received it. Run a single worker where those
-  guarantees matter, until this moves to the database.
-- **Serverless deployment voids the above entirely**, plus audit durability —
+- **Leases, use counters, approvals, and the MCP request ledger live in the
+  SQL authority store** (SQLite or Postgres, sharing the audit database) and
+  are shared by every replica pointed at it. Use reservation is a single
+  atomic update; on Postgres, admission also holds an advisory lock. SQLite
+  is correct across processes but serialises writers; use Postgres for more
+  than one replica.
+- **Runtime credential revocations (`/admin/revocations`) are still
+  in-process memory.** Use `REVOKED_JTIS` / `REVOCATION_FILE` for revocations
+  that must survive a restart or apply to every replica.
+- **Serverless deployment voids durability**, plus audit durability —
   ephemeral per-instance storage means the hash chain forks per instance and
   vanishes on cold start. The serverless profile is for demonstrations only.
 

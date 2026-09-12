@@ -1,0 +1,14 @@
+apiVersion: v2
+name: agent-plane
+description: Runtime authority for AI agents - task-scoped authorization, approvals, policy enforcement, and an MCP gateway.
+type: application
+version: 0.1.0
+appVersion: "0.4.0"
+kubeVersion: ">=1.25.0"
+keywords: [ai-agents, authorization, agent-security, least-privilege, mcp]
+home: https://github.com/vishnu-77/agent-plane
+sources:
+  - https://github.com/vishnu-77/agent-plane
+maintainers:
+  - name: agent-plane maintainers
+    url: https://github.com/vishnu-77/agent-plane

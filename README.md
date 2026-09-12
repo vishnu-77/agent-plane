@@ -222,7 +222,9 @@ checked live on every `/v1/authorize` call, not cached from issuance.
 
 ```text
 Agent -> Action     POST /v1/authorize        pure decision, nothing executes
-Agent -> Tool/MCP   POST /v1/tools/invoke      policy-gated, broker holds the credential
+Human -> Approval   /v1/approvals              approve / reject; executor resumes once
+Agent -> MCP tool   POST /mcp                  lease-gated admission, gateway holds the credential
+Agent -> Tool       POST /v1/tools/invoke      policy-gated, broker holds the credential
 Agent -> Model      POST /v1/chat/completions  policy-gated, OpenAI-compatible
 Agent -> Knowledge  POST /v1/retrieve          policy-gated, identity-aware RAG
 Agent -> Agent      POST /v1/agents/delegate   scoped identity delegation (A2A)
@@ -231,9 +233,10 @@ Agent -> Agent      POST /v1/agents/delegate   scoped identity delegation (A2A)
 Every edge shares the same identity resolver, the same YAML policy engine,
 and the same signed audit chain — not five unrelated products bolted
 together. `/v1/authorize` and `/v1/agents/delegate` additionally evaluate
-`AuthorityLease`/attenuation; the model, tool, and retrieval edges are
-governed by policy. Full endpoint table and curl walkthroughs for every
-edge: [EDGES.md](EDGES.md).
+`AuthorityLease`/attenuation, and so does the MCP gateway before it dispatches;
+the model, tool, and retrieval edges are governed by policy. Full endpoint
+table and curl walkthroughs for every edge: [EDGES.md](EDGES.md) and
+[docs/integration](docs/integration/README.md).
 
 ## Where a decision actually binds
 
@@ -241,8 +244,9 @@ Two different things are on offer here, and the difference matters more than
 any feature in this README.
 
 **Chokepoints — the plane executes, so the answer is binding.** On
-`/v1/tools/invoke`, `/v1/chat/completions` and `/v1/retrieve`, the credential
-lives on the server side: the broker calls the tool with *its* key, the proxy
+`/mcp`, `/v1/tools/invoke`, `/v1/chat/completions` and `/v1/retrieve`, the
+credential lives on the server side: the MCP gateway admits a mapped tool call
+against the bound lease and dispatches with its own upstream credential, the broker calls the tool with *its* key, the proxy
 holds the provider key, retrieval filters before returning. An agent that
 skips these edges has no credential to skip them *with* — provided you also
 revoke its direct provider/tool credentials, which is on you, not on
@@ -255,8 +259,18 @@ ignores a 403, is not constrained by it. Task authority is a control on an
 orchestrator you trust to ask — it is not a sandbox, and it does not contain
 a compromised or prompt-injected agent that holds its own credentials.
 
-Closing that gap — MCP adapter, egress interception, or per-lease credential
-minting — is the open design question, tracked in [ROADMAP.md](ROADMAP.md).
+The MCP gateway closes that gap for agents that speak MCP: point the client at
+`/mcp` and every `tools/call` is admitted against the lease before dispatch.
+For everything else, the SDK adapters put the check at your tool-dispatch
+point in one line, and the conformance kit proves the executor never runs
+without ALLOW. Egress interception and per-lease credential minting remain
+the open design question, tracked in [ROADMAP.md](ROADMAP.md).
+
+**Human in the loop.** An action inside a lease can still `require_approval`.
+The 202 opens a tracked request; an operator approves it in the console, via
+`/v1/approvals`, or from a signed webhook receiver; the executor resumes with
+the approval id and gets ALLOW exactly once. A revoked lease beats a granted
+approval. See [docs/integration/approvals.md](docs/integration/approvals.md).
 
 ### What the decision itself covers
 
@@ -294,17 +308,29 @@ MCP / GitHub / cloud APIs / internal APIs / databases
 
 agent-plane is a service your agent calls before (or through) acting — a
 `base_url` swap for the OpenAI-compatible edge, a broker call for tools, a
-decision call for the task-authority edge. It is not a code-free proxy for
-every managed agent platform; where an integration needs a gateway,
-sidecar, or SDK call, see [INTEGRATION.md](INTEGRATION.md) for exactly
-what's zero-code and what isn't.
+decision call for the task-authority edge, or an MCP endpoint swap. It is not
+a code-free proxy for every managed agent platform; the
+[integration guides](docs/integration/README.md) say exactly what is
+zero-code (model calls, MCP) and what is one wrapper at your dispatch point
+(everything else, with adapters for LangChain, CrewAI, OpenAI Agents, and
+custom loops in the [Python](sdk/python/README.md) and
+[TypeScript](sdk/typescript/README.md) SDKs).
+
+Leases, use counters, approvals, and the MCP request ledger live in the same
+database as the audit chain (SQLite by default, Postgres for more than one
+replica), so a revocation reaches every worker and a restart forgets nothing.
+Helm chart and Kubernetes manifests: [deploy/](deploy/README.md).
 
 ## Run with Docker
 
 ```bash
-docker build -t agent-plane .
-docker run -p 8000:8000 --env-file .env agent-plane
+docker build -t agent-plane .                       # ~287 MB; Dockerfile.alpine ~184 MB
+docker run -p 127.0.0.1:8000:8000 --env-file .env \
+  -e SQLITE_PATH=/data/audit.db -v agent-plane-data:/data agent-plane
 ```
+
+The volume keeps audit records, leases, use counters, and approvals across
+restarts. `docker compose up --build` runs the Postgres + Redis profile.
 
 ## Security-sensitive behaviour covered by tests
 
@@ -341,8 +367,10 @@ Four that decide whether this fits your deployment at all:
 - **`/v1/authorize` decides, it does not execute** — an agent that never asks
   is not constrained by it.
 - **`impact` is caller-declared**, and defaults to the permissive value.
-- **Leases, use counters and revocations live in process memory** — they don't
-  survive a restart or span workers.
+- **Runtime credential revocations (`/admin/revocations`) live in process
+  memory**; leases, use counters, and approvals are durable and shared, but
+  that revocation set is not — use `REVOKED_JTIS` / `REVOCATION_FILE` for
+  revocations that must survive a restart.
 - **Audit truncation is undetectable** and signing is symmetric (HMAC).
 
 The full list, with what each one does and doesn't cover, is maintained in one
@@ -351,10 +379,13 @@ That file also carries the production-hardening checklist.
 
 ## Repository guide
 
+- **[docs/](docs/README.md)** — quickstart, per-edge integration guides, approvals, adapters, conformance kit, API reference, deployment
 - **[EDGES.md](EDGES.md)** — every edge's curl walkthrough, identity modes
 - **[CONFIGURATION.md](CONFIGURATION.md)** — policies, models, tools, knowledge, leases, `.env`
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — design principles, control-plane/edge model, Postgres+Redis
-- **[INTEGRATION.md](INTEGRATION.md)** — wiring this into an existing product (what's zero-code, what isn't)
+- **[INTEGRATION.md](INTEGRATION.md)** — pointer to the integration guides (what's zero-code, what isn't)
+- **[deploy/](deploy/README.md)** — container, Compose, Helm chart, Kubernetes manifests
+- **[sdk/python](sdk/python/README.md)** / **[sdk/typescript](sdk/typescript/README.md)** — clients, adapters, conformance kit
 - **[spec/authority-lease.md](spec/authority-lease.md)** — the `AuthorityLease` object, evaluation order, reason codes
 - **[SECURITY.md](SECURITY.md)** — production hardening checklist, abuse protection, known limitations
 - **[ROADMAP.md](ROADMAP.md)** — staged plan, what's shipped vs. planned

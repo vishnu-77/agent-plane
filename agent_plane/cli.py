@@ -57,11 +57,21 @@ def main(argv: list[str] | None = None) -> None:
     authority = sub.add_parser("authority", help="task-authority tooling (e.g. threat-model freshness)")
     authority.add_argument("args", nargs=argparse.REMAINDER)
 
+    mcp = sub.add_parser("mcp", help="MCP gateway tooling (discover -> mapping YAML)")
+    mcp.add_argument("args", nargs=argparse.REMAINDER)
+
     args = parser.parse_args(argv)
 
     if args.cmd == "init":
         _init(args)
     elif args.cmd == "serve":
+        if args.workers < 1:
+            parser.error("--workers must be at least 1")
+        if args.workers != 1:
+            from agent_plane.config import get_settings
+
+            if get_settings().authority_store == "memory":
+                parser.error("AUTHORITY_STORE=memory is process-local; --workers must be 1")
         import uvicorn
 
         uvicorn.run(
@@ -86,6 +96,10 @@ def main(argv: list[str] | None = None) -> None:
         from agent_plane import authority_cli
 
         authority_cli.main(args.args)
+    elif args.cmd == "mcp":
+        from agent_plane.enforcement import discover
+
+        discover.main(args.args)
 
 
 if __name__ == "__main__":
