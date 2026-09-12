@@ -124,3 +124,24 @@ def test_transaction_is_reentrant(db_url):
     with store.transaction():
         with store.transaction():
             assert store.get("lease-a") is not None
+
+
+def test_pre_0_5_database_is_migrated_in_place(tmp_path):
+    """A database created before the tenant column existed must open and keep its leases."""
+    import json
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE authority_leases (id VARCHAR(200) PRIMARY KEY, subject VARCHAR(200), "
+                 "task VARCHAR(200), revoked BOOLEAN, document JSON, created_at DATETIME, updated_at DATETIME)")
+    doc = {"id": "old-lease", "task": "t", "subject": "agent", "tenant": "acme", "resources": ["r/*"], "actions": ["x.do"]}
+    conn.execute("INSERT INTO authority_leases VALUES (?, ?, ?, ?, ?, NULL, NULL)",
+                 ("old-lease", "agent", "t", 0, json.dumps(doc)))
+    conn.commit()
+    conn.close()
+
+    store = SqlLeaseStore(f"sqlite:///{path}")
+    assert store.get("old-lease").tenant == "acme"
+    assert [ls.id for ls in store.for_subject_task("agent", "t", "acme")] == ["old-lease"]
+    assert SqlLeaseStore(f"sqlite:///{path}").get("old-lease") is not None  # idempotent

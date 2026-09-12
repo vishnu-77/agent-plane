@@ -19,6 +19,7 @@ deduplicate retried tool calls by request key.
 """
 from __future__ import annotations
 
+import json
 import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -35,6 +36,7 @@ from sqlalchemy import (
     create_engine,
     delete,
     func,
+    inspect,
     select,
     text,
     update,
@@ -178,10 +180,29 @@ class SqlLeaseStore:
         connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
         self._engine = create_engine(db_url, connect_args=connect_args, future=True)
         Base.metadata.create_all(self._engine)
+        self._migrate()
         self._session_factory = sessionmaker(bind=self._engine, class_=Session)
         self._is_postgres = "postgresql" in db_url
         self._lock = threading.RLock()
         self._local = threading.local()
+
+    def _migrate(self) -> None:
+        """Bring a database created by an earlier release up to date.
+
+        0.5 added the tenant column to authority_leases. Existing rows are
+        stamped with the tenant recorded in their JSON document (or "default"),
+        so leases issued before the upgrade keep working.
+        """
+        columns = {c["name"] for c in inspect(self._engine).get_columns("authority_leases")}
+        if "tenant" in columns:
+            return
+        with self._engine.begin() as conn:
+            conn.execute(text("ALTER TABLE authority_leases ADD COLUMN tenant VARCHAR(128) DEFAULT 'default'"))
+            rows = conn.execute(text("SELECT id, document FROM authority_leases")).all()
+            for lease_id, document in rows:
+                doc = document if isinstance(document, dict) else json.loads(document or "{}")
+                conn.execute(text("UPDATE authority_leases SET tenant = :t WHERE id = :i"),
+                             {"t": doc.get("tenant") or "default", "i": lease_id})
 
     # -- transaction ---------------------------------------------------------- #
     @contextmanager
