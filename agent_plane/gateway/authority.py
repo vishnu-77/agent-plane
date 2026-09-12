@@ -39,9 +39,8 @@ from pydantic import ValidationError
 
 from agent_plane.authority.lease import AuthorityLease, lease_attenuation_errors, parse_lease
 from agent_plane.authority.provenance import validate_context
-from agent_plane.config import Settings
 from agent_plane.gateway.authz import require_admin
-from agent_plane.gateway.identity import IdentityError, resolve_identity
+from agent_plane.gateway.context import resolve_request
 
 authority_router = APIRouter()
 
@@ -51,12 +50,12 @@ async def authorize(
     request: Request,
     body: dict[str, Any],
     authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """One governed decision. The full chain (identity -> task -> authority
     lineage -> action -> resource -> consequence -> decision -> explanation) is
     computed by :class:`agent_plane.authority.service.AuthorityService`,
     recorded on the audit chain, and readable at ``GET /v1/decisions/{id}``."""
-    settings: Settings = request.app.state.settings
     body = body or {}
     task = body.get("task")
     action = body.get("action")
@@ -74,14 +73,19 @@ async def authorize(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    try:
-        actor = resolve_identity(authorization, settings, request.app.state.revocations)
-    except IdentityError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    # A Project API Key, or one of the token identity modes. Either way the
+    # caller ends up as an Actor in exactly one project.
+    ctx = resolve_request(request, authorization=authorization, x_api_key=x_api_key, body=body)
+    ctx.requires("authorize")
 
     result = request.app.state.authority.decide(
-        actor, task=task, action=action, resource=resource, impact=impact,
-        approval=approval_id, context=context, edge="authorize",
+        ctx.actor, task=task, action=action, resource=resource, impact=impact,
+        # The SDKs declare an integration on every request, and "custom" is what
+        # they say when the caller named none. That is not a distinct edge: this
+        # one is the decision API, so only a named integration renames it.
+        approval=approval_id, context=context,
+        edge=ctx.integration if ctx.integration and ctx.integration != "custom" else "authorize",
+        integration=ctx.integration,
     )
     if result.http_status != 200:
         raise HTTPException(status_code=result.http_status, detail=result.payload)
@@ -172,7 +176,6 @@ async def delegate_lease(
     `POST /v1/agents/delegate` - not admin-gated). Child scope must be a
     subset of the parent's; the parent must allow delegation at all
     (`child_authority != "none"`)."""
-    settings: Settings = request.app.state.settings
     audit = request.app.state.audit
     store = request.app.state.leases
 
@@ -181,10 +184,7 @@ async def delegate_lease(
     if parent is None:
         raise HTTPException(status_code=404, detail="lease not found")
 
-    try:
-        actor = resolve_identity(authorization, settings, request.app.state.revocations)
-    except IdentityError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    actor = resolve_request(request, authorization=authorization, body=body or {}).actor
 
     if actor.agent_id != parent.subject:
         raise HTTPException(status_code=403, detail="only the lease holder may delegate it")

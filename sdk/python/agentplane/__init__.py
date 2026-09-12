@@ -27,6 +27,7 @@ conformance kit in :mod:`agentplane.testing`.
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -41,6 +42,7 @@ __all__ = [
     "AuthorityDecision",
     "AuthorizationProtocolError",
     "Lease",
+    "Task",
 ]
 
 
@@ -221,12 +223,67 @@ def _make_client(base_url: str, headers: dict[str, str], timeout: float,
     return httpx.Client(**kwargs)
 
 
-class AgentPlane:
-    """Executor-side client, authenticated with the agent bearer token."""
+class Task:
+    """One unit of work an agent is doing, and the authority it acts under.
 
-    def __init__(self, base_url: str, token: str, *, timeout: float = 10.0,
-                 transport: httpx.BaseTransport | None = None):
-        self._client = _make_client(base_url, {"Authorization": f"Bearer {token}"}, timeout, transport)
+    ``task.authorize(...)`` asks before a side effect; ``task.report(...)``
+    tells agent-plane what a tool did. Both carry the task, so the decision
+    and its evidence are attributable to the thing someone actually asked for.
+    """
+
+    def __init__(self, plane: AgentPlane, name: str, *, origin: dict[str, Any] | None = None):
+        self.plane = plane
+        self.name = name
+        self.origin = origin or {}
+
+    def authorize(self, action: str, resource: str, **kwargs: Any) -> AuthorityDecision:
+        return self.plane.authorize(task=self.name, action=action, resource=resource, **kwargs)
+
+    def report(self, *, tool: str | None = None, action: str | None = None,
+               resource: str | None = None, arguments: dict[str, Any] | None = None,
+               **kwargs: Any) -> dict[str, Any]:
+        return self.plane.report(task=self.name, tool=tool, action=action, resource=resource,
+                                 arguments=arguments, **kwargs)
+
+    def __enter__(self) -> Task:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+class AgentPlane:
+    """Executor-side client.
+
+    Normally constructed from a Project API Key, which is all a developer
+    holds::
+
+        ap = AgentPlane()                                  # AGENTPLANE_API_KEY / AGENTPLANE_URL
+        ap = AgentPlane(api_key="ap_live_...", url="https://plane.acme.com")
+
+    The original signature still works for deployments that mint their own
+    identity tokens::
+
+        ap = AgentPlane("http://localhost:8000", agent_jwt)
+    """
+
+    def __init__(self, base_url: str | None = None, token: str | None = None, *,
+                 api_key: str | None = None, url: str | None = None,
+                 agent: str | None = None, integration: str = "custom",
+                 timeout: float = 10.0, transport: httpx.BaseTransport | None = None):
+        credential = api_key or token or os.environ.get("AGENTPLANE_API_KEY")
+        endpoint = url or base_url or os.environ.get("AGENTPLANE_URL") or "http://127.0.0.1:8000"
+        if not credential:
+            raise ValueError(
+                "No credential. Pass api_key=... or set AGENTPLANE_API_KEY "
+                "(get one from Integrations in the console)."
+            )
+        headers = {"Authorization": f"Bearer {credential}", "X-Integration": integration}
+        if agent:
+            headers["X-Agent-Id"] = agent
+        self.agent = agent
+        self.integration = integration
+        self._client = _make_client(endpoint, headers, timeout, transport)
 
     # -- authorization ---------------------------------------------------------- #
     def authorize(self, *, task: str, action: str, resource: str,
@@ -276,6 +333,38 @@ class AgentPlane:
                 raise ApprovalTimeout(f"approval {decision.approval_id} still pending after {timeout}s")
             time.sleep(min(interval, max(0.0, deadline - time.monotonic())))
 
+    # -- tasks --------------------------------------------------------------------- #
+    def task(self, name: str, *, origin: dict[str, Any] | None = None) -> Task:
+        """Start (or resume) a task. Registers its provenance, then hands back a
+        handle you can authorize and report against::
+
+            with ap.task("fix-authentication-tests") as task:
+                if task.authorize("filesystem.write", "workspace/src/auth.ts").proceed:
+                    write_the_file()
+        """
+        try:
+            self.register_task(name, origin=origin)
+        except httpx.HTTPStatusError:
+            # Registering provenance is a convenience, not a precondition for
+            # asking permission. A rejected registration must not stop the work.
+            pass
+        return Task(self, name, origin=origin)
+
+    def report(self, *, task: str, tool: str | None = None, action: str | None = None,
+               resource: str | None = None, arguments: dict[str, Any] | None = None,
+               **extra: Any) -> dict[str, Any]:
+        """Report one action. The server normalizes the tool name and arguments
+        into a canonical action and resource, decides, and records it."""
+        body: dict[str, Any] = {"task": task, **extra}
+        for key, value in (("tool", tool), ("action", action), ("resource", resource),
+                           ("arguments", arguments), ("agent", self.agent),
+                           ("integration", self.integration)):
+            if value is not None:
+                body[key] = value
+        resp = self._client.post("/v1/events/action", json=body)
+        resp.raise_for_status()
+        return _json(resp)
+
     # -- intent / task provenance ------------------------------------------------ #
     def register_task(self, task: str, *, origin: dict[str, Any] | None = None) -> dict[str, Any]:
         """Record where a task came from (prompt, event, human, parent agent).
@@ -304,7 +393,12 @@ class AgentPlane:
 
 
 class AgentPlaneAdmin:
-    """Backend / operator client, authenticated with ``ADMIN_TOKEN``."""
+    """Backend / operator client.
+
+    Authenticated with a management key (``ap_mgmt_...``, scoped to one
+    project) or the deployment's ``ADMIN_TOKEN``. Neither is an agent
+    credential; both belong in a trusted backend.
+    """
 
     def __init__(self, base_url: str, admin_token: str, *, timeout: float = 10.0,
                  transport: httpx.BaseTransport | None = None):

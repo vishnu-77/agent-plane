@@ -6,7 +6,7 @@
 #
 # This is deliberately separate from any one agent's AuthorityLease: a lease
 # grants task-scoped authority *within* what's declared possible here.
-version: "4"
+version: "6"
 
 capabilities:
   - edge: consequence
@@ -24,8 +24,14 @@ capabilities:
     description: an operator holds an agent (POST /v1/agents/{id}/quarantine); every action returns QUARANTINE
   - edge: observe-mode
     description: >-
-      ENFORCEMENT_MODE=observe (or PUT /admin/mode per tenant) returns SIMULATE with would_be
-      instead of DENY/APPROVAL; nothing is blocked, everything is recorded
+      observe mode (a project's own mode, ENFORCEMENT_MODE, or PUT /admin/mode per tenant)
+      returns SIMULATE with would_be instead of DENY/APPROVAL; nothing is blocked,
+      everything is recorded
+  - edge: govern-mode
+    description: >-
+      govern mode returns the real decision and flags the violation, but `enforced` is
+      false so the caller may still proceed; the middle step between observe and enforce,
+      chosen per project (observe -> govern -> enforce)
   - edge: lineage
     description: child leases carry parent_lease and origin; GET /v1/lineage/{id} and every decision trace show the chain
   - edge: demo
@@ -50,3 +56,46 @@ capabilities:
     description: >-
       admin revokes (DELETE) or narrows in place (PATCH) an active AuthorityLease
       (/v1/leases/{id}); effective immediately, shrink can only narrow - never widen
+  - edge: accounts
+    description: >-
+      self-serve users, workspaces, projects, and memberships (POST /v1/auth/signup,
+      /login, /logout, /exchange; GET /v1/auth/state, /v1/auth/me; /v1/projects*,
+      /v1/workspaces/{id}/members); scrypt-hashed passwords and a signed httponly
+      console session cookie, SIGNUP_MODE bounds who may ever create the first account
+  - edge: api-key
+    description: >-
+      project-scoped API keys minted, rotated, and revoked from the console
+      (/v1/api-keys*): ap_live_ / ap_test_ authorize agent traffic for one project,
+      ap_mgmt_ authorizes read/write operator calls for that project alone; shown once,
+      stored only as an HMAC keyed by API_KEY_SECRET_VALUE (falls back to JWT_SECRET)
+  - edge: events
+    description: >-
+      the ingestion edge every connector reports to (POST /v1/events/action, batched up
+      to 50, and POST /v1/sessions): a raw tool call is normalized into a canonical
+      action + resource, evaluated for authority and consequence, and recorded; the
+      project's collection policy drops prompt text, tool arguments, and outputs unless
+      a human turned them on, and absolute paths are stripped of usernames
+  - edge: rules
+    description: >-
+      developer-facing ALLOW / ASK FIRST / NEVER rules per project (/v1/rules*, plus
+      GET /v1/rules/suggested drafted from observed traffic); scoped by agent,
+      integration, and environment, compiled on each decision into one ephemeral
+      AuthorityLease (ask -> require_approval, never -> denied_actions); no applicable
+      rule means no lease, which leaves the project default-deny
+  - edge: rules-as-a-file
+    description: >-
+      a project's rules can be exported and applied as YAML (GET /v1/rules/export,
+      POST /v1/rules/import, `agentplane rules check|pull|push`); import merges by rule
+      name, or `replace` deletes every rule the file does not mention; accepts a console
+      session or an ap_mgmt_ key, never an ap_live_ project key; an unknown field is
+      rejected rather than ignored, and a file that fails validation changes nothing
+  - edge: connector
+    description: >-
+      the local connector CLI (`agentplane connect claude|codex|cursor|mcp|sdk`) records
+      an integration (/v1/integrations*), stores the Project API Key in
+      ~/.agentplane/credentials.json (owner-only, 0600), and installs a Claude Code /
+      Codex pre-tool hook that reports each tool call and blocks on exit 2 - only in
+      enforce mode, and never when the control plane is unreachable; the MCP gateway
+      accepts the same Project API Key (or an identity token), but a caller with no
+      (tenant, agent) binding in MCP_GATEWAY_FILE is refused, and for a key the
+      operator's tool mapping is the capability manifest

@@ -1,7 +1,7 @@
 [project]
 name = "agent-plane"
-version = "0.6.0"
-description = "Runtime authority for AI agents: task-scoped authorization, policy enforcement, and MCP gateway"
+version = "0.7.0"
+description = "A context-to-action control plane for AI agents: connect an agent, see what it does, and control what it is allowed to cause"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

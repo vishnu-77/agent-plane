@@ -15,11 +15,13 @@ from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from importlib.resources import files
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
+from agent_plane.accounts import build_account_store
 from agent_plane.approvals.notify import ApprovalNotifier
 from agent_plane.approvals.store import build_approval_store
 from agent_plane.audit.store import build_audit_store
@@ -32,10 +34,12 @@ from agent_plane.consequence import build_consequence_catalog
 from agent_plane.demo.harness import DemoHarness
 from agent_plane.demo.router import demo_router
 from agent_plane.gateway.a2a import a2a_router
+from agent_plane.gateway.accounts_router import accounts_router
 from agent_plane.gateway.admin import admin_router
 from agent_plane.gateway.approvals import approvals_router
 from agent_plane.gateway.authority import authority_router
 from agent_plane.gateway.broker import broker_router
+from agent_plane.gateway.events_router import events_router
 from agent_plane.gateway.retrieval import retrieval_router
 from agent_plane.gateway.router import router
 from agent_plane.gateway.usage_api import usage_router
@@ -47,9 +51,25 @@ from agent_plane.registry.router import registry_router
 from agent_plane.routing.knowledge import build_knowledge_store
 from agent_plane.routing.registry import ModelRegistry
 from agent_plane.routing.tools import build_tool_registry
+from agent_plane.rules import build_rule_store
 from agent_plane.usage.store import build_usage_store
 
 logger = logging.getLogger("agent_plane")
+
+
+def load_rule_templates(settings: Settings) -> list[dict]:
+    """Starter rule sets offered in the Rules screen (never auto-applied)."""
+    import yaml
+
+    from agent_plane.defaults import default_config_file
+
+    path = Path(settings.rule_templates_file) if settings.rule_templates_file else Path("config/rule-templates.yaml")
+    if not path.exists():
+        path = default_config_file("rule-templates.yaml")
+    if not path.exists():
+        return []
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return list(doc.get("templates") or [])
 
 
 def _installed_version() -> str:
@@ -108,11 +128,18 @@ async def lifespan(app: FastAPI):
     )
     app.state.catalog = build_consequence_catalog(settings)
     app.state.agent_registry = build_registry(settings)
+    app.state.accounts = build_account_store(settings)
+    app.state.rules = build_rule_store(settings)
+    app.state.rule_templates = load_rule_templates(settings)
     app.state.cache = build_cache_store(settings)
     app.state.audit = build_audit_store(settings)
     app.state.usage = build_usage_store(settings)
     app.state.authority = AuthorityService(app.state)
     app.state.demo = DemoHarness(app.state) if settings.demo_enabled else None
+    if settings.demo_enabled:
+        # The hosted demo lives in its own project so it can never read or
+        # write anything a real workspace owns.
+        app.state.accounts.ensure_demo_project()
     if not hasattr(app.state, "metrics"):
         app.state.metrics = Metrics()
     # Runtime revocation set, mutated live by the admin API.
@@ -120,10 +147,13 @@ async def lifespan(app: FastAPI):
 
     logger.info(
         "agent-plane ready: version=%s env=%s identity=%s backend=%s authority_store=%s "
-        "policy_version=%s",
+        "mode=%s policy_version=%s",
         _installed_version(), settings.environment, settings.identity_mode,
-        settings.storage_backend, settings.authority_store, bundle.version,
+        settings.storage_backend, settings.authority_store, settings.enforcement_mode,
+        bundle.version,
     )
+    if app.state.accounts.user_count() == 0:
+        logger.info("No accounts yet - open /console to create the first one.")
     if getattr(app.state, "mcp_app", None) is not None:
         async with app.state.mcp_app.router.lifespan_context(app.state.mcp_app):
             yield
@@ -270,6 +300,8 @@ def create_app() -> FastAPI:
     app.include_router(authority_router)
     app.include_router(approvals_router)
     app.include_router(registry_router)
+    app.include_router(accounts_router)
+    app.include_router(events_router)
     app.include_router(demo_router)
     app.include_router(usage_router)
     app.include_router(admin_router)

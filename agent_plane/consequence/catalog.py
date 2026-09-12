@@ -31,12 +31,22 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Impact = Literal["none", "low", "medium", "high", "critical"]
 Reversibility = Literal["reversible", "recoverable", "irreversible"]
 Persistence = Literal["transient", "durable", "permanent"]
 Effect = Literal["read", "list", "create", "mutate", "restart", "delete", "execute", "send", "export"]
+# The consequence *class*: a small closed vocabulary describing the kind of
+# effect, independent of which resource it lands on. Deterministic by design:
+# no scoring, no inference, no model in the path.
+ConsequenceClass = Literal[
+    "read_only", "workspace_mutation", "repository_mutation", "destructive_resource_change",
+    "service_interruption", "configuration_change", "credential_access", "data_egress",
+    "external_communication", "code_execution", "dependency_change",
+]
+# How far one action reaches on its own, before downstream dependents.
+Scope = Literal["none", "single_file", "workspace", "single_service", "repository", "account", "organisation"]
 
 IMPACT_RANK: dict[str, int] = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 REVERSIBILITY_RANK: dict[str, int] = {"reversible": 0, "recoverable": 1, "irreversible": 2}
@@ -44,6 +54,17 @@ PERSISTENCE_RANK: dict[str, int] = {"transient": 0, "durable": 1, "permanent": 2
 _EFFECT_SEVERITY: dict[str, str] = {
     "read": "none", "list": "none", "create": "low", "mutate": "medium", "restart": "medium",
     "execute": "medium", "send": "medium", "export": "high", "delete": "high",
+}
+_EFFECT_CLASS: dict[str, str] = {
+    "read": "read_only", "list": "read_only", "create": "workspace_mutation",
+    "mutate": "workspace_mutation", "restart": "service_interruption",
+    "delete": "destructive_resource_change", "execute": "code_execution",
+    "send": "external_communication", "export": "data_egress",
+}
+_EFFECT_SCOPE: dict[str, str] = {
+    "read": "none", "list": "none", "create": "single_file", "mutate": "single_file",
+    "restart": "single_service", "delete": "single_service", "execute": "workspace",
+    "send": "organisation", "export": "organisation",
 }
 _DEFAULT_TEMPLATE = "config/resources.yaml"
 
@@ -65,6 +86,8 @@ class ResourceProfile(BaseModel):
 
 
 class ActionProfile(BaseModel):
+    """What an action does, before we know which resource it lands on."""
+
     model_config = ConfigDict(extra="forbid")
 
     pattern: str
@@ -73,13 +96,52 @@ class ActionProfile(BaseModel):
     reversibility: Reversibility | None = None
     persistence: Persistence | None = None
     direct_effect: str = ""
+    # The deterministic registry entry, per spec: class / scope / reversible /
+    # environment_sensitive. Written either flat or under a `consequence:` block.
+    consequence_class: ConsequenceClass | None = None
+    scope: Scope | None = None
+    environment_sensitive: bool = False
+    label: str = ""                         # human phrasing for the UI ("Push git changes")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_consequence_block(cls, data: Any) -> Any:
+        """Allow the documented nested form:
+
+            git.push:
+              consequence:
+                class: repository_mutation
+                reversible: true
+                scope: repository
+        """
+        if not isinstance(data, dict):
+            return data
+        block = data.pop("consequence", None)
+        if isinstance(block, dict):
+            data = dict(data)
+            if "class" in block and "consequence_class" not in data:
+                data["consequence_class"] = block["class"]
+            if "scope" in block and "scope" not in data:
+                data["scope"] = block["scope"]
+            if "environment_sensitive" in block:
+                data["environment_sensitive"] = block["environment_sensitive"]
+            if "reversible" in block and "reversibility" not in data:
+                data["reversibility"] = "reversible" if block["reversible"] else "irreversible"
+        return data
 
 
 class Consequence(BaseModel):
-    """What allowing ``action`` on ``resource`` can cause."""
+    """What allowing ``action`` on ``resource`` can cause.
+
+    Every field is derived from declared profiles, never inferred by a model.
+    ``consequence_class`` plus ``scope`` answer "what kind of thing is this";
+    the resource context answers "and where does it land".
+    """
 
     action: str
     resource: str
+    consequence_class: str = "workspace_mutation"
+    scope: str = "single_file"
     effect: Effect
     direct_effect: str
     environment: str
@@ -100,6 +162,16 @@ class Consequence(BaseModel):
     @property
     def mutating(self) -> bool:
         return self.effect not in ("read", "list")
+
+    def registry_shape(self) -> dict[str, Any]:
+        """The compact deterministic record: class, environment, scope, reversibility."""
+        return {
+            "class": self.consequence_class,
+            "environment": self.environment,
+            "scope": self.scope,
+            "reversibility": self.reversibility,
+            "protected_resource": self.protected,
+        }
 
 
 class ConsequenceCatalog:
@@ -171,6 +243,9 @@ class ConsequenceCatalog:
             (self.resource_profile(d) or ResourceProfile(pattern=d)).environment for d in downstream
         ]}) if mutating else []
 
+        consequence_class = (ap.consequence_class if ap and ap.consequence_class
+                             else _EFFECT_CLASS.get(effect, "workspace_mutation"))
+        scope = ap.scope if ap and ap.scope else _EFFECT_SCOPE.get(effect, "single_file")
         # Impact = the worse of what the action does and where it does it, only
         # for mutating effects; a read of production is still a read.
         if mutating:
@@ -181,6 +256,10 @@ class ConsequenceCatalog:
                 impact_rank = max(impact_rank, IMPACT_RANK["high"])
             if customer_facing and impact_rank < IMPACT_RANK["medium"]:
                 impact_rank = IMPACT_RANK["medium"]
+        elif consequence_class in ("credential_access", "data_egress"):
+            # A read that removes a secret from its boundary is not a "low impact
+            # read": holding the credential is equivalent to using it.
+            impact_rank = max(IMPACT_RANK[severity], IMPACT_RANK[criticality])
         else:
             impact_rank = IMPACT_RANK["none"] if criticality in ("none", "low") else IMPACT_RANK["low"]
         impact = next(k for k, v in IMPACT_RANK.items() if v == impact_rank)
@@ -188,6 +267,7 @@ class ConsequenceCatalog:
         direct = ap.direct_effect if ap and ap.direct_effect else _default_direct_effect(effect, resource)
         summary = [direct]
         if mutating:
+            summary.append(consequence_class.replace("_", " "))
             if environment != "unknown":
                 summary.append(f"{environment} mutation")
             if customer_facing:
@@ -201,7 +281,8 @@ class ConsequenceCatalog:
             summary.append("no state change")
 
         return Consequence(
-            action=action, resource=resource, effect=effect, direct_effect=direct,
+            action=action, resource=resource, consequence_class=consequence_class, scope=scope,
+            effect=effect, direct_effect=direct,
             environment=environment, criticality=criticality, customer_facing=customer_facing,
             reversibility=reversibility, persistence=persistence, protected=protected,
             downstream=downstream, blast_radius=blast, environments=environments,

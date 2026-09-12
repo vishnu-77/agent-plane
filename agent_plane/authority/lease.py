@@ -27,6 +27,11 @@ class AuthorityLease(BaseModel):
     # Always denied even if a resource/action pair above would otherwise match -
     # e.g. a lease scoped to "github://acme/*" with "main" carved out.
     protected_resources: list[str] = Field(default_factory=list)
+    # The NEVER list, glob-matched against the action name. An absolute refusal:
+    # checked before scope, before use limits, and inherited by every child, so
+    # "never delete a repository" cannot be granted back by another rule, a
+    # wider lease, or a delegation.
+    denied_actions: list[str] = Field(default_factory=list)
     # Per-action use cap (e.g. {"branch.delete": 5}). Unset = unlimited.
     max_uses: dict[str, int] = Field(default_factory=dict)
     # Actions that are in scope but still require a human in the loop.
@@ -67,6 +72,16 @@ class AuthorityLease(BaseModel):
 def resource_matches(patterns: list[str], resource: str) -> bool:
     """A resource is in scope if it glob-matches any pattern (stdlib fnmatch)."""
     return any(fnmatch.fnmatchcase(resource, p) for p in patterns)
+
+
+def action_matches(patterns: list[str], action: str) -> bool:
+    """Action patterns allow globs: ``repository.*`` covers ``repository.delete``."""
+    return any(fnmatch.fnmatchcase(action, p) for p in patterns)
+
+
+def grants_action(lease: AuthorityLease, action: str) -> bool:
+    """Does this lease grant ``action`` at all (before scope and limits)?"""
+    return action_matches(lease.actions, action) and not action_matches(lease.denied_actions, action)
 
 
 # Shared with evaluator.py, which gates a proposed action's declared impact
@@ -112,6 +127,13 @@ def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> l
     unprotected = [p for p in parent.protected_resources if p not in child.protected_resources]
     if unprotected:
         errors.append(f"removes protected resources: {unprotected}")
+    # NEVER is inherited: a child may add refusals, never drop one.
+    undenied = [a for a in parent.denied_actions if a not in child.denied_actions]
+    if undenied:
+        errors.append(f"removes never-allowed actions: {undenied}")
+    granted_never = [a for a in child.actions if action_matches(parent.denied_actions, a)]
+    if granted_never:
+        errors.append(f"grants actions the parent refuses outright: {granted_never}")
     errors.extend(consequence_attenuation_errors(parent.permitted_consequence, child.permitted_consequence))
     return errors
 
@@ -185,6 +207,8 @@ def parse_lease(doc: dict[str, Any]) -> AuthorityLease:
         actions=auth.get("actions") or doc.get("actions") or [],
         protected_resources=constraints.get("protected_resources")
         or doc.get("protected_resources") or [],
+        denied_actions=constraints.get("denied_actions") or auth.get("never")
+        or doc.get("denied_actions") or doc.get("never") or [],
         max_uses=constraints.get("max_uses") or doc.get("max_uses") or {},
         require_approval=constraints.get("require_approval")
         or doc.get("require_approval") or [],

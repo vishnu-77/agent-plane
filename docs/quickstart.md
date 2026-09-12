@@ -1,94 +1,144 @@
 # Quickstart
 
-Five minutes from a clean checkout to an approved, audited action. No model
-provider keys are needed.
+From a clean checkout to a coding agent reporting what it does. Nothing is
+blocked along the way: a new project starts in **observe** mode.
+
+You need Python 3.11+. You do not need a model provider key, an admin token,
+or any YAML.
 
 ## 1. Run the service
 
 ```bash
 python -m venv .venv && source .venv/bin/activate     # PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]" -e ./sdk/python
-python -c "import secrets; print('JWT_SECRET=' + secrets.token_urlsafe(32)); print('ADMIN_TOKEN=' + secrets.token_urlsafe(32)); print('AUDIT_SIGNING_KEY=' + secrets.token_urlsafe(32))" >> .env
 agentplane serve --host 127.0.0.1 --port 8000
 ```
 
-`http://127.0.0.1:8000/console` shows the console, `/docs` the OpenAPI UI.
-Leases and audit evidence persist in `audit.db` (SQLite) between restarts.
+In `ENVIRONMENT=development` (the default) the service starts with no
+configuration. Accounts, projects, keys, rules, leases, and the signed audit
+chain all live in `audit.db` (SQLite) and survive restarts.
 
-## 2. Issue a lease from a template
+Open <http://127.0.0.1:8000/console>.
 
-The trusted backend does this with the admin token. `repair-service` is one of
-the shipped templates in `config/lease-templates.yaml`.
+## 2. Sign up
 
-```python
-import os
-from agentplane import AgentPlaneAdmin
+The first account on a fresh install owns the workspace, and sign-up closes
+behind it (`SIGNUP_MODE=first_user`, the default). Passwords are at least ten
+characters.
 
-admin = AgentPlaneAdmin("http://127.0.0.1:8000", os.environ["ADMIN_TOKEN"])
-lease = admin.issue_from_template(
-    "repair-service", subject="devops-agent", task="fix-checkout", tenant="acme",
-    variables={"env": "staging", "service": "checkout"})
-print(lease.id, lease.resources, lease.require_approval)
-# lease-repair-service-… ['staging/checkout'] ['deployment.restart']
+Signing in sets an httponly `ap_session` cookie. The console never asks you to
+paste a token, and the cookie never authorizes an agent action - only a human
+session.
+
+## 3. Create a project
+
+A project is one governed environment: its own keys, integrations, rules,
+mode, and activity. Name it after what it governs (`checkout-api`,
+`my-laptop`) and leave the mode at **observe**.
+
+## 4. Choose an integration and generate a key
+
+Go to **Integrations** and pick what you actually run. The connect dialog
+creates a Project API Key for you and shows it **once** - the server stores
+only an HMAC of it.
+
+Keys start with `ap_live_`, `ap_test_`, or `ap_mgmt_`. See
+[accounts.md](accounts.md).
+
+## 5. Connect
+
+The dialog prints the exact command. For Claude Code:
+
+```bash
+agentplane connect claude --key ap_live_...
 ```
 
-## 3. Authorize an action
+It verifies the key against the running service, stores it in
+`~/.agentplane/credentials.json` (not in a file you commit), installs a
+`PreToolUse` hook in `~/.claude/settings.json` (`--scope project` writes
+`.claude/settings.json` instead), and prints what the integration can observe
+and whether it can enforce.
 
-The executor holds the agent's bearer token (an HS256 JWT signed with
-`JWT_SECRET` in `jwt_claims` mode).
+The other targets are `codex`, `cursor`, `mcp`, and `sdk`. Check any of them
+with `agentplane connect status`, and undo one with
+`agentplane connect disconnect claude`. See [connectors.md](connectors.md).
+
+## 6. Watch activity appear
+
+Use the agent normally. Each tool call it makes is reported to
+`POST /v1/events/action`, normalized into a canonical action and resource
+(`Bash` running `git push` becomes `git.push`), decided, and recorded.
+
+**Activity** in the console fills up. Every row opens a decision: what the
+agent did, what it would affect, what decided it, and why. In observe mode
+nothing is blocked and the hook always exits 0 - including when agent-plane
+is unreachable.
+
+By default only metadata is collected: agent, session, task, action,
+resource, decision, and consequence. Prompt text, tool arguments, tool
+output, and file contents are off unless you turn them on per project under
+**Settings → Data collection**.
+
+## 7. Understand what you saw
+
+**Rules → Suggested** (`GET /v1/rules/suggested?project=...`) drafts a rule
+from what each agent actually did: read-shaped actions proposed as ALLOW,
+writes as ASK FIRST, deletes as NEVER. Nothing is applied automatically.
+
+Review a draft, edit it, and save it. Or start from a template in
+**Rules → Templates**. A rule says three things:
+
+```text
+ALLOW       read the repository, modify the workspace, run tests
+ASK FIRST   push git changes, install packages
+NEVER       delete repositories, read credentials
+```
+
+NEVER is absolute: no other rule, lease, or delegation can grant it back.
+See [rules.md](rules.md).
+
+## 8. Govern, then enforce
+
+**Settings → Mode**, or `PATCH /v1/projects/{id}` with `{"mode": "govern"}`.
+
+| Mode | What comes back | What binds |
+| --- | --- | --- |
+| `observe` | a would-be DENY or ASK returns `simulate` with `would_be` | nothing |
+| `govern` | the real decision, with `enforced: false` | nothing; your executor decides |
+| `enforce` | the real decision, with `enforced: true` | wherever the connector can stop the action |
+
+Move to `enforce` when every agent in the project is covered by a rule you
+have reviewed. What enforcement means depends on the connector: the MCP
+gateway refuses to dispatch, a pre-tool hook blocks the tool, an editor
+integration can only report. The response says which, in `enforcement` and
+`binding` - nothing implies agent-plane blocked what a connector cannot
+block. See [modes.md](modes.md).
+
+## Instead of connecting an agent: use the SDK
+
+```bash
+pip install ./sdk/python
+export AGENTPLANE_API_KEY=ap_live_...
+export AGENTPLANE_URL=http://127.0.0.1:8000
+```
 
 ```python
-import jwt
 from agentplane import AgentPlane
 
-token = jwt.encode({"sub": "operator-42", "tenant": "acme", "agent_id": "devops-agent",
-                    "allowed_tools": ["deployment"]}, os.environ["JWT_SECRET"], algorithm="HS256")
-plane = AgentPlane("http://127.0.0.1:8000", token)
-
-print(plane.authorize(task="fix-checkout", action="deployment.read", resource="staging/checkout"))
-# allow / ACTION_WITHIN_TASK_AUTHORITY
-print(plane.authorize(task="fix-checkout", action="deployment.read", resource="production/checkout"))
-# deny / RESOURCE_OUTSIDE_DELEGATED_SCOPE
-pending = plane.authorize(task="fix-checkout", action="deployment.restart", resource="staging/checkout")
-print(pending.decision, pending.approval_id)
-# approval_required apr_…
+ap = AgentPlane()                                   # reads the environment
+with ap.task("fix-authentication-tests") as task:
+    decision = task.authorize("filesystem.write", "workspace/src/auth.ts")
+    if decision.proceed:                            # ALLOW, or SIMULATE in observe mode
+        write_the_file()
+        task.report(tool="Edit", resource="workspace/src/auth.ts")
 ```
 
-## 4. Approve and resume
-
-Approve from the console (**Approvals** page, after connecting operator
-access) or with the admin client, then resume from the executor:
-
-```python
-admin.approve(pending.approval_id, note="verified with on-call", decided_by="alice")
-resumed = plane.wait_for_approval(pending, timeout=60)
-print(resumed.decision, resumed.reason)     # allow ACTION_APPROVED
-print(plane.authorize(task="fix-checkout", action="deployment.restart",
-                      resource="staging/checkout", approval=pending.approval_id).reason)
-# APPROVAL_ALREADY_USED  - an approval authorises exactly one execution
-```
-
-## 5. Narrow or revoke while the agent runs
-
-```python
-admin.shrink_lease(lease.id, actions=["deployment.read"])   # restart is gone immediately
-admin.revoke_lease(lease.id)                                 # everything is gone
-```
-
-## 6. Inspect the evidence
-
-```python
-for event in admin.audit(limit=10):
-    print(event["decision_id"], event["decision"], event["reason"])
-```
-
-Or open the console, connect operator access with the admin token, and open
-**Decisions**: each event's inspector shows the reason, lease reference,
-approval id, and provenance context recorded on the signed audit event.
+`decision.allowed` stays strict (ALLOW only); `decision.proceed` also accepts
+an observe-mode `simulate`, which is not enforced. See
+[connectors.md](connectors.md#your-own-code-sdk).
 
 ## Next
 
-- Wrap your real tools once with the [framework adapters](integration/frameworks.md).
-- Prove the executor never runs without ALLOW with the [conformance kit](integration/conformance.md).
-- Move to Postgres and more than one replica with the [deployment guide](deployment.md).
-- Switch identity to signed delegation before production: [SECURITY.md](../SECURITY.md).
+- [Concepts](concepts.md) - the model in one page.
+- [Observe → Govern → Enforce](integration/observe-enforce.md) - the rollout.
+- [Deployment](deployment.md) - running your own instance for a team.

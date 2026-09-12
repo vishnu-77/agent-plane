@@ -117,6 +117,55 @@ resources:
     description: outbound email
     business: cannot be unsent
 
+  # --- coding agents: the workspace an agent edits, and what it can reach ---
+  - pattern: "workspace/*"
+    environment: workspace
+    criticality: low
+    reversibility: reversible
+    persistence: durable
+    description: files in the current working tree
+    business: reviewable before it ever ships
+
+  - pattern: "workspace/.env*"
+    environment: workspace
+    criticality: critical
+    reversibility: irreversible
+    persistence: permanent
+    protected: true
+    description: local secrets
+    business: credentials must not leave the machine
+
+  - pattern: "shell/*"
+    environment: workspace
+    criticality: medium
+    reversibility: recoverable
+    description: commands run on the developer machine or CI runner
+
+  - pattern: "package/*"
+    environment: workspace
+    criticality: medium
+    reversibility: recoverable
+    dependents: ["workspace/*"]
+    description: third-party dependencies
+    business: a new dependency is new code you now run
+
+  - pattern: "network/*"
+    environment: external
+    criticality: high
+    customer_facing: false
+    reversibility: irreversible
+    persistence: permanent
+    description: outbound network access
+
+  - pattern: "credentials/*"
+    environment: secrets
+    criticality: critical
+    reversibility: irreversible
+    persistence: permanent
+    protected: true
+    description: credential stores
+    business: reading one is equivalent to holding it
+
 actions:
   - pattern: "*.read"
     effect: read
@@ -161,3 +210,109 @@ actions:
     reversibility: irreversible
     persistence: permanent
     direct_effect: "an email is delivered to an external recipient"
+
+  # --- coding agents ---
+  - pattern: "filesystem.read"
+    effect: read
+    label: Read files
+    consequence:
+      class: read_only
+      scope: single_file
+      reversible: true
+    direct_effect: "reads a file; no state change"
+  - pattern: "filesystem.write"
+    effect: mutate
+    label: Modify the workspace
+    consequence:
+      class: workspace_mutation
+      scope: single_file
+      reversible: true
+    direct_effect: "writes a file in the working tree"
+  - pattern: "filesystem.delete"
+    effect: delete
+    label: Delete files
+    consequence:
+      class: destructive_resource_change
+      scope: single_file
+      reversible: false
+    direct_effect: "removes a file from the working tree"
+  - pattern: "shell.execute"
+    effect: execute
+    label: Run commands
+    consequence:
+      class: code_execution
+      scope: workspace
+      reversible: true
+    direct_effect: "runs a command with the developer's own privileges"
+  - pattern: "tests.execute"
+    effect: execute
+    severity: low
+    label: Run tests
+    consequence:
+      class: code_execution
+      scope: workspace
+      reversible: true
+    direct_effect: "runs the test suite"
+  - pattern: "git.commit"
+    effect: mutate
+    severity: low
+    label: Commit changes
+    consequence:
+      class: repository_mutation
+      scope: repository
+      reversible: true
+    direct_effect: "records a commit locally"
+  - pattern: "git.push"
+    effect: mutate
+    severity: medium
+    label: Push git changes
+    consequence:
+      class: repository_mutation
+      scope: repository
+      reversible: true
+      environment_sensitive: true
+    direct_effect: "publishes commits others and CI will build on"
+  - pattern: "repository.delete"
+    effect: delete
+    severity: critical
+    label: Delete repositories
+    consequence:
+      class: destructive_resource_change
+      scope: repository
+      reversible: false
+    direct_effect: "removes the repository and its history"
+  - pattern: "package.install"
+    effect: create
+    severity: medium
+    label: Install packages
+    consequence:
+      class: dependency_change
+      scope: workspace
+      reversible: true
+    direct_effect: "adds third-party code that will then execute"
+  - pattern: "network.access"
+    effect: send
+    severity: medium
+    label: Access external network
+    consequence:
+      class: external_communication
+      scope: organisation
+      reversible: false
+    direct_effect: "contacts a host outside the workspace"
+  - pattern: "credentials.read"
+    effect: read
+    severity: critical
+    label: Access credentials
+    consequence:
+      class: credential_access
+      scope: account
+      reversible: false
+    direct_effect: "reads a secret; holding it is the same as using it"
+  - pattern: "config.write"
+    effect: mutate
+    severity: medium
+    label: Change configuration
+    consequence:
+      class: configuration_change
+      scope: single_service
+      reversible: true

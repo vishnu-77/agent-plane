@@ -1,153 +1,176 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  api,
-  type AgentSummary,
+  Api,
+  ApiError,
+  setDemoToken,
   type ApprovalRequest,
-  type Credentials,
+  type Agent,
+  type AuthState,
   type DecisionSummary,
+  type Me,
   type Mode,
-  type Scenario,
+  type Project,
+  type Source,
   type SystemState,
-  type TaskRecord,
-  tenantQuery,
 } from "./api";
 
-export interface Snapshot {
+const DEMO_PROJECT = "prj_demo";
+const LAST_PROJECT = "agentplane.project";
+
+export interface Feed {
   system: SystemState | null;
-  agents: AgentSummary[];
-  tasks: TaskRecord[];
   decisions: DecisionSummary[];
+  agents: Agent[];
   approvals: ApprovalRequest[];
   error: string | null;
-  updatedAt: number | null;
   loading: boolean;
+  updatedAt: number | null;
 }
 
 interface Store {
-  mode: Mode;
-  setMode: (m: Mode) => void;
-  creds: Credentials;
-  setAdminToken: (t: string) => void;
-  demoAvailable: boolean;
-  scenarios: Scenario[];
-  tenant: string | null;
-  setTenant: (t: string | null) => void;
-  snapshot: Snapshot;
+  ready: boolean;
+  authState: AuthState | null;
+  me: Me | null;
+  signedIn: boolean;
+  source: Source;
+  setSource: (s: Source) => void;
+  project: Project | null;
+  projects: Project[];
+  selectProject: (id: string) => void;
+  refreshAccount: () => Promise<Me | null>;
+  setMode: (mode: Mode) => Promise<void>;
+  feed: Feed;
   refresh: () => Promise<void>;
   paused: boolean;
   setPaused: (p: boolean) => void;
-  selected: string | null;
-  select: (id: string | null) => void;
-  connected: boolean;
+  signOut: () => Promise<void>;
 }
 
 const Ctx = createContext<Store | null>(null);
+const EMPTY: Feed = { system: null, decisions: [], agents: [], approvals: [], error: null, loading: false, updatedAt: null };
 
-const EMPTY: Snapshot = { system: null, agents: [], tasks: [], decisions: [], approvals: [], error: null, updatedAt: null, loading: false };
+const DEMO_PROJECT_RECORD: Project = {
+  id: DEMO_PROJECT, workspace_id: "wsp_demo", name: "demo-project", slug: "demo", mode: "enforce",
+  demo: true, collection: {}, created_at: "", keys: 0, integrations: 0, connected: 1, rules: 0,
+};
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<Mode>(() => (location.hash.includes("demo") ? "demo" : "live"));
-  const [creds, setCreds] = useState<Credentials>({ admin: "", demo: "" });
-  const [demoAvailable, setDemoAvailable] = useState(false);
-  const [scenarios, setScenarios] = useState<Scenario[]>([]);
-  const [tenant, setTenant] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
+  const [ready, setReady] = useState(false);
+  const [authState, setAuthState] = useState<AuthState | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
+  const [source, setSourceState] = useState<Source>("live");
+  const [projectId, setProjectId] = useState<string | null>(() => localStorage.getItem(LAST_PROJECT));
+  const [feed, setFeed] = useState<Feed>(EMPTY);
   const [paused, setPaused] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
   const generation = useRef(0);
 
-  // Discover the demo token once; the server only hands it out when DEMO_ENABLED.
-  useEffect(() => {
-    fetch("/demo/scenarios", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d && d.token) {
-          setDemoAvailable(true);
-          setScenarios(d.scenarios ?? []);
-          setCreds((c) => ({ ...c, demo: d.token }));
-          // No operator token yet: start on the demo so the first screen is alive.
-          setModeState((m) => (m === "live" && !creds.admin ? "demo" : m));
-        }
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const refreshAccount = useCallback(async () => {
+    try {
+      const next = await Api.me();
+      setMe(next);
+      setProjectId((current) => {
+        const known = next.projects.some((p) => p.id === current);
+        return known ? current : (next.projects[0]?.id ?? null);
+      });
+      return next;
+    } catch {
+      setMe(null);
+      return null;
+    }
   }, []);
 
-  const connected = mode === "demo" ? !!creds.demo : !!creds.admin;
+  useEffect(() => {
+    (async () => {
+      try {
+        const state = await Api.authState();
+        setAuthState(state);
+        if (state.demo_token) setDemoToken(state.demo_token);
+      } catch {
+        setAuthState(null);
+      }
+      await refreshAccount();
+      setReady(true);
+    })();
+  }, [refreshAccount]);
+
+  const projects = me?.projects ?? [];
+  const project = source === "demo"
+    ? DEMO_PROJECT_RECORD
+    : projects.find((p) => p.id === projectId) ?? projects[0] ?? null;
+
+  const selectProject = useCallback((id: string) => {
+    setProjectId(id);
+    localStorage.setItem(LAST_PROJECT, id);
+    setFeed(EMPTY);
+  }, []);
+
+  const setSource = useCallback((next: Source) => {
+    setSourceState(next);
+    setFeed(EMPTY);
+  }, []);
 
   const refresh = useCallback(async () => {
-    const gen = ++generation.current;
-    if (!connected) {
-      setSnapshot((s) => ({ ...s, loading: false, error: null }));
+    if (!project) {
+      setFeed((f) => ({ ...f, loading: false }));
       return;
     }
-    setSnapshot((s) => ({ ...s, loading: true }));
-    const q = tenantQuery(mode, tenant);
-    const sep = q ? "&" : "?";
+    const gen = ++generation.current;
+    setFeed((f) => ({ ...f, loading: true }));
     const results = await Promise.allSettled([
-      api<SystemState>(`/v1/system${q}`, { mode, creds }),
-      api<{ agents: AgentSummary[] }>(`/v1/agents${q}`, { mode, creds }),
-      api<{ tasks: TaskRecord[] }>(`/v1/tasks${q}`, { mode, creds }),
-      api<{ decisions: DecisionSummary[] }>(`/v1/decisions${q}${sep}limit=120`, { mode, creds }),
-      api<{ approvals: ApprovalRequest[] }>(`/v1/approvals?status=pending&limit=100${mode === "demo" ? "&tenant=demo" : tenant ? `&tenant=${encodeURIComponent(tenant)}` : ""}`, { mode, creds }),
+      Api.system(project.id, source),
+      Api.decisions(project.id, 120, source),
+      Api.agents(project.id, source),
+      Api.approvals(project.id, source),
     ]);
     if (gen !== generation.current) return;
-    const [sys, ag, tk, dc, ap] = results;
-    const firstError = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
-    setSnapshot({
-      system: sys.status === "fulfilled" ? sys.value : null,
-      agents: ag.status === "fulfilled" ? ag.value.agents : [],
-      tasks: tk.status === "fulfilled" ? tk.value.tasks : [],
-      decisions: dc.status === "fulfilled" ? dc.value.decisions : [],
-      approvals: ap.status === "fulfilled" ? ap.value.approvals : [],
-      error: sys.status === "rejected" ? String((firstError?.reason as Error)?.message ?? "unreachable") : null,
-      updatedAt: Date.now(),
+    const [system, decisions, agents, approvals] = results;
+    const failure = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+    setFeed({
+      system: system.status === "fulfilled" ? system.value : null,
+      decisions: decisions.status === "fulfilled" ? decisions.value.decisions : [],
+      agents: agents.status === "fulfilled" ? agents.value.agents : [],
+      approvals: approvals.status === "fulfilled" ? approvals.value.approvals : [],
+      error: system.status === "rejected" ? (failure?.reason as ApiError)?.message ?? "Cannot reach agent-plane" : null,
       loading: false,
+      updatedAt: Date.now(),
     });
-  }, [mode, creds, tenant, connected]);
+  }, [project, source]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (ready) void refresh();
+  }, [ready, refresh]);
 
   useEffect(() => {
-    const t = setInterval(() => {
+    const timer = setInterval(() => {
       if (!paused && !document.hidden) void refresh();
     }, 4000);
-    return () => clearInterval(t);
+    return () => clearInterval(timer);
   }, [refresh, paused]);
 
-  const setMode = useCallback((m: Mode) => {
-    setModeState(m);
-    setSelected(null);
-    setSnapshot(EMPTY);
+  const setMode = useCallback(async (mode: Mode) => {
+    if (!project || project.demo) return;
+    await Api.updateProject(project.id, { mode });
+    await refreshAccount();
+    await refresh();
+  }, [project, refreshAccount, refresh]);
+
+  const signOut = useCallback(async () => {
+    await Api.logout();
+    setMe(null);
+    setFeed(EMPTY);
   }, []);
 
-  const value = useMemo<Store>(
-    () => ({
-      mode,
-      setMode,
-      creds,
-      setAdminToken: (t) => setCreds((c) => ({ ...c, admin: t })),
-      demoAvailable,
-      scenarios,
-      tenant,
-      setTenant,
-      snapshot,
-      refresh,
-      paused,
-      setPaused,
-      selected,
-      select: setSelected,
-      connected,
-    }),
-    [mode, setMode, creds, demoAvailable, scenarios, tenant, snapshot, refresh, paused, selected, connected],
-  );
+  const value = useMemo<Store>(() => ({
+    ready, authState, me, signedIn: !!me, source, setSource, project, projects, selectProject,
+    refreshAccount, setMode, feed, refresh, paused, setPaused, signOut,
+  }), [ready, authState, me, source, setSource, project, projects, selectProject, refreshAccount,
+      setMode, feed, refresh, paused, signOut]);
+
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useStore(): Store {
-  const s = useContext(Ctx);
-  if (!s) throw new Error("StoreProvider missing");
-  return s;
+  const store = useContext(Ctx);
+  if (!store) throw new Error("StoreProvider missing");
+  return store;
 }

@@ -9,32 +9,61 @@ python -m pip install agent-plane-sdk          # from your package index
 python -m pip install ./sdk/python             # from this checkout
 ```
 
+## Connect with a project API key
+
+Create a project in the console and generate a key. That key is the whole
+credential: there is no JWT to mint and no lease to provision first.
+
+```bash
+export AGENTPLANE_API_KEY=ap_live_...
+export AGENTPLANE_URL=http://127.0.0.1:8000
+```
+
+## Report what your agent does
+
+```python
+from agentplane import AgentPlane
+
+with AgentPlane() as ap:                        # reads the two variables above
+    task = ap.task("fix-authentication-tests", origin={"kind": "prompt", "text": prompt})
+    task.report(tool="Read", arguments={"file_path": "src/auth.ts"})
+    task.report(tool="Edit", arguments={"file_path": "src/auth.ts"})
+```
+
+Reporting is enough to see activity, the authority behind it, and what each
+action would cause. In Observe nothing is blocked.
+
 ## Authorize before execution
 
-Your backend supplies a trusted agent bearer token and provisions the matching
-task AuthorityLease on the server. Execute the real action only when
-`decision.allowed` is true.
+Ask before a side effect, and execute only when `decision.allowed` is true.
 
 ```python
 import os
 from agentplane import AgentPlane
 
-with AgentPlane(os.environ["AGENT_PLANE_URL"], os.environ["AGENT_TOKEN"]) as plane:
-    decision = plane.authorize(
-        task="fix-staging-checkout",
-        action="deployment.restart",
-        resource="staging/checkout",
+with AgentPlane(api_key=os.environ["AGENTPLANE_API_KEY"]) as ap:
+    task = ap.task("fix-staging-checkout")
+    decision = task.authorize(
+        "deployment.restart", "staging/checkout",
         context={"conversation_id": thread_id, "origin": "human"},  # optional provenance
     )
     if decision.allowed:
         restart()                                   # ALLOW
     elif decision.needs_approval:
-        resumed = plane.wait_for_approval(decision, timeout=600)
+        resumed = ap.wait_for_approval(decision, timeout=600)
         if resumed.allowed:
             restart()                               # ACTION_APPROVED, exactly once
     else:
         log.warning("%s %s", decision.reason, decision.evidence_id)   # DENY
 ```
+
+`decision.proceed` is true for an explicit ALLOW and for Observe mode's
+SIMULATE, where nothing is enforced. In Govern the decision is real, so
+`proceed` is false even though agent-plane does not block; your code decides
+what to do with it. `decision.allowed` stays strict: ALLOW only.
+
+Deployments that mint their own identity tokens can still pass one:
+`AgentPlane(url, agent_jwt)`.
 
 `AuthorityDecision` exposes `decision`, `reason`, `lease`, `evidence_id`,
 `approval_id`, `context`, and the properties `allowed` (true only for ALLOW)
@@ -72,10 +101,16 @@ the same shape. See `docs/integration/frameworks.md`.
 
 ## Backend / operator client
 
+Advanced, and not part of getting started: rules in the console cover the
+normal case. This is for issuing authority for a single task from your own
+backend.
+
 ```python
 from agentplane import AgentPlaneAdmin
 
-admin = AgentPlaneAdmin(os.environ["AGENT_PLANE_URL"], os.environ["ADMIN_TOKEN"])
+# A management key (ap_mgmt_..., scoped to one project) or the deployment's
+# ADMIN_TOKEN. Either way this is not an agent credential.
+admin = AgentPlaneAdmin(os.environ["AGENTPLANE_URL"], os.environ["AGENTPLANE_MGMT_KEY"])
 lease = admin.issue_from_template("repair-service", subject="devops-agent",
                                   task="fix-staging-checkout", tenant="acme",
                                   variables={"env": "staging", "service": "checkout"})
@@ -86,7 +121,7 @@ admin.revoke_lease(lease.id)
 events = admin.audit(limit=20)
 ```
 
-The admin token is not an agent credential. Keep it in your trusted backend.
+Keep this credential in your trusted backend. Never ship it to an agent.
 
 ## Prove your executor fails closed
 

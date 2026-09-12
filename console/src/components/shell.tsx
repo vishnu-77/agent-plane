@@ -1,163 +1,240 @@
-import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Check, ChevronDown } from "lucide-react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { Api, type Mode } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { cn, pad } from "@/lib/utils";
-import { DemoMarker, DemoSwitch, StateLamp, SystemTicker } from "./instruments";
-import { Button, Dialog, DialogContent, Input, Kbd } from "./ui";
+import { MODE_COPY, ago, cn } from "@/lib/format";
+import { Badge, Button, Dialog, DialogContent, Input } from "./ui";
 
-const NAV: Array<{ group: string; items: Array<{ to: string; label: string; end?: boolean }> }> = [
-  { group: "", items: [{ to: "/", label: "Live", end: true }] },
-  { group: "SYSTEM", items: [{ to: "/agents", label: "Agents" }, { to: "/tasks", label: "Tasks" }, { to: "/resources", label: "Resources" }] },
-  { group: "GOVERN", items: [{ to: "/govern", label: "Authority × Consequence" }, { to: "/decisions", label: "Decisions" }, { to: "/policies", label: "Policies" }] },
-  { group: "EVIDENCE", items: [{ to: "/timeline", label: "Timeline" }, { to: "/audit", label: "Audit" }] },
-  { group: "PLATFORM", items: [{ to: "/integrations", label: "Integrations" }, { to: "/gateway", label: "Gateway" }, { to: "/runtime", label: "Runtime" }, { to: "/settings", label: "Settings" }] },
+// Four things a developer does, in the order they do them. Everything else
+// is either a drill-down or lives in Settings.
+const NAV = [
+  { to: "/", label: "Activity", end: true },
+  { to: "/agents", label: "Agents" },
+  { to: "/rules", label: "Rules" },
+  { to: "/integrations", label: "Integrations" },
 ];
 
-export function Shell() {
-  const { mode, setMode, demoAvailable, snapshot, connected, creds, setAdminToken, paused, setPaused, refresh } = useStore();
-  const [connectOpen, setConnectOpen] = useState(false);
-  const [cmdOpen, setCmdOpen] = useState(false);
-  const [token, setToken] = useState("");
+export function ProjectSwitcher() {
+  const { project, projects, selectProject, source } = useStore();
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const { refreshAccount } = useStore();
   const navigate = useNavigate();
-  const sys = snapshot.system;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setCmdOpen((o) => !o);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
+  if (!project) return null;
+  if (source === "demo") {
+    return <span className="text-sm font-medium">{project.name}</span>;
+  }
   return (
-    <div className="flex h-full min-h-screen flex-col">
-      <header className="flex h-12 items-center gap-4 border-b border-hairline bg-paper-raised px-4">
-        <a href="#/" className="flex items-center gap-2.5" aria-label="agent-plane">
-          <img src="/brand/mark.svg" alt="" width={26} height={26} />
-          <span className="dot text-sm font-semibold tracking-[0.22em]">AGENT-PLANE</span>
-        </a>
-        <span className="hidden text-hairline-strong md:inline">/</span>
-        <span className="hidden font-mono text-2xs uppercase tracking-[0.16em] text-ink-2 md:inline">authority × consequence</span>
-        <div className="ml-auto flex items-center gap-3">
-          <StateLamp tone={sys ? (sys.mode === "enforce" ? "on" : "approval") : "off"} label={sys ? sys.mode : "offline"} pulse={!!sys} />
-          <Button size="sm" variant="ghost" onClick={() => setCmdOpen(true)} className="hidden md:inline-flex">
-            Go to… <Kbd>⌘K</Kbd>
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setPaused(!paused)} aria-pressed={paused}>{paused ? "Resume" : "Pause"}</Button>
-          <Button size="sm" variant="ghost" onClick={() => void refresh()}>Refresh</Button>
-          <Button size="sm" variant={mode === "live" && !creds.admin ? "default" : "outline"} onClick={() => setConnectOpen(true)}>
-            {creds.admin ? "Operator" : "Connect"}
-          </Button>
-          <DemoSwitch mode={mode} onChange={setMode} demoAvailable={demoAvailable} />
-        </div>
-      </header>
-      {mode === "demo" ? <DemoMarker /> : null}
-      <div className="flex min-h-0 flex-1">
-        <nav className="hidden w-[196px] shrink-0 border-r border-hairline bg-paper px-2 py-3 md:block" aria-label="Main">
-          {NAV.map((g) => (
-            <div key={g.group || "live"} className="mb-4">
-              {g.group ? <div className="eyebrow px-2 pb-1">{g.group}</div> : null}
-              {g.items.map((it) => (
-                <NavLink
-                  key={it.to}
-                  to={it.to}
-                  end={it.end}
-                  className={({ isActive }) =>
-                    cn("block rounded px-2 py-1.5 text-sm text-ink-2 hover:bg-paper-sunk hover:text-ink", isActive && "bg-ink text-paper hover:bg-ink hover:text-paper", it.end && "dot text-xs")
-                  }
-                >
-                  {it.label}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <main id="content" className="min-w-0 flex-1 overflow-auto">
-          {!connected ? (
-            <div className="border-b border-hairline bg-paper-sunk px-4 py-2 text-xs text-ink-2">
-              {mode === "live" ? (
-                <>Connect operator access to read this runtime. <button className="underline" onClick={() => setConnectOpen(true)}>Connect</button>{demoAvailable ? <> · or switch to <button className="underline" onClick={() => setMode("demo")}>DEMO</button></> : null}</>
-              ) : (
-                <>Demo mode is not enabled on this server.</>
-              )}
-            </div>
-          ) : snapshot.error ? (
-            <div className="border-b border-hairline bg-deny-bg px-4 py-2 text-xs text-deny">{snapshot.error}</div>
-          ) : null}
-          <Outlet />
-        </main>
-      </div>
-      <SystemTicker
-        items={[
-          <span key="id">identity {sys ? (sys.identity_mode === "delegation" ? "verified" : "asserted") : "—"}</span>,
-          <span key="ln">lineage {sys ? "recorded" : "—"}</span>,
-          <span key="au">audit {sys?.audit_head ? "chained · " + sys.audit_head.slice(0, 10) : "—"}</span>,
-          <span key="pv">policy {sys?.policy_version ?? "—"}</span>,
-          <span key="st">store {sys?.authority_store ?? "—"}</span>,
-          <span key="ag">{sys ? `${pad(sys.agents)} agents · ${pad(sys.tasks)} tasks · ${pad(sys.pending_approvals)} pending` : ""}</span>,
-          <span key="up" className="ml-auto">{snapshot.updatedAt ? `updated ${new Date(snapshot.updatedAt).toISOString().slice(11, 19)}Z` : ""}</span>,
-        ]}
-      />
+    <>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger className="inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-sm font-medium hover:bg-paper-sunk focus:outline-none">
+          {project.name}
+          <ChevronDown size={13} className="text-ink-2" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content align="start" sideOffset={6} className="z-50 min-w-[220px] rounded border border-hairline bg-paper-raised p-1">
+            {projects.map((p) => (
+              <DropdownMenu.Item
+                key={p.id}
+                onSelect={() => selectProject(p.id)}
+                className="flex cursor-pointer items-center justify-between gap-3 rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-paper-sunk"
+              >
+                <span className="truncate">{p.name}</span>
+                <span className="flex items-center gap-2">
+                  <span className="dot text-2xs text-ink-2">{p.mode}</span>
+                  {p.id === project.id ? <Check size={12} /> : null}
+                </span>
+              </DropdownMenu.Item>
+            ))}
+            <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
+            <DropdownMenu.Item onSelect={() => setCreating(true)}
+              className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-paper-sunk">
+              New project…
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
 
-      <Dialog open={connectOpen} onOpenChange={setConnectOpen}>
-        <DialogContent title="Connect operator access" description="The operator token (ADMIN_TOKEN) reads every tenant and can issue, narrow, or revoke authority. It stays in this tab's memory.">
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent title="New project" description="A project is the boundary: its own agents, rules, keys, and activity.">
           <form
             className="space-y-3"
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
-              setAdminToken(token.trim());
-              setToken("");
-              setMode("live");
-              setConnectOpen(false);
+              const created = await Api.createProject({ name, mode: "observe" });
+              setName("");
+              setCreating(false);
+              await refreshAccount();
+              selectProject(created.project.id);
+              navigate("/integrations");
             }}
           >
             <label className="block">
-              <span className="eyebrow">X-Admin-Token</span>
-              <Input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="operator token" className="mt-1" />
+              <span className="eyebrow">Project name</span>
+              <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="production-ops" className="mt-1" />
             </label>
-            <div className="flex justify-between">
-              <Button type="button" variant="ghost" onClick={() => { setAdminToken(""); setConnectOpen(false); }}>Disconnect</Button>
-              <Button type="submit" variant="default">Connect</Button>
+            <p className="text-xs text-ink-2">It starts in Observe, so nothing is blocked while you watch what your agents do.</p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setCreating(false)}>Cancel</Button>
+              <Button type="submit" variant="default" disabled={!name.trim()}>Create project</Button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
 
-      <Dialog open={cmdOpen} onOpenChange={setCmdOpen}>
-        <DialogContent title="Go to" description="Jump to a screen, an agent, or a task.">
-          <Command label="Command menu" className="text-sm">
-            <Command.Input autoFocus placeholder="Type to search…" className="mb-2 h-8 w-full rounded border border-hairline-strong bg-paper px-2 text-sm focus:border-ink focus:outline-none" />
-            <Command.List className="max-h-72 overflow-auto">
-              <Command.Empty className="px-2 py-3 text-xs text-ink-2">Nothing matches.</Command.Empty>
-              <Command.Group heading={<div className="eyebrow px-2 pt-2">Screens</div>}>
-                {NAV.flatMap((g) => g.items).map((it) => (
-                  <Command.Item key={it.to} value={it.label} onSelect={() => { navigate(it.to); setCmdOpen(false); }} className="cursor-pointer rounded px-2 py-1.5 aria-selected:bg-paper-sunk">
-                    {it.label}
-                  </Command.Item>
-                ))}
-              </Command.Group>
-              <Command.Group heading={<div className="eyebrow px-2 pt-2">Agents</div>}>
-                {snapshot.agents.map((a) => (
-                  <Command.Item key={a.id} value={`agent ${a.id}`} onSelect={() => { navigate(`/agents?select=${encodeURIComponent(a.id)}`); setCmdOpen(false); }} className="cursor-pointer rounded px-2 py-1.5 font-mono text-xs aria-selected:bg-paper-sunk">
-                    {a.id} <span className="text-ink-2">· {a.current_task ?? "idle"}</span>
-                  </Command.Item>
-                ))}
-              </Command.Group>
-              <Command.Group heading={<div className="eyebrow px-2 pt-2">Tasks</div>}>
-                {snapshot.tasks.map((t) => (
-                  <Command.Item key={t.id} value={`task ${t.id}`} onSelect={() => { navigate(`/tasks?select=${encodeURIComponent(t.id)}`); setCmdOpen(false); }} className="cursor-pointer rounded px-2 py-1.5 font-mono text-xs aria-selected:bg-paper-sunk">
-                    {t.id}
-                  </Command.Item>
-                ))}
-              </Command.Group>
-            </Command.List>
-          </Command>
-        </DialogContent>
-      </Dialog>
+export function ModeSwitch({ compact }: { compact?: boolean }) {
+  const { project, setMode, source } = useStore();
+  const [pending, setPending] = useState<Mode | null>(null);
+  if (!project) return null;
+  const readOnly = source === "demo";
+
+  const change = async (mode: Mode) => {
+    if (mode === project.mode || readOnly) return;
+    setPending(mode);
+    try {
+      await setMode(mode);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  if (compact) {
+    return (
+      <span className="dot rounded-sm border border-hairline-strong px-2 py-1 text-2xs text-ink-2">
+        {project.mode}
+      </span>
+    );
+  }
+  return (
+    <div role="group" aria-label="Runtime mode" className="inline-flex items-center rounded border border-hairline-strong bg-paper-raised p-[2px]">
+      {(["observe", "govern", "enforce"] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          disabled={readOnly || pending !== null}
+          title={MODE_COPY[mode].blurb}
+          aria-pressed={project.mode === mode}
+          onClick={() => void change(mode)}
+          className={cn("dot rounded-sm px-2.5 py-1 text-2xs transition-colors disabled:opacity-50",
+            project.mode === mode ? "bg-ink text-paper" : "text-ink-2 hover:text-ink")}
+        >
+          {mode}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Shell() {
+  const { project, feed, source, setSource, authState, me, signOut, paused, setPaused, refresh } = useStore();
+  const navigate = useNavigate();
+  const connectedAgents = feed.agents.filter((a) => a.status !== "idle").length;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "r" && (e.metaKey || e.ctrlKey)) return;
+      if (e.key === "/" && document.activeElement?.tagName !== "INPUT") {
+        e.preventDefault();
+        navigate("/");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate]);
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-hairline bg-paper-raised px-4">
+        <a href="#/" className="flex items-center gap-2" aria-label="agent-plane">
+          <img src="/brand/mark.svg" alt="" width={22} height={22} />
+          <span className="dot text-[13px] font-semibold tracking-[0.2em]">AGENT-PLANE</span>
+        </a>
+        <span className="text-hairline-strong">/</span>
+        <ProjectSwitcher />
+
+        <nav className="ml-6 hidden items-center gap-1 md:flex" aria-label="Main">
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                cn("rounded px-2.5 py-1 text-sm text-ink-2 hover:bg-paper-sunk hover:text-ink",
+                   isActive && "bg-paper-sunk font-medium text-ink")
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="ml-auto flex items-center gap-3">
+          <ModeSwitch />
+          {authState?.demo_available ? (
+            <div role="group" aria-label="Data source" className="inline-flex items-center rounded border border-hairline-strong bg-paper-raised p-[2px]">
+              {(["live", "demo"] as const).map((s) => (
+                <button key={s} type="button" aria-pressed={source === s} onClick={() => setSource(s)}
+                  className={cn("dot rounded-sm px-2 py-1 text-2xs", source === s ? "bg-ink text-paper" : "text-ink-2 hover:text-ink")}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger className="rounded px-2 py-1 text-xs text-ink-2 hover:bg-paper-sunk hover:text-ink focus:outline-none">
+              {me?.user.name ?? "Account"}
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content align="end" sideOffset={6} className="z-50 min-w-[180px] rounded border border-hairline bg-paper-raised p-1">
+                <DropdownMenu.Item onSelect={() => navigate("/settings")} className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-paper-sunk">Settings</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => setPaused(!paused)} className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-paper-sunk">
+                  {paused ? "Resume live updates" : "Pause live updates"}
+                </DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => void refresh()} className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-paper-sunk">Refresh now</DropdownMenu.Item>
+                <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
+                <DropdownMenu.Item onSelect={() => void signOut()} className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-paper-sunk">Sign out</DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        </div>
+      </header>
+
+      <nav className="flex items-center gap-1 border-b border-hairline bg-paper-raised px-4 py-1.5 md:hidden" aria-label="Main">
+        {NAV.map((item) => (
+          <NavLink key={item.to} to={item.to} end={item.end}
+            className={({ isActive }) => cn("rounded px-2 py-1 text-sm text-ink-2", isActive && "bg-paper-sunk text-ink")}>
+            {item.label}
+          </NavLink>
+        ))}
+      </nav>
+
+      {source === "demo" ? (
+        <div className="flex items-center gap-2 border-b border-hairline bg-paper-sunk px-4 py-1 font-mono text-2xs uppercase tracking-[0.16em] text-ink-2">
+          <span className="lamp lamp-on animate-pulse2" />
+          demo environment · no external side effects · real authority engine, simulated targets
+        </div>
+      ) : null}
+
+      {feed.error ? (
+        <div className="border-b border-hairline bg-deny-bg px-4 py-1.5 text-xs text-deny">{feed.error}</div>
+      ) : null}
+
+      <main className="min-h-0 flex-1">
+        <Outlet />
+      </main>
+
+      <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-hairline bg-paper px-4 py-1.5 font-mono text-2xs text-ink-2">
+        <span>{project ? `${connectedAgents} agent${connectedAgents === 1 ? "" : "s"} connected` : "no project"}</span>
+        {feed.system ? <><span className="text-hairline-strong">│</span><span>{feed.system.pending_approvals} awaiting review</span></> : null}
+        {paused ? <><span className="text-hairline-strong">│</span><Badge tone="hold">paused</Badge></> : null}
+        <span className="ml-auto">{feed.updatedAt ? `updated ${ago(new Date(feed.updatedAt).toISOString())}` : ""}</span>
+      </footer>
     </div>
   );
 }

@@ -5,6 +5,102 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-12
+
+agent-plane becomes a product a developer can adopt alone, in minutes. Sign up,
+create a project, connect an agent, and activity appears. Nothing in that path
+asks for a JWT, an authority lease, a policy bundle, or an admin token. The
+authority engine underneath is unchanged; what changed is everything a
+developer has to know before it starts working for them.
+
+### Added
+- **Accounts and tenancy** (`agent_plane/accounts`): User -> Workspace -> Project,
+  with agents, sessions, and tasks discovered under a project. Passwords are
+  hashed with scrypt (stdlib); the console authenticates as a human with a
+  signed, httponly session cookie and holds no token in JavaScript.
+  `POST /v1/auth/signup|login|logout`, `GET /v1/auth/state|me`,
+  `POST /v1/auth/exchange`, and `/v1/projects*`.
+- **Project API keys**: `ap_live_`, `ap_test_`, and `ap_mgmt_` keys, HMAC-SHA256
+  hashed at rest and shown exactly once, listed by prefix and last four, with
+  rotate and revoke per machine. `/v1/api-keys*`.
+- **One ingestion edge** (`POST /v1/events/action`, `POST /v1/sessions`): every
+  integration reports the same way, one event or a batch of up to 50. Tool calls
+  are normalized into actions and resources (`agent_plane/events/normalize.py`),
+  which also strips usernames out of absolute paths before anything is stored.
+  The project's data-collection policy is applied before storage: metadata is
+  kept, prompt text, tool arguments, and outputs are dropped unless a human
+  turned them on.
+- **Rules** (`agent_plane/rules`, `/v1/rules*`): the developer-facing primitive,
+  three lists - ALLOW, ASK FIRST, NEVER - scoped by agent, integration, and
+  environment. They compile into a task-scoped `AuthorityLease` with a
+  fingerprint, so an edit takes effect on the next action and disabling a rule
+  takes the authority away. `NEVER` is absolute: it is checked across every
+  active grant before scope, limits, or approval, so no other rule, lease, or
+  delegation can grant it back (`ACTION_REFUSED_BY_RULE`).
+- **Suggested rules** (`GET /v1/rules/suggested`): a reviewable draft built from
+  what each agent actually did - reads proposed as allowed, changes as ask-first,
+  destructive actions as never. A suggestion disappears once a rule covers it.
+- **Connectors** (`agent_plane/connect`): `agentplane connect claude|codex|cursor|mcp|sdk`,
+  plus `status` and `disconnect`. Each verifies the key against the running
+  service, stores the credential in `~/.agentplane/credentials.json` (0600,
+  outside anything people commit), installs what that agent needs, and states
+  what it can and cannot enforce. The Claude Code connector installs a PreToolUse
+  hook that blocks only a binding refusal or a pending approval, and exits 0
+  when agent-plane is unreachable.
+- **Govern mode**: projects carry their own runtime mode. Observe records and
+  blocks nothing (SIMULATE with `would_be`), Govern returns the real decision
+  with `enforced: false`, Enforce binds. Every decision carries `binding`, which
+  is true only where the connector can actually block, so the product never
+  implies it stopped something it could not stop.
+- **Permissions as a file** (`agent_plane/rules/yaml_io.py`): the same rules in
+  YAML, for teams who keep them in version control. `GET /v1/rules/export` and
+  `POST /v1/rules/import` (merge by rule name, or `replace` to make the file the
+  whole truth), the **Permissions as a file** panel on the Rules screen, and
+  `agentplane rules check|pull|push`. `check` needs no credential and changes
+  nothing, so it belongs in the pull request that changes the file. An unknown
+  field is an error rather than something quietly ignored.
+- **New console** (`console/`): Activity, Agents, Rules, Integrations, and
+  Settings. Activity rows show time, agent, action, resource, and result; a row
+  opens a Decision Drawer with the plain answer first and the authority path on
+  request. Sign-in and a two-step onboarding create the first project.
+
+### Changed
+- `POST /v1/authorize` and `/v1/tasks` accept a project API key, not only a JWT.
+- A result that no rule produced is reported as observed, not as a violation. A
+  project with no rules denies by default, so Observe and Govern compute "would
+  be denied" for every action; that is a fact about the project, not about the
+  action, and it is now stated once for the project instead of on every row.
+- An out-of-scope denial no longer describes authority that does not exist: the
+  explanation distinguishes an action the task grants elsewhere from one it never
+  granted at all.
+- The demo project is readable while signed in, so the console's LIVE/DEMO switch
+  works after sign-up instead of returning 403.
+- Console navigation is four items. The previous Live, Tasks, Resources, Govern,
+  Decisions, Policies, Evidence, and Platform pages are removed.
+- New projects default to Observe. The deployment-wide default is unchanged.
+- The MCP gateway accepts the Project API Key its own connector prints, which it
+  previously refused with `401 invalid_identity_or_task_binding`. Identity tokens
+  still work. A key authenticates and never authorizes: the caller's
+  `(tenant, agent)` pair must match a binding in `MCP_GATEWAY_FILE`, and because a
+  key asserts no capability manifest, the operator's tool mapping is the manifest
+  rather than anything the client declares about itself.
+- Deployment-wide operations behind a console session (policy reload, credential
+  revocation, lease issue and revoke, quarantine, the global mode fallback) now
+  require the account that created the instance. Any signed-in account qualified
+  before, which on a shared install made every developer an administrator of
+  everyone else's tenants. `ADMIN_TOKEN` and management keys are unchanged.
+- `GET /demo/scenarios` reports the demo project's real id (`prj_demo`) instead of
+  `demo`, which matched nothing.
+- The rule editor lists what coding agents actually do first, instead of the
+  operator vocabulary the catalog happens to declare first.
+
+### Fixed
+- A completed MCP dispatch was recorded as `outcome_unknown` against MCP SDK
+  releases that renamed `is_error` to `isError`: the result is read from the
+  serialised payload, before redaction, and both spellings are accepted.
+- `examples` is a real package, so an unrelated installed distribution shipping a
+  top-level `examples` module can no longer shadow the repository's own.
+
 ## [0.6.0] - 2026-09-12
 
 The product is rebuilt around one narrative: an autonomous agent should only

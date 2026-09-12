@@ -22,6 +22,7 @@ import hashlib
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from agent_plane.approvals.store import new_request
@@ -30,10 +31,11 @@ from agent_plane.authority.evaluator import (
     AuthorityReason,
     evaluate_authority,
 )
-from agent_plane.authority.lease import AuthorityLease, resource_matches
+from agent_plane.authority.lease import AuthorityLease, action_matches, resource_matches
 from agent_plane.authority.provenance import provenance_record
 from agent_plane.consequence import IMPACT_RANK, Consequence
 from agent_plane.consequence.catalog import REVERSIBILITY_RANK
+from agent_plane.rules import compile_rules, compiled_lease_id
 from agent_plane.schemas.canonical import Actor, DecisionAction
 
 TRACE_SCHEMA = "agent-plane.trace.v1"
@@ -161,11 +163,23 @@ def explain(outcome: DecisionAction, reason: str, *, task: str, action: str, res
     elif reason == AuthorityReason.ACTION_REQUIRES_APPROVAL.value:
         lines.append(f"The task '{task}' permits {action} against {resource}, but the lease requires a human to approve this action before it runs.{cons}")
     elif reason == AuthorityReason.RESOURCE_OUTSIDE_DELEGATED_SCOPE.value:
-        lines.append(f"The current task permits {action} only against {_scope(lease) if lease else 'resources it was never granted'}.")
+        # The resource is out of scope, which says nothing about whether the
+        # action was granted at all. Claiming "the task permits <action> only
+        # against ..." for an action the task never granted would describe
+        # authority that does not exist, so say which of the two it is.
+        if lease is not None and action_matches(lease.actions, action):
+            lines.append(f"The task '{task}' permits {action} only against {_scope(lease)}.")
+        elif lease is not None:
+            lines.append(f"The task '{task}' reaches {_scope(lease)} and never granted {action} at all.")
+        else:
+            lines.append(f"Nothing grants {action} for this task.")
         lines.append(f"The requested action targets {resource}.{cons}")
         lines.append("No authority lineage permits that consequence.")
     elif reason == AuthorityReason.RESOURCE_PROTECTED.value:
         lines.append(f"{resource} is explicitly protected by the task's authority lease; {action} against it is refused regardless of scope.{cons}")
+    elif reason == AuthorityReason.ACTION_REFUSED_BY_RULE.value:
+        lines.append(f"A rule for this project lists {action} as NEVER allowed.")
+        lines.append("A never-rule is absolute: no other rule, lease, or delegation can grant it back.")
     elif reason == AuthorityReason.ACTION_NOT_AUTHORIZED.value:
         lines.append(f"No authority lineage permits {action}.")
         if path:
@@ -200,7 +214,9 @@ def explain(outcome: DecisionAction, reason: str, *, task: str, action: str, res
     else:
         lines.append(reason)
     if outcome == DecisionAction.SIMULATE:
-        lines.append(f"Observe mode: this would have been {str(would_be).upper()} under enforcement. Nothing was blocked; the attempt is recorded for the agent's authority profile.")
+        lines.append(f"Observe mode: this would have been {str(would_be).upper()} under enforcement. Nothing was blocked; the attempt is recorded so this agent's authority can be described from what it actually does.")
+    elif would_be:
+        lines.append("Govern mode: the violation is recorded and flagged, but agent-plane is not blocking it. Switch this project to Enforce when you want the decision to bind.")
     return lines
 
 
@@ -213,9 +229,55 @@ class AuthorityService:
 
     # -- helpers --------------------------------------------------------------- #
     def _mode(self, tenant: str) -> str:
+        """observe | govern | enforce.
+
+        A project carries its own mode, so a developer changes it in the UI and
+        nothing else needs to know. Traffic that belongs to no project (a
+        legacy JWT tenant) falls back to the runtime override, then to the
+        deployment default.
+        """
+        accounts = getattr(self.state, "accounts", None)
+        if accounts is not None:
+            project = accounts.project(tenant)
+            if project is not None:
+                return project.mode
         registry = getattr(self.state, "agent_registry", None)
         default = getattr(self.state.settings, "enforcement_mode", "enforce")
         return registry.mode(tenant, default) if registry is not None else default
+
+    def _apply_rules(self, actor: Actor, task: str, *, integration: str | None,
+                     environment: str | None) -> None:
+        """Compile the project's rules into an ephemeral lease for this task.
+
+        Rules are the project's standing authority; explicitly issued leases are
+        task grants. Both are evaluated together, which is what lets a rule's
+        NEVER list refuse an action that some other grant would have allowed.
+        """
+        rules_store = getattr(self.state, "rules", None)
+        if rules_store is None:
+            return
+        agent = actor.agent_id or actor.user_id
+        rules = rules_store.list(actor.tenant, enabled_only=True)
+        compiled = compile_rules(
+            rules, project_id=actor.tenant, agent=agent, task=task,
+            integration=integration, environment=environment,
+        )
+        if compiled is None:
+            # No rule applies any more (disabled, deleted, or re-scoped). Revoke
+            # whatever they previously compiled to, so turning a rule off takes
+            # authority away instead of leaving a stale grant behind.
+            stale_id = compiled_lease_id(actor.tenant, agent, task)
+            previous = self.state.leases.get(stale_id)
+            if previous is not None and not previous.revoked:
+                self.state.leases.revoke(stale_id)
+            return
+        existing = self.state.leases.get(compiled.id)
+        fingerprint = compiled.origin.get("fingerprint")
+        stale = (existing is None or existing.revoked
+                 or existing.origin.get("fingerprint") != fingerprint
+                 or (existing.expires_at is not None and existing.expires_at <= datetime.now(UTC)))
+        if stale:
+            self.state.leases.add(compiled)
 
     def _resume(self, actor: Actor, approval_id: str, *, task: str, action: str, resource: str,
                 impact: str) -> tuple[AuthorityDecision, str | None]:
@@ -254,6 +316,7 @@ class AuthorityService:
         self, actor: Actor, *, task: str, action: str, resource: str, impact: str = "reversible",
         approval: str | None = None, context: dict[str, str] | None = None, edge: str = "authorize",
         consume: bool = True, lease_ids: frozenset[str] | None = None, record: bool = True,
+        integration: str | None = None,
     ) -> DecisionResult:
         started = time.perf_counter()
         context = dict(context or {})
@@ -265,6 +328,9 @@ class AuthorityService:
         mode = self._mode(actor.tenant)
 
         consequence: Consequence | None = catalog.evaluate(action, resource) if catalog is not None else None
+        if lease_ids is None:
+            self._apply_rules(actor, task, integration=integration,
+                              environment=consequence.environment if consequence else None)
         violations: list[str] = []
         approval_ref: str | None = None
         would_be: str | None = None
@@ -307,12 +373,14 @@ class AuthorityService:
                 self.state.approvals.create(req)
                 approval_ref = req.id
 
-        # 4. Observe mode never blocks (quarantine excepted).
-        if mode == "observe" and decision.decision in (DecisionAction.DENY, DecisionAction.APPROVAL_REQUIRED):
+        # 4. Only enforce mode binds. Observe reports SIMULATE and hides nothing;
+        #    govern reports the real decision but leaves execution to the caller.
+        if mode != "enforce" and decision.decision in (DecisionAction.DENY, DecisionAction.APPROVAL_REQUIRED):
             would_be = decision.decision.value
-            decision = AuthorityDecision(decision=DecisionAction.SIMULATE, reason=decision.reason,
-                                         lease_id=decision.lease_id, decision_id=decision.decision_id)
             enforced = False
+            if mode == "observe":
+                decision = AuthorityDecision(decision=DecisionAction.SIMULATE, reason=decision.reason,
+                                             lease_id=decision.lease_id, decision_id=decision.decision_id)
 
         lease = leases.get(decision.lease_id) if decision.lease_id else None
         if lease is None:
@@ -372,8 +440,10 @@ class AuthorityService:
             "evidence_id": decision.decision_id,
             "enforced": enforced,
         }
+        payload["mode"] = mode
         if would_be:
             payload["would_be"] = would_be
+            payload["advisory"] = True
         if approval_ref:
             payload["approval_id"] = approval_ref
         if context:

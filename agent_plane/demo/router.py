@@ -16,6 +16,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from agent_plane.demo.scenarios import DEMO_TENANT
+
 demo_router = APIRouter(prefix="/demo", tags=["demo"])
 
 
@@ -29,7 +31,7 @@ def _harness(request: Request):
 @demo_router.get("/scenarios")
 async def list_scenarios(request: Request) -> dict[str, Any]:
     harness = _harness(request)
-    return {"scenarios": harness.describe(), "tenant": "demo",
+    return {"scenarios": harness.describe(), "tenant": DEMO_TENANT,
             "token_header": "X-Demo-Token", "token": request.app.state.settings.demo_token}
 
 
@@ -58,4 +60,5 @@ async def run_scenario(request: Request, name: str, body: dict[str, Any] | None 
 async def targets(request: Request) -> dict[str, Any]:
     harness = _harness(request)
     return {"deployments": harness.targets.deployments, "branches": harness.targets.branches,
+            "workspace": harness.targets.files, "commits": harness.targets.commits,
             "log": harness.targets.log[-50:]}

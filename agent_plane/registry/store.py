@@ -374,7 +374,14 @@ class _RegistryOps:
             if rec is None:
                 rec = TaskRecord(id=task, tenant=tenant, origin=origin, created_at=now, last_activity=now)
             else:
-                rec.origin = origin
+                # Provenance accumulates. A later report that carries no origin
+                # (an agent reporting a tool call, say) must not erase the prompt
+                # or the human we already recorded for this task.
+                merged = rec.origin.model_dump()
+                for field, value in origin.model_dump().items():
+                    if value and not (field == "kind" and value == "unknown"):
+                        merged[field] = value
+                rec.origin = Origin.model_validate(merged)
                 rec.last_activity = now
             if agent and agent not in rec.agents:
                 rec.agents.append(agent)

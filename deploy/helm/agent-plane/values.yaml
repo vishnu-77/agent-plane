@@ -4,9 +4,11 @@
 #   1. Point `postgres.url` (or `existingSecret`) at a shared Postgres. Leases,
 #      approvals, use counters, and audit evidence live there, so replicas can
 #      scale and a revocation reaches every pod.
-#   2. Provide strong JWT_SECRET / ADMIN_TOKEN / AUDIT_SIGNING_KEY via
-#      `existingSecret` (recommended) or `secrets.*`.
+#   2. Provide strong JWT_SECRET / ADMIN_TOKEN / AUDIT_SIGNING_KEY /
+#      API_KEY_SECRET_VALUE via `existingSecret` (recommended) or `secrets.*`.
 #   3. Set `env.ENVIRONMENT=production` and IDENTITY_MODE=delegation.
+#   4. Decide `env.SIGNUP_MODE` before the console is reachable: "first_user"
+#      closes signup once the owner exists, "closed" allows nobody.
 
 replicaCount: 2
 
@@ -95,8 +97,19 @@ env:
   RATE_LIMIT_PER_MINUTE: "600"
   TRUST_FORWARDED_FOR: "true"
   APPROVAL_TTL_SECONDS: "3600"
-  # observe = record everything, block nothing (onboarding); enforce = real decisions.
+  # Fallback mode for traffic that belongs to no project; a project's own mode wins.
+  # observe = record everything, block nothing (onboarding)
+  # govern  = return the real decision and flag violations, but do not bind
+  # enforce = DENY / APPROVAL / QUARANTINE bind
   ENFORCEMENT_MODE: enforce
+  # Accounts and the console. first_user = the first person to sign up becomes
+  # the owner and signup then closes; "closed" allows nobody; "open" is a
+  # deliberate choice for a shared install.
+  SIGNUP_MODE: first_user
+  # Send the console session cookie only over HTTPS (implied by ENVIRONMENT=production).
+  SECURE_COOKIES: "true"
+  # Console session lifetime; 14 days by default.
+  SESSION_TTL_SECONDS: "1209600"
   # The hosted demo runs real decisions in an isolated tenant against simulated
   # targets. Keep it off unless this deployment is the public demo.
   DEMO_ENABLED: "false"
@@ -111,13 +124,19 @@ redis:
   url: ""
 
 # Secrets. Prefer existingSecret with keys:
-#   JWT_SECRET, ADMIN_TOKEN, AUDIT_SIGNING_KEY, POSTGRES_URL, REDIS_URL,
-#   DELEGATION_PUBLIC_KEY, DELEGATION_SIGNING_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
+#   JWT_SECRET, ADMIN_TOKEN, AUDIT_SIGNING_KEY, API_KEY_SECRET_VALUE,
+#   POSTGRES_URL, REDIS_URL, DELEGATION_PUBLIC_KEY, DELEGATION_SIGNING_KEY,
+#   OPENAI_API_KEY, ANTHROPIC_API_KEY
 existingSecret: ""
 secrets:
   JWT_SECRET: ""
   ADMIN_TOKEN: ""
   AUDIT_SIGNING_KEY: ""
+  # Derives the stored HMAC of every API key (ap_live_/ap_test_/ap_mgmt_) and
+  # signs console sessions. Falls back to JWT_SECRET when empty; set it here so
+  # the two can be rotated independently. Rotating it invalidates every issued
+  # API key and signs every user out.
+  API_KEY_SECRET_VALUE: ""
   DELEGATION_PUBLIC_KEY: ""
   DELEGATION_SIGNING_KEY: ""
   OPENAI_API_KEY: ""
@@ -132,6 +151,8 @@ config: {}
 #  leases.yaml: |
 #    leases: []
 #  lease-templates.yaml: |
+#    templates: []
+#  rule-templates.yaml: |
 #    templates: []
 
 extraVolumes: []

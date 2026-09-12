@@ -5,6 +5,7 @@ import asyncio
 import os
 
 import httpx2
+from fastapi import HTTPException
 from mcp import Client, types
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server.lowlevel import Server
@@ -13,7 +14,8 @@ from starlette.responses import JSONResponse
 
 from agent_plane.enforcement.mapping import load_config
 from agent_plane.enforcement.service import EnforcementService
-from agent_plane.gateway.identity import IdentityError, resolve_identity
+from agent_plane.gateway.context import resolve_request
+from agent_plane.gateway.identity import IdentityError
 
 PROTOCOL = "2026-07-28"
 
@@ -123,6 +125,12 @@ def build_gateway(app, path):
     mcp_app = server.streamable_http_app(streamable_http_path="/mcp", json_response=True,
         stateless_http=True, max_request_body_size=min(app.state.gateway_body_limit, 1_000_000))
 
+    # The operator's declared surface, used as the capability manifest for a
+    # caller that authenticates with a Project API Key. Both halves are needed:
+    # the policy layer checks the tool name it was asked for, the authority
+    # evaluator checks the action that tool performs.
+    MAPPED_SURFACE = sorted({t.name for t in config.tools} | {t.action for t in config.tools})
+
     active_requests = 0
 
     async def endpoint(scope, receive, send):
@@ -132,9 +140,23 @@ def build_gateway(app, path):
             await JSONResponse({"error": "method_not_allowed"}, status_code=405, headers={"Allow": "POST"})(scope, receive, send)
             return
         try:
-            actor = resolve_identity(request.headers.get("authorization"), app.state.settings, app.state.revocations)
+            # A Project API Key is what a developer holds, and what
+            # `agentplane connect mcp` hands to the MCP client; the identity
+            # modes still work for deployments that mint their own tokens.
+            # Either way the (tenant, agent) pair must match a binding in the
+            # operator's gateway mapping, so authority is never inferred here.
+            ctx = resolve_request(request, authorization=request.headers.get("authorization"),
+                                  x_api_key=request.headers.get("x-api-key"))
+            actor = ctx.actor
+            if ctx.api_key_id and not actor.allowed_tools:
+                # An identity token carries a capability manifest its issuer
+                # asserts. A Project API Key carries none, and a manifest the
+                # client declares about itself would be worth nothing. The
+                # operator's tool mapping is the manifest here: this gateway
+                # exposes exactly these actions, whoever is calling.
+                actor = actor.model_copy(update={"allowed_tools": MAPPED_SURFACE})
             service.binding(actor)
-        except (IdentityError, ValueError):
+        except (IdentityError, ValueError, HTTPException):
             await JSONResponse({"error": "invalid_identity_or_task_binding"}, status_code=401)(scope, receive, send)
             return
         if request.headers.get("MCP-Protocol-Version") != PROTOCOL:

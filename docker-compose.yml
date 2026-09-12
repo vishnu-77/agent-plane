@@ -47,6 +47,14 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       AUDIT_SIGNING_KEY: ${AUDIT_SIGNING_KEY:-dev-audit-key-change-me}
+      # Accounts, API keys (ap_live_/ap_test_/ap_mgmt_), and console sessions.
+      # Empty falls back to JWT_SECRET; set it to rotate keys independently.
+      API_KEY_SECRET_VALUE: ${API_KEY_SECRET_VALUE:-}
+      SIGNUP_MODE: ${SIGNUP_MODE:-first_user}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      # Fallback mode for traffic that belongs to no project (a project's own
+      # observe | govern | enforce mode always wins).
+      ENFORCEMENT_MODE: ${ENFORCEMENT_MODE:-enforce}
       IDENTITY_MODE: ${IDENTITY_MODE:-jwt_claims}
       DELEGATION_PUBLIC_KEY: ${DELEGATION_PUBLIC_KEY:-}
       DELEGATION_SIGNING_KEY: ${DELEGATION_SIGNING_KEY:-}

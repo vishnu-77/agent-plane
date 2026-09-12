@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     # YAML catalog of task-bound AuthorityLease grants. Unset -> config/leases.yaml
     # if present, else no leases (default-deny: no lease means no authority).
     leases_file: str | None = None
+    # Starter rule sets offered in the Rules screen. Unset -> config/rule-templates.yaml
+    # if present, else the packaged defaults. Never applied automatically.
+    rule_templates_file: str | None = None
     # YAML catalog of lease templates for POST /v1/leases/from-template.
     # Unset -> config/lease-templates.yaml if present, else the packaged defaults.
     lease_templates_file: str | None = None
@@ -151,13 +154,34 @@ class Settings(BaseSettings):
     # Unset -> config/resources.yaml if present, else the packaged defaults.
     resources_file: str | None = None
 
-    # --- Observe -> Enforce ---
-    # "enforce": DENY / APPROVAL / QUARANTINE are returned as such.
-    # "observe": nothing is blocked; a would-be DENY or APPROVAL comes back as
-    #            SIMULATE with `would_be`, and the registry records what the
-    #            agent tried so a lease can be inferred. Per-tenant override
-    #            via PUT /admin/mode.
-    enforcement_mode: Literal["enforce", "observe"] = "enforce"
+    # --- Observe -> Govern -> Enforce ---
+    # The default mode for new projects, and the fallback for a project that
+    # has not chosen one:
+    #   "observe": nothing is blocked; a would-be DENY or REVIEW comes back as
+    #              SIMULATE with `would_be`, and the registry records what the
+    #              agent tried so rules can be suggested.
+    #   "govern":  the real decision is returned and violations are flagged,
+    #              but `enforced` is false so an executor may still proceed.
+    #   "enforce": DENY / APPROVAL / QUARANTINE bind where agent-plane is the
+    #              execution chokepoint.
+    # A project carries its own mode and always wins; this is the fallback for
+    # traffic that belongs to no project (a legacy JWT tenant), so upgrading
+    # never silently stops enforcing for an existing deployment. New projects
+    # created through onboarding start in "observe" regardless of this value.
+    enforcement_mode: Literal["observe", "govern", "enforce"] = "enforce"
+
+    # --- Accounts ---
+    # Key used to derive the stored HMAC of every API key, and to sign console
+    # session cookies. Defaults to JWT_SECRET so a dev install needs no extra
+    # setup; set it explicitly in production. Rotating it invalidates every
+    # issued API key and signs every session out.
+    api_key_secret_value: str | None = None
+    # first_user: the first person to sign up becomes the owner; after that
+    # signup is closed. "open" allows anyone; "closed" allows nobody.
+    signup_mode: Literal["first_user", "open", "closed"] = "first_user"
+    session_ttl_seconds: int = 14 * 24 * 3600
+    # Send the session cookie only over HTTPS. Forced on in production.
+    secure_cookies: bool = False
 
     # --- Hosted demo ---
     # Enables /demo/* (deterministic scenarios against simulated targets in the
@@ -194,6 +218,15 @@ class Settings(BaseSettings):
 
     # --- Upstream call behaviour ---
     upstream_timeout_seconds: float = 60.0
+
+    @property
+    def api_key_secret(self) -> str:
+        """Key for API-key HMACs and session signatures (falls back to JWT_SECRET)."""
+        return self.api_key_secret_value or self.jwt_secret
+
+    @property
+    def cookies_secure(self) -> bool:
+        return self.secure_cookies or self.environment == "production"
 
     @property
     def audit_db_url(self) -> str:

@@ -20,39 +20,91 @@
 
 </div>
 
-Connect Claude Code, Codex, LangGraph, MCP agents or your own agent.
+Connect your agents. See what they do, understand what authority sits behind
+their actions, and control what they are allowed to cause.
 
-agent-plane discovers the agents in your system, traces where their
-authority came from, and evaluates the consequences of their actions before
-those actions reach real systems.
+Claude Code, Codex, Cursor, MCP servers, LangGraph, or your own application.
 
-```text
-prompt   "Investigate why checkout is failing in staging. Do not touch production."
-   ↓
-task     incident-218
-   ↓
-agent    incident-agent            langgraph · workstation-02
-   ↓
-authority  logs.read  metrics.read  deployment.read  deployment.restart
-           scope staging/checkout · protected production/*
-   ↓
-action   deployment.restart
-   ↓
-resource production/checkout                                   MISMATCH
-   ↓
-consequence  workload restarts; in-flight requests are dropped
-             production · customer-facing · 3 downstream resources
-   ↓
-DENY     RESOURCE_OUTSIDE_DELEGATED_SCOPE
-         CONSEQUENCE_OUTSIDE_TASK_BOUNDARY
+## Connect an agent
+
+```bash
+git clone https://github.com/vishnu-77/agent-plane.git && cd agent-plane
+python -m venv .venv && source .venv/bin/activate      # PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]" -e ./sdk/python
+agentplane serve --host 127.0.0.1
 ```
 
-Every decision stays explainable through that whole chain, in the console
-and in the signed audit record behind it.
+Open **http://127.0.0.1:8000/console**, create an account, and name a project.
+The console shows you one command:
 
-<img src="docs/assets/console-live.png" alt="The LIVE screen: the Authority–Consequence Graph for a denied production restart, the current decision with its authority, consequence, and result, and the decision stream." width="100%" />
+```bash
+agentplane connect claude --key ap_live_...
+```
 
-<sub>The LIVE screen after the staging-incident scenario: prompt → task → agent → authority → action → resource, folded into direct effect → downstream → consequence → DENY. Real engine, simulated targets.</sub>
+That is the whole setup. There is no JWT to mint, no authority YAML to write,
+no policy bundle to load, and no admin token to pass around. Activity appears
+as soon as the agent does something.
+
+```text
+14:03  claude-code   filesystem.read    workspace/src/auth.ts       ALLOWED
+14:03  claude-code   filesystem.write   workspace/src/auth.ts       WOULD REVIEW
+14:03  claude-code   tests.execute      shell/npm                   ALLOWED
+14:04  claude-code   repository.delete  github://acme/app           WOULD BLOCK
+```
+
+New projects start in **Observe**, so the first thing agent-plane does is
+watch. Nothing is blocked until you say so.
+
+<img src="docs/assets/console-activity.png" alt="The Activity screen: a coding agent's reads, edits, test run and commit are allowed, a push waits for a human, and reading .env and deleting the repository are blocked." width="100%" />
+
+<sub>The demo's coding-agent scenario, in Enforce. Real engine, simulated
+targets: the push is held for a human, the protected file and the repository
+deletion are refused.</sub>
+
+## Then decide what they may do
+
+A rule is three lists, written in the console or over the API:
+
+```text
+ALLOW       filesystem.read   tests.execute
+ASK FIRST   filesystem.write  git.push
+NEVER       repository.delete
+```
+
+`NEVER` is absolute. No other rule, lease, or delegation can grant it back.
+
+agent-plane also drafts a rule from what your agents actually did: reads are
+proposed as allowed, changes as ask-first, destructive actions as never. You
+review it before it takes effect, and a suggestion disappears once a rule
+covers it.
+
+Rules can live in version control instead, next to the code they govern:
+
+```bash
+agentplane rules check permissions.yaml     # in the pull request
+agentplane rules push  permissions.yaml --project prj_… --key ap_mgmt_…
+```
+
+## Three modes
+
+| Mode | What happens |
+| --- | --- |
+| **Observe** | Every action is recorded and explained. Nothing is blocked. |
+| **Govern** | Violations are decided and flagged. Execution is still the caller's. |
+| **Enforce** | The decision binds, wherever the integration can enforce it. |
+
+Enforcement is only ever claimed where it is real. A connector says what it
+can observe and whether it can block, and every decision carries a `binding`
+flag, so the product never implies it stopped something it could not stop.
+
+| Integration | Sees | Can block |
+| --- | --- | --- |
+| Claude Code | every action | most actions |
+| Codex | every action | most actions |
+| MCP server | every action | yes |
+| API / model gateway | every action | yes |
+| Cursor / OpenCode | most actions | no |
+| LangGraph, SDK, your app | what your code reports | your code decides |
 
 ## Capability ≠ Authority
 
@@ -76,6 +128,30 @@ deployment.restart  production/payments   critical, customer-facing, irreversibl
 
 Same verb three times. Three different consequences. Authorization has to
 consider the second column, not just the first.
+
+Every decision stays explainable through the whole chain, in the console and
+in the signed audit record behind it.
+
+```text
+prompt   "Investigate why checkout is failing in staging. Do not touch production."
+   ↓
+task     incident-218
+   ↓
+agent    incident-agent            langgraph · workstation-02
+   ↓
+authority  logs.read  metrics.read  deployment.read  deployment.restart
+           scope staging/checkout · protected production/*
+   ↓
+action   deployment.restart
+   ↓
+resource production/checkout                                   MISMATCH
+   ↓
+consequence  workload restarts; in-flight requests are dropped
+             production · customer-facing · 3 downstream resources
+   ↓
+DENY     RESOURCE_OUTSIDE_DELEGATED_SCOPE
+         CONSEQUENCE_OUTSIDE_TASK_BOUNDARY
+```
 
 ## Three primitives
 
@@ -112,23 +188,15 @@ Executable Authority =
 
 Outcomes: `ALLOW` · `DENY` · `APPROVAL` · `QUARANTINE` · `SIMULATE`.
 
-## Try it in two minutes
+## See it before you connect anything
 
-```bash
-git clone https://github.com/vishnu-77/agent-plane.git && cd agent-plane
-python -m venv .venv && source .venv/bin/activate      # PowerShell: .venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]" -e ./sdk/python
-agentplane serve --host 127.0.0.1
-```
+The console has a **DEMO** switch. It runs the real authority engine against
+simulated targets in an isolated project; nothing leaves your machine and
+nothing external is touched.
 
-Open **http://127.0.0.1:8000/console**, keep the **DEMO** switch on, and run
-*Staging incident*. Watch the graph build from the prompt to the denial,
-then open the evidence. The demo runs the real authority engine against
-simulated targets; nothing leaves your machine.
-
-Three scenarios ship: a staging incident that must not touch production, a
-GitHub cleanup that must never delete `main`, and a delegation where a child
-agent asks for authority no ancestor ever held.
+Three scenarios ship: a coding agent that must stay inside its task, a GitHub
+cleanup that must never delete `main`, and a delegation where a child agent
+asks for authority no ancestor ever held.
 
 ## Change the route, not the agent
 
@@ -150,28 +218,20 @@ deployments its own gateways enforce. In enterprise environments an Envoy,
 Kubernetes, or cloud gateway can ask agent-plane for the decision. Existing
 IAM, model routers, and cloud gateways stay in place.
 
-Start in **Observe**: nothing is blocked, agents and their real behaviour are
-discovered, a suggested authority profile is built from what each agent
-actually did. Review it. Switch to **Enforce**.
-
-```text
-TASK      "Summarise customer support tickets"
-EXPECTED  tickets.read
-OBSERVED  tickets.read   customer.export  UNDECLARED   email.send  UNDECLARED
-```
-
 ## Underneath
 
 Once the story is clear, the mechanics are ordinary and documented:
 
 | | |
 | --- | --- |
-| `AuthorityLease` | the task-scoped grant: actions, resources, protected resources, use limits, approval, expiry, permitted consequence, lineage · [spec](spec/authority-lease.md) |
+| Ingestion | one endpoint every integration reports to: `POST /v1/events/action` · [api](docs/api-reference.md) |
+| Projects and keys | `ap_live_` / `ap_test_` / `ap_mgmt_`, hashed at rest, shown once, rotate or revoke one machine |
+| Rules | what you write; they compile into task-scoped authority, which is what the engine evaluates |
+| `AuthorityLease` | that task-scoped grant: actions, resources, protected resources, use limits, approval, expiry, permitted consequence, lineage · [spec](spec/authority-lease.md) |
 | Gateways | OpenAI-compatible, MCP, tool broker, retrieval · [integration](docs/integration/README.md) |
 | Delegation | child leases and child identities that only attenuate · [authorization](docs/integration/authorization.md) |
 | Revocation | narrow or revoke a live lease, quarantine an agent; every replica sees it |
 | Approvals | a tracked request, a human decision, one resume · [approvals](docs/integration/approvals.md) |
-| Policies | organisation rules in YAML, hot-reloadable · [configuration](CONFIGURATION.md) |
 | Audit | hash-chained, HMAC-signed decisions with the full trace · [api](docs/api-reference.md) |
 | SDKs | Python and TypeScript clients, framework adapters, a fail-closed conformance kit · [python](sdk/python/README.md) · [typescript](sdk/typescript/README.md) |
 | Deployment | Docker, Compose, Helm · [deploy](deploy/README.md) |

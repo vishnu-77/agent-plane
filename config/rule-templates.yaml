@@ -1,0 +1,91 @@
+# Starter rule sets offered in the Rules screen. Nothing here is applied
+# automatically: a human picks one, reviews it, and it becomes that project's
+# authority. Written the way the product talks about authority - allow, ask
+# first, never - and compiled into internal AuthorityLease structures.
+templates:
+  - key: coding-agents
+    name: Coding agents
+    description: >-
+      A coding agent may read the repository, change the working tree, and run
+      tests. Publishing, installing dependencies, and reaching the network need
+      a human. Destructive and credential actions are refused outright.
+    scope:
+      agents: ["*"]
+    allow:
+      - repository.read
+      - filesystem.read
+      - filesystem.write
+      - tests.execute
+      - shell.execute
+      - git.commit
+    ask:
+      - git.push
+      - package.install
+      - network.access
+    never:
+      - repository.delete
+      - credentials.read
+      - filesystem.delete
+    resources: ["workspace/*", "shell/*", "github://*", "package/*", "network/*"]
+    protected_resources: ["workspace/.env*", "github://*/branches/main"]
+
+  - key: read-only
+    name: Read-only review
+    description: An agent that may look at everything and change nothing.
+    scope:
+      agents: ["*"]
+    allow:
+      - "*.read"
+      - "*.list"
+    ask: []
+    never:
+      - "*.write"
+      - "*.delete"
+      - "*.restart"
+      - "*.install"
+      - "*.send"
+      - "*.export"
+    resources: ["*"]
+
+  - key: ops-staging
+    name: Staging operations
+    description: >-
+      Investigate and restart staging workloads. Production is never touched,
+      and the permitted consequence is bounded to staging.
+    scope:
+      agents: ["*"]
+    allow:
+      - logs.read
+      - metrics.read
+      - deployment.read
+    ask:
+      - deployment.restart
+      - deployment.scale
+    never:
+      - deployment.delete
+      - credentials.read
+    resources: ["staging/*"]
+    protected_resources: ["production/*"]
+    permitted_consequence:
+      environments: ["staging"]
+      customer_facing: false
+      max_impact: medium
+
+  - key: support-agents
+    name: Support agents
+    description: >-
+      Read tickets and draft replies. Exporting customer data and sending
+      external email are refused, which is the pair that turns a helpful
+      summariser into a data-exfiltration path.
+    scope:
+      agents: ["*"]
+    allow:
+      - tickets.read
+      - tickets.list
+    ask:
+      - tickets.write
+    never:
+      - customer.export
+      - email.send
+      - credentials.read
+    resources: ["tickets/*"]

@@ -4,9 +4,99 @@
 # underneath it via config/instructions. `capability_manifest_version` pins
 # which version of config/capability-manifest.yaml this review covers -
 # `agentplane authority check-freshness` fails CI if they drift apart.
-capability_manifest_version: "4"
+capability_manifest_version: "6"
 
 last_reviewed: "2026-09-12"
+
+# Manifest 5 review: the developer-first surface - accounts and console
+# sessions, project API keys, the /v1/events/action ingestion edge, project
+# rules, the local connectors, and govern mode.
+#   - accounts: passwords are scrypt-stretched (stdlib) and only the derived
+#     hash is stored; the console session is a signed httponly cookie, not a
+#     server-side table and never a token in local storage. SIGNUP_MODE is the
+#     only thing standing between a public instance and open registration -
+#     "first_user" (default) closes signup after the owner exists, "open" is a
+#     deliberate choice for a shared install, "closed" for a seeded one. Set
+#     SECURE_COOKIES (implied by ENVIRONMENT=production) so the cookie never
+#     travels over plaintext, and CORS_ORIGINS narrowly, since the cookie is
+#     what a cross-origin page would be trying to ride.
+#   - api keys: the plaintext is shown exactly once and stored only as an
+#     HMAC-SHA256 keyed by API_KEY_SECRET_VALUE, so a database read alone does
+#     not yield a usable key; the key material never leaves the server. That
+#     secret defaults to JWT_SECRET for a zero-setup dev install, which means a
+#     production deployment that leaks JWT_SECRET leaks the key index too - set
+#     it explicitly and separately. Rotating either invalidates every issued key
+#     and signs every session out, which is the intended break-glass. ap_live_
+#     and ap_test_ authorize agent traffic for one project only; ap_mgmt_ is an
+#     operator credential for that same project and is deliberately weaker than
+#     ADMIN_TOKEN, which still sees every tenant and remains the break-glass
+#     credential of the deployment, not something a developer is handed.
+#   - events ingestion: POST /v1/events/action is the widest edge in the
+#     product - it is reachable with nothing but a project key, and everything
+#     in the body is caller-asserted. It is therefore treated as evidence, not
+#     as authority: the project is taken from the key, never from the body, and
+#     a connector cannot report itself into another tenant. Normalization reads
+#     only the tool name and the argument *shape*, never file contents or
+#     prompt text. The project's collection policy defaults to off for prompt
+#     content, tool arguments, tool output, file content, and model messages, so
+#     the default posture ingests metadata rather than source; absolute paths
+#     have the home prefix (and therefore the developer's username) stripped
+#     before storage. Batches are capped at 50 events and the deployment-wide
+#     rate limit still applies.
+#   - rules: ALLOW / ASK FIRST / NEVER are a developer-legible surface over the
+#     same AuthorityLease machinery, compiled per decision rather than stored as
+#     authority - "ask" becomes require_approval and "never" becomes
+#     denied_actions, which the evaluator treats as an absolute refusal that no
+#     other rule can widen. No applicable rule yields no lease at all, so the
+#     project stays default-deny; a project with rules is only as safe as its
+#     narrowest scope, since scopes are unioned across applicable rules.
+#     GET /v1/rules/suggested only ever drafts - nothing an agent did can turn
+#     itself into authority without a human saving the rule.
+#   - connectors: `agentplane connect` writes the Project API Key to
+#     ~/.agentplane/credentials.json with owner-only permissions rather than to
+#     an editor settings file that gets committed by accident; POSIX modes do
+#     not exist on Windows, so treat the developer's machine, not the file mode,
+#     as the boundary. The installed pre-tool hook is fail-open by design: it
+#     exits 0 (proceed) when the control plane is unreachable or the mode is
+#     observe/govern, and returns a blocking exit 2 only in enforce mode on an
+#     integration that can actually block. That is the right trade for an
+#     editor, and it is exactly why a hook is a governance signal and not a
+#     security control - a developer can uninstall it, and nothing stops the
+#     same tool call being made outside it.
+#   - govern mode: the real decision is returned but `enforced` is false, so a
+#     violation is visible and the caller may still proceed. It is a reporting
+#     state, not a control; only enforce mode binds, and only where agent-plane
+#     is the execution chokepoint.
+
+# Manifest 6 review: permissions as a file, the MCP gateway's credential, and
+# who counts as an administrator.
+#   - rules as a file: import rewrites a project's authority, so it takes a
+#     console session or an ap_mgmt_ key and refuses an ap_live_ project key -
+#     an agent must not be able to widen the rules it is judged by, and the
+#     agent's own credential is the one most likely to leak. `replace` deletes
+#     every rule the file does not mention and is never the default. Validation
+#     is strict and happens before anything is written: an unknown field is an
+#     error, so a typo cannot silently drop a "never" list, and a file that
+#     fails leaves the project exactly as it was. `agentplane rules check`
+#     needs no credential and reaches no network, which is what makes it safe
+#     to run on an untrusted pull request.
+#   - MCP credential: /mcp now accepts a Project API Key as well as an identity
+#     token. The key authenticates, it does not authorize: the (tenant, agent)
+#     pair must still match a binding in MCP_GATEWAY_FILE, which is operator-
+#     written, and a caller without one is refused. An identity token carries an
+#     issuer-asserted capability manifest; a key carries none, so rather than
+#     letting the client declare its own, the operator's tool mapping is the
+#     manifest. The net surface for a key-authenticated caller is therefore the
+#     mapped tools, bounded by the bound lease - narrower than a token whose
+#     issuer may assert a wider manifest.
+#   - administrators: a console session satisfies the deployment-wide
+#     operations (policy reload, credential revocation, lease issue/revoke,
+#     quarantine, the global mode fallback) only for the account that created
+#     the instance. Previously any signed-in account did, which on a shared
+#     install meant every developer was an administrator of everyone else's
+#     tenants. First-account-wins is a convention, not an authorization model:
+#     a multi-tenant deployment should still put ADMIN_TOKEN behind an operator
+#     boundary and treat SIGNUP_MODE=open as a decision about who may register.
 
 # 0.6 review (manifest 4): consequence modelling, the agent registry,
 # quarantine, observe mode, lineage, and the hosted demo.
@@ -35,12 +125,22 @@ notes:
   tool_and_action_capabilities: >
     Tools are config-driven (config/tools.yaml) and default-deny; the broker
     executes with its own credential. AuthorityLease adds a second, narrower
-    gate per task on top.
+    gate per task on top. Connector traffic (POST /v1/events/action) widens the
+    set of *reported* actions, not the set of executable ones: a coding agent's
+    raw tool name is normalized into a canonical action + resource from the tool
+    name and argument shape alone, and an action agent-plane does not recognise
+    is recorded, never inferred into authority.
   identity_and_authorization: >
     IDENTITY_MODE=delegation verifies scope cryptographically in production;
     jwt_claims (dev) trusts caller-asserted claims - do not run that mode in
     production (config.py fails closed if IDENTITY_MODE=delegation lacks a key,
-    but does not block jwt_claims itself).
+    but does not block jwt_claims itself). Alongside those, a Project API Key
+    (ap_live_/ap_test_) now binds a request to exactly one project regardless of
+    what the body claims, and a console session cookie identifies a human but
+    never authorizes an agent action. Operator access resolves in a fixed order
+    - session, then ap_mgmt_ key scoped to one project, then ADMIN_TOKEN across
+    every tenant - so the weakest credential that can answer a request is the
+    one that does.
   multi_agent_orchestration: >
     A2A delegation enforces attenuation (child scope subset of parent).
     AuthorityLease delegation (POST /v1/leases/{id}/delegate, v0.3) mirrors it:
@@ -49,9 +149,32 @@ notes:
     maximum_impact/expiry - a fresh child lease defaults to child_authority
     "none" so re-delegation doesn't chain unbounded unless explicitly granted.
   human_oversight: >
+    Project rules are the developer's own oversight surface: ASK FIRST compiles
+    to require_approval so a human decides in-flight, NEVER compiles to an
+    absolute denied_actions refusal, and a suggestion drawn from observed
+    traffic is only ever a draft until someone saves it. A project moves
+    observe -> govern -> enforce deliberately; observe and govern block nothing
+    by design, and the console mode lamp plus the SDK's `enforced`/`would_be`
+    fields exist so neither is mistaken for enforcement.
     An operator can pull or narrow authority from an active lease mid-task
     (DELETE/PATCH /v1/leases/{id}, v0.4) - effective immediately, without
     waiting for the lease's natural expiry. Shrinking reuses the same
     "never grants more" attenuation rule as delegation, so an operator can
     only narrow, never accidentally widen. Both admin-token gated and
     audited, same as lease issuance.
+  memory_and_context_sources: >
+    Ingested events are the plane's memory of what agents did, so the project's
+    collection policy is the privacy boundary: prompt content, tool arguments,
+    tool output, file content, and model messages are all off unless a human
+    turns them on per project, and home-directory prefixes are stripped out of
+    absolute paths so a developer's username is not persisted. Turning any of
+    them on moves source material into the audit database - a deliberate,
+    per-project decision, not a default.
+  detection_and_recovery: >
+    Every credential in the new surface can be pulled without a deploy: an API
+    key is revoked or rotated from the console (/v1/api-keys*), a rule is
+    disabled or deleted, a project's mode drops back to observe, and rotating
+    API_KEY_SECRET_VALUE invalidates every key and session at once. Because
+    keys, rules, accounts, and audit evidence share the configured database,
+    those changes reach every replica rather than one worker's memory - the
+    same reason AUTHORITY_STORE=memory is refused in production.

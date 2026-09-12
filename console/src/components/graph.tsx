@@ -8,8 +8,17 @@
 // (what it causes, how far it reaches, the decision) below. Two views of the
 // same runtime, fused at the resource.
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentSummary, Consequence, LineageLink, Trace } from "@/lib/api";
-import { cn, outcomeLabel, outcomeTone, shortId } from "@/lib/utils";
+import type { Agent, Consequence, LineageLink, Trace } from "@/lib/api";
+import { cn, outcomeLabel, outcomeTone as baseTone } from "@/lib/format";
+
+// The graph's palette predates the product vocabulary; map one to the other.
+type GraphTone = "allow" | "deny" | "approval" | "hold" | "neutral";
+const outcomeTone = (outcome: string | null | undefined, wouldBe?: string | null): GraphTone => {
+  const tone = baseTone(outcome, wouldBe);
+  return tone === "review" ? "approval" : tone;
+};
+const shortId = (value: string | null | undefined, n = 12) =>
+  !value ? "-" : value.length > n ? `${value.slice(0, n - 1)}...` : value;
 
 export type Layer = "origin" | "task" | "agent" | "authority" | "action" | "resource" | "effect" | "downstream" | "consequence" | "decision";
 
@@ -52,7 +61,7 @@ const LAYER_TITLE: Record<Layer, string> = {
 };
 
 // ---------------------------------------------------------------- model
-export function graphFromTrace(trace: Trace, siblings: AgentSummary[] = [], opts: { lineageOnly?: boolean } = {}): Graph {
+export function graphFromTrace(trace: Trace, siblings: Agent[] = [], opts: { lineageOnly?: boolean } = {}): Graph {
   const nodes: GNode[] = [];
   const edges: GEdge[] = [];
   const add = (n: GNode) => {

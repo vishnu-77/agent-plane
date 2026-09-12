@@ -1,23 +1,55 @@
 /**
  * TypeScript client for agent-plane.
  *
- * Mirrors the Python SDK contract exactly: `authorize()` returns a decision
- * and the caller executes the real action only when `decision.allowed` is
- * true. Any inconsistent or unexpected response throws
- * `AuthorizationProtocolError`; HTTP and network failures throw too. None of
- * those may be treated as permission.
+ * Mirrors the Python SDK contract. A developer holds one credential - a
+ * Project API Key (`ap_live_…` / `ap_test_…`) - and works through a task:
  *
  *   import { AgentPlane } from "@agent-plane/sdk";
- *   const plane = new AgentPlane(process.env.AGENT_PLANE_URL!, agentToken);
- *   const d = await plane.authorize({ task, action: "deployment.restart", resource: "staging/checkout" });
- *   if (d.allowed) await restart();
- *   else if (d.needsApproval) { const r = await plane.waitForApproval(d, { timeoutMs: 600_000 }); ... }
+ *
+ *   const ap = new AgentPlane();                      // AGENTPLANE_API_KEY / AGENTPLANE_URL
+ *   const task = await ap.task("fix-staging-checkout");
+ *   const d = await task.authorize("deployment.restart", "staging/checkout");
+ *   if (d.proceed) await restart();
+ *
+ * `authorize()` asks before a side effect; `report()` tells agent-plane what a
+ * tool did. Both carry the task, so the decision and its evidence are
+ * attributable to the thing someone actually asked for.
+ *
+ * A decision only blocks when the connector can block. `binding` says whether
+ * this decision actually stopped anything, and `enforcement` says what the
+ * reporting connector is capable of. For an SDK caller enforcement is
+ * advisory: agent-plane answers, your code decides. Nothing here may be read
+ * as agent-plane having blocked an action it cannot reach.
+ *
+ * Any inconsistent or unexpected response throws `AuthorizationProtocolError`;
+ * HTTP and network failures throw too. None of those may be treated as
+ * permission.
  *
  * Uses the global `fetch` (Node 18+, browsers, edge runtimes). No dependencies.
  */
 
 export type DecisionKind = "allow" | "deny" | "approval_required" | "quarantine" | "simulate";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "consumed" | "expired";
+
+/**
+ * Project runtime mode. `observe` records and never blocks; `govern` returns
+ * the real decision but leaves execution to the caller; `enforce` binds, but
+ * only on connectors that can actually block.
+ */
+export type RuntimeMode = "observe" | "govern" | "enforce";
+
+/**
+ * What the reporting connector is capable of, declared per integration kind.
+ * `advisory` means agent-plane can only answer - it cannot stop the action.
+ */
+export type EnforcementLevel = "full" | "partial" | "advisory";
+
+/** The server rejects a larger batch; refuse before spending a round trip. */
+export const MAX_BATCH = 50;
+
+const DEFAULT_URL = "http://127.0.0.1:8000";
+const MODES: string[] = ["observe", "govern", "enforce"];
+const ENFORCEMENT_LEVELS: string[] = ["full", "partial", "advisory"];
 
 export class AuthorizationProtocolError extends Error {
   constructor(message: string) {
@@ -56,14 +88,29 @@ export interface AuthorityDecision {
   task: string;
   action: string;
   resource: string;
+  /** the agent the decision was attributed to; "" when the server did not say */
+  agent: string;
   /** true only for an explicit ALLOW */
   allowed: boolean;
   needsApproval: boolean;
   quarantined: boolean;
-  /** false only for observe-mode SIMULATE */
+  /** false when the project's mode did not enforce (observe / govern) */
   enforced: boolean;
-  /** simulate: what enforce mode would have returned */
+  /** what enforce mode would have returned, when this one did not enforce */
   wouldBe: string | null;
+  /** the decision is information, not an outcome: nothing was stopped */
+  advisory: boolean;
+  /** the project's runtime mode, when the server reported it */
+  mode: RuntimeMode | null;
+  /** what the reporting connector can do; null when the server did not say */
+  enforcement: EnforcementLevel | null;
+  /**
+   * Whether this decision actually binds - true only when the project enforces
+   * *and* the connector can block. False means agent-plane recorded the
+   * decision and nothing else; honouring it is the caller's job. Never report
+   * an action as blocked unless this is true.
+   */
+  binding: boolean;
   /** ALLOW, or an observe-mode SIMULATE: the executor may proceed */
   proceed: boolean;
   consequence: Record<string, unknown>;
@@ -116,7 +163,46 @@ export interface AuthorizeInput {
   context?: Record<string, string>;
 }
 
+/**
+ * One action an agent is about to take, or has just taken. Either name the
+ * canonical `action` and `resource`, or hand over the raw `tool` and
+ * `arguments` and let the server normalize them.
+ */
+export interface ActionEvent {
+  task?: string;
+  tool?: string;
+  action?: string;
+  resource?: string;
+  arguments?: Record<string, unknown>;
+  repository?: string;
+  branch?: string;
+  impact?: "reversible" | "irreversible";
+  approval?: string;
+  context?: Record<string, string>;
+  /** where the task came from; provenance, never permission */
+  origin?: Record<string, unknown>;
+  agent?: string;
+  integration?: string;
+  session?: string;
+  host?: string;
+}
+
+export interface SessionInfo {
+  session: string;
+  agent: string;
+  project: string;
+  mode: RuntimeMode | null;
+}
+
 export interface ClientOptions {
+  /** Project API Key. Falls back to AGENTPLANE_API_KEY. */
+  apiKey?: string;
+  /** runtime base URL. Falls back to AGENTPLANE_URL, then localhost. */
+  url?: string;
+  /** agent identifier reported with every call (X-Agent-Id) */
+  agent?: string;
+  /** integration kind; decides the enforcement level the server reports back */
+  integration?: string;
   /** custom fetch (tests, polyfills) */
   fetch?: typeof fetch;
   /** per-request timeout in ms (default 10s) */
@@ -133,20 +219,37 @@ function isRecord(v: unknown): v is Json {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function parseDecision(status: number, text: string, input: AuthorizeInput): AuthorityDecision {
-  const expected = EXPECTED[status];
-  if (!expected) throw new HttpError(status, text);
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    throw new AuthorizationProtocolError("Invalid JSON from agent-plane");
-  }
-  // FastAPI wraps 202/403 in "detail"; HTTP success is not permission.
-  const payload = isRecord(body) && isRecord(body.detail) ? body.detail : body;
+/**
+ * Read an environment variable without depending on @types/node: the same
+ * bundle runs in browsers and edge runtimes, where `process` may not exist.
+ */
+function env(name: string): string | undefined {
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  return proc?.env?.[name];
+}
+
+function asMode(v: unknown): RuntimeMode | null {
+  return typeof v === "string" && MODES.includes(v) ? (v as RuntimeMode) : null;
+}
+
+function asEnforcement(v: unknown): EnforcementLevel | null {
+  return typeof v === "string" && ENFORCEMENT_LEVELS.includes(v) ? (v as EnforcementLevel) : null;
+}
+
+/**
+ * Validate and shape one decision payload, whichever edge produced it.
+ *
+ * `fallback` supplies what the caller asked about; `/v1/events/action` echoes
+ * its own normalized task, action and resource, and those win, because they
+ * are what was actually decided on.
+ */
+function decisionOf(
+  payload: unknown,
+  fallback: { task: string; action: string; resource: string },
+): AuthorityDecision {
   if (
     !isRecord(payload) ||
-    !expected.includes(payload.decision as DecisionKind) ||
+    typeof payload.decision !== "string" ||
     typeof payload.reason !== "string" || !payload.reason ||
     typeof payload.evidence_id !== "string" || !payload.evidence_id ||
     (payload.lease != null && typeof payload.lease !== "string") ||
@@ -172,18 +275,42 @@ function parseDecision(status: number, text: string, input: AuthorizeInput): Aut
     evidenceId: payload.evidence_id,
     approvalId: (payload.approval_id as string | undefined) ?? null,
     context,
-    task: input.task,
-    action: input.action,
-    resource: input.resource,
+    task: typeof payload.task === "string" && payload.task ? payload.task : fallback.task,
+    action: typeof payload.action === "string" && payload.action ? payload.action : fallback.action,
+    resource: typeof payload.resource === "string" && payload.resource ? payload.resource : fallback.resource,
+    agent: typeof payload.agent === "string" ? payload.agent : "",
     allowed: decision === "allow",
     needsApproval: decision === "approval_required",
     quarantined: decision === "quarantine",
     enforced,
     wouldBe: (payload.would_be as string | undefined) ?? null,
+    advisory: payload.advisory === true,
+    mode: asMode(payload.mode),
+    enforcement: asEnforcement(payload.enforcement),
+    // Default false. A missing field must never read as "agent-plane blocked
+    // this"; only an explicit true from the server binds.
+    binding: payload.binding === true,
     proceed: decision === "allow" || (decision === "simulate" && !enforced),
     consequence,
     explanation,
   };
+}
+
+function parseDecision(status: number, text: string, input: AuthorizeInput): AuthorityDecision {
+  const expected = EXPECTED[status];
+  if (!expected) throw new HttpError(status, text);
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new AuthorizationProtocolError("Invalid JSON from agent-plane");
+  }
+  // FastAPI wraps 202/403 in "detail"; HTTP success is not permission.
+  const payload = isRecord(body) && isRecord(body.detail) ? body.detail : body;
+  if (!isRecord(payload) || !expected.includes(payload.decision as DecisionKind)) {
+    throw new AuthorizationProtocolError("Inconsistent authorization decision");
+  }
+  return decisionOf(payload, input);
 }
 
 async function request(
@@ -225,17 +352,24 @@ function asLease(body: unknown): Lease {
   return body as unknown as Lease;
 }
 
+interface Resolved {
+  baseUrl: string;
+  headers: Record<string, string>;
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+}
+
 abstract class BaseClient {
   protected readonly baseUrl: string;
   protected readonly fetchImpl: typeof fetch;
   protected readonly timeoutMs: number;
   protected readonly headers: Record<string, string>;
 
-  constructor(baseUrl: string, headers: Record<string, string>, opts: ClientOptions = {}) {
-    this.headers = headers;
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
-    this.fetchImpl = opts.fetch ?? globalThis.fetch;
-    this.timeoutMs = opts.timeoutMs ?? 10_000;
+  constructor(cfg: Resolved) {
+    this.headers = cfg.headers;
+    this.baseUrl = cfg.baseUrl.replace(/\/+$/, "");
+    this.fetchImpl = cfg.fetch ?? globalThis.fetch;
+    this.timeoutMs = cfg.timeoutMs ?? 10_000;
     if (!this.fetchImpl) throw new Error("No fetch implementation available; pass options.fetch");
   }
 
@@ -246,13 +380,100 @@ abstract class BaseClient {
   }
 }
 
-/** Executor-side client, authenticated with the agent bearer token. */
-export class AgentPlane extends BaseClient {
-  constructor(baseUrl: string, token: string, opts: ClientOptions = {}) {
-    super(baseUrl, { Authorization: `Bearer ${token}` }, opts);
+/**
+ * Resolve the executor credential and endpoint. Kept outside the constructor
+ * so `super()` stays the first statement.
+ */
+function executorConfig(
+  baseUrlOrOptions: string | ClientOptions | undefined,
+  token: string | undefined,
+  options: ClientOptions,
+): Resolved {
+  const opts = typeof baseUrlOrOptions === "object" && baseUrlOrOptions !== null ? baseUrlOrOptions : options;
+  const baseUrl = typeof baseUrlOrOptions === "string" ? baseUrlOrOptions : undefined;
+  const credential = opts.apiKey ?? token ?? env("AGENTPLANE_API_KEY");
+  if (!credential) {
+    throw new Error(
+      "No credential. Pass apiKey: … or set AGENTPLANE_API_KEY " +
+      "(get one from Integrations in the console).",
+    );
+  }
+  const integration = opts.integration ?? "custom";
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${credential}`,
+    "X-Integration": integration,
+  };
+  if (opts.agent) headers["X-Agent-Id"] = opts.agent;
+  return {
+    baseUrl: opts.url ?? baseUrl ?? env("AGENTPLANE_URL") ?? DEFAULT_URL,
+    headers,
+    fetch: opts.fetch,
+    timeoutMs: opts.timeoutMs,
+  };
+}
+
+/**
+ * One unit of work an agent is doing, and the authority it acts under.
+ * Obtained from `ap.task(name)`, which also registers the task's provenance.
+ */
+export class Task {
+  readonly plane: AgentPlane;
+  readonly name: string;
+  readonly origin: Record<string, unknown>;
+
+  constructor(plane: AgentPlane, name: string, origin: Record<string, unknown> = {}) {
+    this.plane = plane;
+    this.name = name;
+    this.origin = origin;
   }
 
-  /** Ask whether `action` on `resource` is authorised for `task`. Execute only on `allowed`. */
+  /** Ask before the side effect; execute only when the decision says proceed. */
+  authorize(
+    action: string,
+    resource: string,
+    opts: Omit<AuthorizeInput, "task" | "action" | "resource"> = {},
+  ): Promise<AuthorityDecision> {
+    return this.plane.authorize({ ...opts, task: this.name, action, resource });
+  }
+
+  /** Report one action taken under this task. */
+  report(event: Omit<ActionEvent, "task"> = {}): Promise<AuthorityDecision> {
+    return this.plane.report({ ...event, task: this.name });
+  }
+
+  /** Report up to MAX_BATCH actions taken under this task, in one round trip. */
+  reportBatch(events: Array<Omit<ActionEvent, "task">>): Promise<AuthorityDecision[]> {
+    return this.plane.reportBatch(events.map((e) => ({ ...e, task: this.name })));
+  }
+
+  /** Wait out an approval_required decision raised by this task. */
+  waitForApproval(
+    decision: AuthorityDecision,
+    opts: { timeoutMs?: number; intervalMs?: number } = {},
+  ): Promise<AuthorityDecision> {
+    return this.plane.waitForApproval(decision, opts);
+  }
+}
+
+/** Executor-side client, authenticated with a Project API Key. */
+export class AgentPlane extends BaseClient {
+  /** agent identifier sent with every call, or null when the server names one */
+  readonly agent: string | null;
+  readonly integration: string;
+
+  /** `new AgentPlane()` / `new AgentPlane({ apiKey, url })` - the normal form. */
+  constructor(options?: ClientOptions);
+  /** Legacy form, for deployments that mint their own identity tokens. */
+  constructor(baseUrl: string, token: string, options?: ClientOptions);
+  constructor(baseUrlOrOptions?: string | ClientOptions, token?: string, options: ClientOptions = {}) {
+    super(executorConfig(baseUrlOrOptions, token, options));
+    this.agent = this.headers["X-Agent-Id"] ?? null;
+    this.integration = this.headers["X-Integration"] ?? "custom";
+  }
+
+  // -- authorization ---------------------------------------------------------- //
+
+  /** Ask whether `action` on `resource` is authorised for `task`. */
   async authorize(input: AuthorizeInput): Promise<AuthorityDecision> {
     const body: Json = { task: input.task, action: input.action, resource: input.resource };
     if (input.approval) body.approval = input.approval;
@@ -262,15 +483,86 @@ export class AgentPlane extends BaseClient {
     return parseDecision(status, text, input);
   }
 
-  async getApproval(approvalId: string): Promise<ApprovalRequest> {
-    const { status, text } = await this.call("GET", `/v1/approvals/${encodeURIComponent(approvalId)}`);
-    return asApproval(parseJson(status, text));
+  // -- tasks ------------------------------------------------------------------ //
+
+  /**
+   * Start (or resume) a task and hand back a handle you can authorize and
+   * report against. Registering provenance is a convenience, not a
+   * precondition for asking permission, so a rejected registration is
+   * swallowed rather than allowed to stop the work.
+   */
+  async task(name: string, opts: { origin?: Record<string, unknown> } = {}): Promise<Task> {
+    try {
+      await this.registerTask(name, opts.origin ?? {});
+    } catch (err) {
+      if (!(err instanceof HttpError)) throw err;
+    }
+    return new Task(this, name, opts.origin ?? {});
   }
 
   /** Record where a task came from. Prompts are provenance, never permission. */
   async registerTask(task: string, origin: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const { status, text } = await this.call("POST", "/v1/tasks", { task, origin });
     return (parseJson(status, text).task as Record<string, unknown>) ?? {};
+  }
+
+  // -- reporting -------------------------------------------------------------- //
+
+  /**
+   * Report one action. The server normalizes the tool name and arguments into
+   * a canonical action and resource, decides, records the evidence, and
+   * answers. Read `binding` before describing anything as blocked.
+   */
+  async report(event: ActionEvent): Promise<AuthorityDecision> {
+    const { status, text } = await this.call("POST", "/v1/events/action", this.eventBody(event));
+    return decisionOf(parseJson(status, text), fallbackFor(event));
+  }
+
+  /** Report up to MAX_BATCH actions in one round trip; one decision each, in order. */
+  async reportBatch(events: ActionEvent[]): Promise<AuthorityDecision[]> {
+    if (events.length > MAX_BATCH) {
+      throw new RangeError(`a batch carries at most ${MAX_BATCH} events (got ${events.length})`);
+    }
+    const { status, text } = await this.call("POST", "/v1/events/action", {
+      events: events.map((e) => this.eventBody(e)),
+    });
+    const results = parseJson(status, text).results;
+    // One decision per event, positionally: a short or reordered array would
+    // silently attribute a decision to the wrong action.
+    if (!Array.isArray(results) || results.length !== events.length) {
+      throw new AuthorizationProtocolError("Batch response does not match the batch sent");
+    }
+    return results.map((r, i) => decisionOf(r, fallbackFor(events[i] as ActionEvent)));
+  }
+
+  /** Announce an agent session. Optional: reporting actions creates one anyway. */
+  async startSession(opts: { task?: string; origin?: Record<string, unknown> } = {}): Promise<SessionInfo> {
+    const body: Json = { integration: this.integration };
+    if (opts.task) body.task = opts.task;
+    if (opts.origin) body.origin = opts.origin;
+    if (this.agent) body.agent = this.agent;
+    const { status, text } = await this.call("POST", "/v1/sessions", body);
+    const payload = parseJson(status, text);
+    return {
+      session: String(payload.session ?? ""),
+      agent: String(payload.agent ?? ""),
+      project: String(payload.project ?? ""),
+      mode: asMode(payload.mode),
+    };
+  }
+
+  private eventBody(event: ActionEvent): Json {
+    const body: Json = { ...event };
+    if (this.agent && body.agent === undefined) body.agent = this.agent;
+    if (body.integration === undefined) body.integration = this.integration;
+    return body;
+  }
+
+  // -- approvals -------------------------------------------------------------- //
+
+  async getApproval(approvalId: string): Promise<ApprovalRequest> {
+    const { status, text } = await this.call("GET", `/v1/approvals/${encodeURIComponent(approvalId)}`);
+    return asApproval(parseJson(status, text));
   }
 
   /**
@@ -298,11 +590,21 @@ export class AgentPlane extends BaseClient {
     }
   }
 
+  // -- delegation ------------------------------------------------------------- //
+
   /** Mint an attenuated child lease for `agent` (lease-holder self-service). */
   async delegate(leaseId: string, body: { agent: string } & Partial<Omit<Lease, "id" | "task" | "subject" | "revoked">> & { id?: string }): Promise<Lease> {
     const { status, text } = await this.call("POST", `/v1/leases/${encodeURIComponent(leaseId)}/delegate`, body);
     return asLease(parseJson(status, text).lease);
   }
+}
+
+function fallbackFor(event: ActionEvent): { task: string; action: string; resource: string } {
+  return {
+    task: event.task ?? "",
+    action: event.action ?? event.tool ?? "",
+    resource: event.resource ?? "",
+  };
 }
 
 export interface IssueLeaseInput {
@@ -324,7 +626,10 @@ export interface IssueLeaseInput {
 /** Backend / operator client, authenticated with ADMIN_TOKEN. Never give this to an agent. */
 export class AgentPlaneAdmin extends BaseClient {
   constructor(baseUrl: string, adminToken: string, opts: ClientOptions = {}) {
-    super(baseUrl, { "X-Admin-Token": adminToken }, opts);
+    super({
+      baseUrl, headers: { "X-Admin-Token": adminToken },
+      fetch: opts.fetch, timeoutMs: opts.timeoutMs,
+    });
   }
 
   async issueLease(input: IssueLeaseInput): Promise<Lease> {
@@ -406,7 +711,7 @@ export class AgentPlaneAdmin extends BaseClient {
     return parseJson(status, text);
   }
 
-  async setMode(mode: "observe" | "enforce", tenant?: string): Promise<Record<string, unknown>> {
+  async setMode(mode: RuntimeMode, tenant?: string): Promise<Record<string, unknown>> {
     const { status, text } = await this.call("PUT", "/admin/mode", tenant ? { mode, tenant } : { mode });
     return parseJson(status, text);
   }
@@ -420,7 +725,9 @@ export class AgentPlaneAdmin extends BaseClient {
 /**
  * Wrap an async function so agent-plane is consulted before every call.
  * `resource` derives the canonical resource from the call's arguments.
- * Throws on anything but ALLOW; the wrapped function never runs otherwise.
+ * The wrapped function runs only when the decision says proceed; anything
+ * else throws NotAuthorized. This is how an SDK caller chooses to make an
+ * advisory decision binding on itself - agent-plane cannot do it for you.
  */
 export function govern<A extends unknown[], R>(
   plane: AgentPlane,

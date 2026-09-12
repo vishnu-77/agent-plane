@@ -19,6 +19,9 @@ stringData:
   JWT_SECRET: "replace-with-32-plus-random-bytes"
   ADMIN_TOKEN: "replace-with-32-plus-random-bytes"
   AUDIT_SIGNING_KEY: "replace-with-32-plus-random-bytes"
+  # Derives the stored HMAC of every API key (ap_live_/ap_test_/ap_mgmt_) and
+  # signs console sessions. Rotating it invalidates every key and session.
+  API_KEY_SECRET_VALUE: "replace-with-32-plus-random-bytes"
   POSTGRES_URL: "postgresql+psycopg://agentplane:agentplane@postgres.agent-plane.svc:5432/agentplane"
   REDIS_URL: "redis://redis.agent-plane.svc:6379/0"
   # DELEGATION_PUBLIC_KEY: |
@@ -62,7 +65,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-plane
-          image: ghcr.io/vishnu-77/agent-plane:0.6.0
+          image: ghcr.io/vishnu-77/agent-plane:0.7.0
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -85,6 +88,21 @@ spec:
               value: sql
             - name: TRUST_FORWARDED_FOR
               value: "true"
+            # Fallback for traffic that belongs to no project; a project's own
+            # mode (observe | govern | enforce) always wins.
+            - name: ENFORCEMENT_MODE
+              value: enforce
+            # first_user: the first person to sign up becomes the owner and
+            # signup then closes. Use "closed" to allow nobody.
+            - name: SIGNUP_MODE
+              value: first_user
+            # Console session cookie over HTTPS only (implied by ENVIRONMENT=production).
+            - name: SECURE_COOKIES
+              value: "true"
+            # The hosted demo runs real decisions in an isolated tenant against
+            # simulated targets. Off unless this deployment is the public demo.
+            - name: DEMO_ENABLED
+              value: "false"
           envFrom:
             - secretRef:
                 name: agent-plane

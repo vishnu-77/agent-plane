@@ -1,9 +1,16 @@
 # Approvals
 
-An action can be inside a lease's scope and still need a human. A lease lists
-those actions in `require_approval`; a policy can also demand approval for a
-tool. Either way the decision is `APPROVAL_REQUIRED` (HTTP 202), and since
-0.5 that decision opens an **approval request** the runtime tracks for you.
+An action can be inside an agent's authority and still need a human. A rule's
+**ASK FIRST** list compiles to a lease's `require_approval`; a lease can name
+those actions directly; a policy file can also demand approval for a brokered
+tool. Either way the decision is `APPROVAL_REQUIRED` (HTTP 202 on
+`/v1/authorize`), and that decision opens an **approval request** the runtime
+tracks for you.
+
+**Only in enforce mode.** In `observe` the decision comes back as `simulate`;
+in `govern` it comes back as `approval_required` with `enforced: false` and no
+`approval_id`. There is nothing to approve, because nothing was stopped. See
+[modes.md](../modes.md).
 
 ## Lifecycle
 
@@ -50,10 +57,12 @@ Direct HTTP: repeat the same `POST /v1/authorize` body with
 
 ## Operator side
 
-- Console → **Approvals**: approve or reject with an optional note. The
-  console sends the decision with the operator token you connected with.
-- API: `GET /v1/approvals?status=pending`, `POST /v1/approvals/{id}/approve`,
-  `POST /v1/approvals/{id}/reject` with `{"note": "...", "decided_by": "..."}`.
+- Console: approve or reject with an optional note, authenticated by your
+  session cookie. No token is pasted into the UI.
+- API: `GET /v1/approvals?status=pending&tenant=<project>`,
+  `POST /v1/approvals/{id}/approve`, `POST /v1/approvals/{id}/reject` with
+  `{"note": "...", "decided_by": "..."}`. These accept a console session, a
+  management key (`ap_mgmt_…`), or `ADMIN_TOKEN`, all in `X-Admin-Token`.
 - SDK: `AgentPlaneAdmin.list_approvals()`, `.approve()`, `.reject()`.
 
 ## Webhook

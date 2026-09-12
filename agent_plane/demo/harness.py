@@ -18,7 +18,12 @@ from agent_plane.schemas.canonical import Actor
 
 
 class SimulatedTargets:
-    """In-memory stand-ins for staging, production, and GitHub."""
+    """In-memory stand-ins for a working tree, staging, production, and GitHub.
+
+    Nothing here touches the disk, the network, or a real repository: an ALLOW
+    "executes" by moving a number in this object, so a hosted demo can run the
+    real engine without any external side effect.
+    """
 
     def __init__(self) -> None:
         self.reset()
@@ -29,6 +34,14 @@ class SimulatedTargets:
             "production/checkout": {"status": "healthy", "restarts": 0},
         }
         self.branches: list[str] = ["main", "stale-feature", "feature/latency"]
+        # The coding agent's working tree: file paths and revision counters, no
+        # contents. A write moves a revision; it never reaches a real file.
+        self.files: dict[str, dict[str, Any]] = {
+            "tests/test_checkout.py": {"revision": 1},
+            "agent_plane/checkout/retry.py": {"revision": 3},
+        }
+        self.commits: list[dict[str, Any]] = []
+        self.edits = 0
         self.log: list[dict[str, Any]] = []
 
     def execute(self, action: str, resource: str) -> dict[str, Any]:
@@ -44,6 +57,23 @@ class SimulatedTargets:
             result = {"deleted": branch, "remaining": list(self.branches)}
         elif action == "branch.list":
             result = {"branches": list(self.branches)}
+        elif action == "filesystem.read":
+            path = resource.removeprefix("workspace/")
+            result = {"read": path, "revision": self.files.get(path, {}).get("revision", 0)}
+        elif action == "filesystem.write":
+            path = resource.removeprefix("workspace/")
+            entry = self.files.setdefault(path, {"revision": 0})
+            entry["revision"] += 1
+            self.edits += 1
+            result = {"edited": path, "revision": entry["revision"]}
+        elif action == "tests.execute":
+            # Deterministic and it follows the story: the flaky test fails until
+            # the edit lands.
+            failed = 0 if self.edits else 1
+            result = {"suite": resource, "passed": 128 - failed, "failed": failed}
+        elif action == "git.commit":
+            self.commits.append({"message": "fix flaky checkout retry", "files": self.edits})
+            result = {"committed": len(self.commits), "files": self.edits}
         elif action in ("logs.read", "metrics.read", "deployment.read", "repository.read"):
             result = {"read": resource, "sample": {"error_rate": 0.42, "p95_ms": 1830}
                       if resource.startswith("staging") else {"error_rate": 0.01, "p95_ms": 210}}
@@ -138,7 +168,12 @@ class DemoHarness:
         else:
             root = existing_root
         registry.attach_lease(tenant=DEMO_TENANT, task=scenario.task, agent=scenario.agent, lease_id=root.id)
-        declared = sorted({a.split(".", 1)[0] for a in root.actions} | {"deployment"})
+        # The identity layer's static grant: a coding agent's session declares its
+        # whole toolbelt, and the lease is what narrows it for this task. Deriving
+        # the manifest from the run keeps the demo on the interesting gate - an
+        # action the agent can technically perform is still outside task authority.
+        declared = sorted({a.split(".", 1)[0] for a in root.actions}
+                          | {st.action.split(".", 1)[0] for st in scenario.steps})
 
         results: list[dict[str, Any]] = []
         children: dict[str, AuthorityLease] = {
@@ -167,6 +202,7 @@ class DemoHarness:
                 "index": index, "agent": step.agent, "action": step.action, "resource": step.resource,
                 "note": step.note, "expected": step.expected, "outcome": outcome.outcome.value,
                 "reason": outcome.reason, "decision_id": outcome.decision_id, "lease": outcome.lease_id,
+                "approval_id": outcome.approval_id,
                 "matches_expected": outcome.outcome.value == step.expected or
                 (outcome.outcome.value == "simulate" and outcome.would_be == step.expected),
                 "explanation": outcome.trace["explanation"], "consequence": outcome.payload.get("consequence"),
@@ -175,8 +211,9 @@ class DemoHarness:
         return {"scenario": scenario.name, "title": scenario.title, "prompt": scenario.prompt,
                 "task": scenario.task, "agent": scenario.agent, "run_id": run_id, "lease": root.id,
                 "children": {k: v.id for k, v in children.items()}, "steps": results,
-                "summary": scenario.summary, "targets": {"deployments": self.targets.deployments,
-                                                          "branches": self.targets.branches}}
+                "summary": scenario.summary,
+                "targets": {"deployments": self.targets.deployments, "branches": self.targets.branches,
+                            "workspace": self.targets.files, "commits": self.targets.commits}}
 
     @staticmethod
     def describe() -> list[dict[str, Any]]:
@@ -185,6 +222,9 @@ class DemoHarness:
             "framework": s.framework, "created_by": s.created_by, "summary": s.summary,
             "authority": {"actions": s.lease["actions"], "resources": s.lease["resources"],
                           "protected_resources": s.lease.get("protected_resources", []),
+                          # Actions that are granted but held for a human, so the
+                          # description of the authority matches what the run does.
+                          "require_approval": s.lease.get("require_approval", []),
                           "permitted_consequence": s.lease.get("permitted_consequence", {})},
             "steps": [{"index": i, "agent": st.agent, "action": st.action, "resource": st.resource,
                        "expected": st.expected, "note": st.note, "spawns": st.spawn["agent"] if st.spawn else None}

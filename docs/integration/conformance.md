@@ -1,6 +1,7 @@
 # Executor conformance kit
 
-The only property that makes agent-plane a control rather than a suggestion:
+For executors that call `/v1/authorize` themselves. The only property that
+makes agent-plane a control rather than a suggestion:
 **the real action runs after an explicit ALLOW and never otherwise.** The
 classic integration bug is trusting an HTTP status, a truthy body, or a
 caught exception. `agentplane.testing` catches all of those before you
@@ -49,8 +50,10 @@ def build(plane, execute):
 | `allow` | 200 with a consistent ALLOW | yes, exactly once |
 | `deny` | 403, decision wrapped in `detail` | no |
 | `approval_required` | 202 with `approval_id` | no |
+| `quarantine` | 423, the agent is held by an operator | no |
 | `http_500`, `http_401`, `http_404`, `http_429` | error statuses | no |
 | `http_200_wrong_decision` | 200 whose body says `deny` | no |
+| `http_200_simulate_claims_enforced` | 200 `simulate` that claims `enforced: true` | no |
 | `http_200_no_evidence` | 200 without `evidence_id` | no |
 | `http_200_empty_object`, `http_200_list`, `http_200_not_json`, `http_204_no_content` | malformed bodies | no |
 | `transport_failure` | connection dropped | no |

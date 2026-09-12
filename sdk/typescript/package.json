@@ -1,6 +1,6 @@
 {
   "name": "@agent-plane/sdk",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "TypeScript client for agent-plane runtime task authorization",
   "license": "MIT",
   "type": "module",
@@ -16,7 +16,8 @@
   "engines": { "node": ">=18" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --experimental-strip-types --test test/"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "typescript": "^5.6.0"

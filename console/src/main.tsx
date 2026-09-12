@@ -1,50 +1,53 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createHashRouter, RouterProvider } from "react-router-dom";
+import { createHashRouter, Navigate, RouterProvider } from "react-router-dom";
 import "./index.css";
-import { StoreProvider } from "./lib/store";
+import { StoreProvider, useStore } from "./lib/store";
 import { TooltipProvider } from "./components/ui";
 import { Shell } from "./components/shell";
-import { LivePage } from "./pages/live";
+import { ActivityPage } from "./pages/activity";
 import { AgentsPage } from "./pages/agents";
-import { TasksPage } from "./pages/tasks";
-import { ResourcesPage } from "./pages/resources";
-import { GovernPage } from "./pages/govern";
-import { DecisionsPage } from "./pages/decisions";
-import { PoliciesPage } from "./pages/policies";
-import { TimelinePage, AuditPage } from "./pages/evidence";
-import { IntegrationsPage, GatewayPage, RuntimePage, SettingsPage } from "./pages/platform";
+import { RulesPage } from "./pages/rules";
+import { IntegrationsPage } from "./pages/integrations";
+import { SettingsPage } from "./pages/settings";
+import { AuthPage, OnboardingPage } from "./pages/auth";
 
-// Hash routing keeps the app self-contained under /console without server
-// rewrites, and lets a URL like /console#/decisions?select=az_… be shared.
 const router = createHashRouter([
   {
     path: "/",
     element: <Shell />,
     children: [
-      { index: true, element: <LivePage /> },
+      { index: true, element: <ActivityPage /> },
       { path: "agents", element: <AgentsPage /> },
-      { path: "tasks", element: <TasksPage /> },
-      { path: "resources", element: <ResourcesPage /> },
-      { path: "govern", element: <GovernPage /> },
-      { path: "decisions", element: <DecisionsPage /> },
-      { path: "policies", element: <PoliciesPage /> },
-      { path: "timeline", element: <TimelinePage /> },
-      { path: "audit", element: <AuditPage /> },
+      { path: "rules", element: <RulesPage /> },
       { path: "integrations", element: <IntegrationsPage /> },
-      { path: "gateway", element: <GatewayPage /> },
-      { path: "runtime", element: <RuntimePage /> },
       { path: "settings", element: <SettingsPage /> },
-      { path: "*", element: <LivePage /> },
+      { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
 ]);
+
+/** Sign-in, then onboarding, then the product. DEMO skips straight through. */
+function Root() {
+  const { ready, signedIn, source, projects } = useStore();
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <span className="dot text-2xs text-ink-2">loading</span>
+      </div>
+    );
+  }
+  if (source === "demo") return <RouterProvider router={router} />;
+  if (!signedIn) return <AuthPage />;
+  if (!projects.length) return <OnboardingPage />;
+  return <RouterProvider router={router} />;
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <StoreProvider>
       <TooltipProvider>
-        <RouterProvider router={router} />
+        <Root />
       </TooltipProvider>
     </StoreProvider>
   </StrictMode>,

@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import type { ReactNode } from "react";
-import { cn, pad } from "@/lib/utils";
+import { cn, pad } from "@/lib/format";
 
 // ---------------------------------------------------------------- InstrumentPanel
 export function InstrumentPanel({

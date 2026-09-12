@@ -24,7 +24,7 @@ from enum import Enum
 
 from pydantic import BaseModel
 
-from agent_plane.authority.lease import IMPACT_RANK, resource_matches
+from agent_plane.authority.lease import IMPACT_RANK, action_matches, resource_matches
 from agent_plane.authority.store import LeaseStore
 from agent_plane.schemas.canonical import Actor, DecisionAction
 
@@ -41,6 +41,8 @@ class AuthorityReason(str, Enum):
     ACTION_LIMIT_EXCEEDED = "ACTION_LIMIT_EXCEEDED"
     ACTION_WITHIN_TASK_AUTHORITY = "ACTION_WITHIN_TASK_AUTHORITY"
     ACTION_REQUIRES_APPROVAL = "ACTION_REQUIRES_APPROVAL"
+    # The NEVER list: refused outright, whatever else would grant it.
+    ACTION_REFUSED_BY_RULE = "ACTION_REFUSED_BY_RULE"
     # Consequence boundary (agent_plane.consequence): the action is in scope but
     # what it would cause exceeds what the task's lease permits.
     CONSEQUENCE_OUTSIDE_TASK_BOUNDARY = "CONSEQUENCE_OUTSIDE_TASK_BOUNDARY"
@@ -132,6 +134,14 @@ def _evaluate_authority(
             decision_id=decision_id,
         )
 
+    # NEVER is an absolute refusal: checked across every active grant before
+    # scope, use limits, or approval, so no other rule can grant it back.
+    for lease in active:
+        if action_matches(lease.denied_actions, action):
+            return AuthorityDecision(decision=DecisionAction.DENY,
+                                     reason=AuthorityReason.ACTION_REFUSED_BY_RULE,
+                                     lease_id=lease.id, decision_id=decision_id)
+
     # Protection is a deny override across all active matching grants, independent
     # of insertion order. No use may be consumed before checking this override.
     for lease in active:
@@ -144,7 +154,7 @@ def _evaluate_authority(
     for lease in active:
         if not resource_matches(lease.resources, resource):
             continue
-        if action not in lease.actions:
+        if not action_matches(lease.actions, action):
             best_reason = AuthorityReason.ACTION_NOT_AUTHORIZED
             continue
         # Unknown impact values rank as irreversible (fail closed), same
@@ -159,7 +169,7 @@ def _evaluate_authority(
             best_reason = AuthorityReason.ACTION_LIMIT_EXCEEDED
             continue
 
-        if action in lease.require_approval:
+        if action_matches(lease.require_approval, action):
             return AuthorityDecision(
                 decision=DecisionAction.APPROVAL_REQUIRED,
                 reason=AuthorityReason.ACTION_REQUIRES_APPROVAL,

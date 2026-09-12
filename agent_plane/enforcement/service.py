@@ -202,11 +202,16 @@ class EnforcementService:
                     async with asyncio.timeout(self.config.timeout_seconds):
                         upstream_result = await self.upstream(tool, forwarded)
                     result_dict = upstream_result.model_dump(mode="json", by_alias=True, exclude_none=True)
+                    # The MCP SDK exposes this as ``isError`` (1.26+) and as
+                    # ``is_error`` in older releases. Read the serialised dict,
+                    # before redaction, so neither a rename nor a redaction rule
+                    # can turn a completed dispatch into "outcome_unknown".
+                    errored = bool(result_dict.get("isError") or result_dict.get("is_error"))
                     if len(json.dumps(result_dict).encode()) > self.config.max_response_bytes:
                         raise ValueError("Upstream result exceeds configured bound")
                     if policy.redact:
                         result_dict, _ = scanner.redact_json(result_dict, policy.redact)
-                    outcome = "upstream_error" if upstream_result.is_error else "completed"
+                    outcome = "upstream_error" if errored else "completed"
                     data = self.record(actor, context, phase="execution", outcome=outcome, decision=decision, reason="UPSTREAM_RESULT_RECEIVED")
                     result = {"decision": decision, "reason": reason, "evidence": data, "result": result_dict}
                 except (Exception, asyncio.CancelledError) as exc:

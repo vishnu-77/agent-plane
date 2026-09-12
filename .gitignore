@@ -45,14 +45,21 @@
 /docs/*
 !/docs/README.md
 !/docs/quickstart.md
+!/docs/accounts.md
+!/docs/connectors.md
+!/docs/rules.md
+!/docs/modes.md
+!/docs/concepts.md
+!/docs/demo.md
 !/docs/api-reference.md
 !/docs/deployment.md
 !/docs/openapi.json
 !/docs/integration/
+!/docs/architecture/
 !/docs/assets/
 /docs/assets/*
 !/docs/assets/hero.png
-!/docs/assets/console-live.png
+!/docs/assets/console-activity.png
 
 # Internal planning documents stay local, including within public directories.
 ROADMAP.md

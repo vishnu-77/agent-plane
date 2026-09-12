@@ -1,6 +1,8 @@
 """Agent registry, lineage, observe/enforce, quarantine, and the demo harness."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import jwt
 import pytest
 from fastapi.testclient import TestClient
@@ -172,7 +174,7 @@ def test_delegation_records_lineage_and_explains_denial(client):
 # --------------------------------------------------------------------------- #
 # Demo
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("name", ["staging-incident", "github-maintenance", "delegation"])
+@pytest.mark.parametrize("name", ["coding-agent", "github-maintenance", "delegation"])
 def test_demo_scenarios_run_through_the_real_engine(client, name):
     scenarios = client.get("/demo/scenarios").json()
     assert name in {s["name"] for s in scenarios["scenarios"]}
@@ -184,17 +186,70 @@ def test_demo_scenarios_run_through_the_real_engine(client, name):
     # Every step is a real decision with a readable trace, scoped to the demo tenant.
     for step in run["steps"]:
         trace = client.get(f"/v1/decisions/{step['decision_id']}", headers=DEMO).json()["trace"]
-        assert trace["identity"]["tenant"] == "demo" and trace["edge"] == "demo"
+        assert trace["identity"]["tenant"] == "prj_demo" and trace["edge"] == "demo"
         assert trace["task"]["origin"]["text"] == run["prompt"]
-    # ALLOW steps executed against the simulated targets and left receipts.
+    # ALLOW steps executed against the simulated targets and left receipts;
+    # nothing else executed at all.
     allowed = [s for s in run["steps"] if s["outcome"] == "allow"]
     assert all(s["executed"] is not None for s in allowed)
+    assert all(s["executed"] is None for s in run["steps"] if s["outcome"] != "allow")
     receipts = client.get(f"/v1/decisions/{allowed[-1]['decision_id']}", headers=DEMO).json()["receipts"]
     assert receipts and receipts[0]["reason"] == "UPSTREAM_RESULT_RECEIVED"
     # Demo viewers cannot read other tenants.
     assert client.get("/v1/agents?tenant=acme", headers=DEMO).json()["agents"] == [] or \
-        all(a["tenant"] == "demo" for a in client.get("/v1/agents?tenant=acme", headers=DEMO).json()["agents"])
+        all(a["tenant"] == "prj_demo" for a in client.get("/v1/agents?tenant=acme", headers=DEMO).json()["agents"])
     assert client.get("/v1/system", headers=DEMO).json()["demo"] is True
+
+
+def test_demo_coding_agent_separates_the_task_from_the_session(client):
+    run = client.post("/demo/scenarios/coding-agent/run").json()
+    assert [s["outcome"] for s in run["steps"]] == [
+        "allow", "allow", "allow", "allow", "allow", "approval_required", "deny", "deny"]
+    read, edit, tests_run, commit, push, dotenv, delete = run["steps"][1:]
+    # Reading, editing and testing inside the workspace is the task itself.
+    assert edit["action"] == "filesystem.write" and edit["executed"]["revision"] == 4
+    assert tests_run["executed"] == {"suite": "shell/pytest", "passed": 128, "failed": 0}
+    assert commit["action"] == "git.commit" and commit["executed"]["committed"] == 1
+    # The push is in scope but held: a real approval request exists, and nothing ran.
+    assert push["reason"] == "ACTION_REQUIRES_APPROVAL" and push["executed"] is None
+    approvals = client.get("/v1/approvals", headers=DEMO).json()["approvals"]
+    assert [(a["action"], a["resource"], a["status"]) for a in approvals] == [
+        ("git.push", "github://demo/agent-plane/branches/fix-checkout-flake", "pending")]
+    assert push["approval_id"] == approvals[0]["id"]
+    # Local secrets are carved out of a workspace the lease otherwise covers.
+    assert dotenv["resource"] == "workspace/.env" and dotenv["reason"] == "RESOURCE_PROTECTED"
+    # And the action the task never granted is refused on the lineage, not on the
+    # agent's toolbelt: the session can technically delete a repository.
+    assert delete["reason"] == "ACTION_NOT_AUTHORIZED"
+    assert delete["explanation"][0] == "No authority lineage permits repository.delete."
+    assert "repository" in client.get(
+        f"/v1/decisions/{delete['decision_id']}", headers=DEMO).json()[
+        "trace"]["identity"]["declared_capabilities"]
+    # Nothing left the simulated targets: no branch was published by the run.
+    assert run["targets"]["branches"] == ["main", "stale-feature", "feature/latency"]
+
+
+def test_demo_coding_agent_has_no_external_side_effects(client):
+    """The workspace the demo edits is an in-memory model, not this repository."""
+    run = client.post("/demo/scenarios/coding-agent/run").json()
+    edited = "agent_plane/checkout/retry.py"
+    assert run["targets"]["workspace"][edited]["revision"] == 4
+    assert not Path(edited).exists() and not Path("tests/test_checkout.py").exists()
+    # Every step is recorded; no step reached a real file, shell, or remote.
+    log = client.get("/demo/targets").json()["log"]
+    assert [entry["action"] for entry in log] == [
+        "filesystem.read", "filesystem.read", "filesystem.write", "tests.execute", "git.commit"]
+
+
+def test_demo_runs_are_deterministic(client):
+    """Same scenario, same engine, same outcomes - the demo makes no claim that
+    a second run cannot check."""
+    first = client.post("/demo/scenarios/coding-agent/run", json={"run_id": "runone"}).json()
+    second = client.post("/demo/scenarios/coding-agent/run", json={"run_id": "runtwo"}).json()
+    def shape(run):
+        return [(s["action"], s["resource"], s["outcome"], s["reason"], s["explanation"]) for s in run["steps"]]
+    assert shape(first) == shape(second)
+    assert first["lease"] != second["lease"]
 
 
 def test_demo_delegation_lineage_explains_the_denial(client):
@@ -214,7 +269,7 @@ def test_demo_github_consequences_differ(client):
 
 
 def test_demo_reset_clears_the_tenant(client):
-    client.post("/demo/scenarios/staging-incident/run")
+    client.post("/demo/scenarios/coding-agent/run")
     assert client.get("/v1/agents", headers=DEMO).json()["count"] >= 1
     assert client.post("/demo/reset").json()["reset"] is True
     assert client.get("/v1/agents", headers=DEMO).json()["count"] == 0

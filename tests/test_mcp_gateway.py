@@ -45,6 +45,39 @@ def test_missing_identity_and_unsupported_protocol(gateway):
     assert client.get('/mcp', headers=headers).status_code == 405
 
 
+def test_a_project_api_key_is_accepted(gateway):
+    """`agentplane connect mcp` hands the MCP client a Project API Key.
+
+    The gateway has to accept it, or the one command the console prints does
+    not work. Authority is still not inferred from the key: the (tenant, agent)
+    pair must match a binding in the operator's mapping file.
+    """
+    client, headers = gateway
+    accounts = client.app.state.accounts
+    user = accounts.create_user(email="mcp@example.com", password="correct-horse-battery")
+    workspace = accounts.create_workspace(name="acme", owner=user.id)
+    # The demo mapping binds tenant "acme" to the repo-agent's task and lease.
+    accounts.create_project(workspace_id=workspace.id, name="acme", created_by=user.id,
+                            project_id="acme")
+    _, secret = accounts.create_key(project_id="acme", name="mcp", created_by=user.id)
+
+    key_headers = {**headers, "Authorization": f"Bearer {secret}", "X-Agent-Id": "repo-agent"}
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "repo.delete_branch", "arguments": {"branch": "main"}, "_meta": {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "1"},
+        "io.modelcontextprotocol/clientCapabilities": {}}}}
+    response = client.post("/mcp", headers={**key_headers, "Mcp-Method": "tools/call",
+                                            "Mcp-Name": "repo.delete_branch"}, json=body)
+    assert response.status_code == 200, response.text
+    assert "RESOURCE_PROTECTED" in response.text     # decided, not refused at the door
+    assert "not_dispatched" in response.text
+
+    # A revoked or unknown key is still nobody.
+    assert client.post("/mcp", headers={**headers, "Authorization": "Bearer ap_live_nope"},
+                       json={}).status_code == 401
+
+
 def test_origin_and_body_bounds(gateway):
     client, headers = gateway
     assert client.post('/mcp', headers={**headers, 'Origin': 'https://untrusted.example'}, json={}).status_code == 403

@@ -1,5 +1,8 @@
 # Framework adapters
 
+An advanced surface, for your own code. If you run a coding agent or an MCP
+client, use a [connector](../connectors.md) instead - nothing is wrapped.
+
 `agentplane.adapters` puts the authorize-before-execute check in front of a
 tool once. Every adapter is the same rule: derive the canonical resource from
 the call's arguments in **your** code, call `plane.authorize`, run the tool
@@ -10,7 +13,7 @@ Outcomes are uniform:
 
 | Decision | Adapter behaviour |
 | --- | --- |
-| ALLOW | tool runs; decision available as `last_decision` |
+| ALLOW (or observe-mode SIMULATE) | tool runs; decision available as `last_decision` |
 | APPROVAL_REQUIRED | `ApprovalRequired` raised with `decision.approval_id`; or, with `wait_for_approval=<seconds>`, the adapter polls and resumes |
 | DENY / protocol error / HTTP or transport error | `NotAuthorized` (or the underlying exception) raised; tool never runs |
 
@@ -23,7 +26,7 @@ id, so one wrapped tool serves many tasks.
 from agentplane import AgentPlane
 from agentplane.adapters import govern
 
-plane = AgentPlane(url, agent_token)
+plane = AgentPlane(api_key="ap_live_...", url="http://127.0.0.1:8000")
 
 @govern(plane, task=lambda: current_task_id(), action="branch.delete",
         resource="github://acme/repo/branches/{branch}")

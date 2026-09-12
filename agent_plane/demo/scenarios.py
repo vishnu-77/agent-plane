@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-DEMO_TENANT = "demo"
+DEMO_TENANT = "prj_demo"   # the isolated demo project
 
 
 @dataclass(frozen=True)
@@ -34,31 +34,49 @@ class Scenario:
 
 
 SCENARIOS: dict[str, Scenario] = {
-    "staging-incident": Scenario(
-        name="staging-incident",
-        title="Staging incident",
-        prompt="Investigate why checkout is failing in staging. Restart checkout if required. Do not touch production.",
-        created_by="human:oncall-01",
-        task="incident-218",
-        agent="incident-agent",
-        framework="langgraph",
+    "coding-agent": Scenario(
+        name="coding-agent",
+        title="Coding agent",
+        prompt="The checkout retry test is flaky. Fix it in the repo and run the suite. Ask me before anything leaves my machine.",
+        created_by="human:dev-01",
+        task="fix-checkout-flake-31",
+        agent="coding-agent",
+        framework="claude-code",
         lease={
-            "id": "demo-lease-incident-218", "task": "incident-218", "subject": "incident-agent",
-            "resources": ["staging/checkout", "staging/checkout/*"],
-            "actions": ["logs.read", "metrics.read", "deployment.read", "deployment.restart"],
-            "protected_resources": ["production/*"],
-            "permitted_consequence": {"environments": ["staging"], "customer_facing": False,
-                                      "max_impact": "medium"},
-            "maximum_impact": "reversible", "child_authority": "subset_only",
+            "id": "demo-lease-fix-checkout-flake-31", "task": "fix-checkout-flake-31", "subject": "coding-agent",
+            # The working tree, the test runner, and the repo the work belongs to.
+            # Nothing else: the session can reach far more than the task needs.
+            "resources": ["workspace/*", "shell/pytest", "github://demo/agent-plane",
+                          "github://demo/agent-plane/branches/fix-checkout-flake"],
+            "actions": ["filesystem.read", "filesystem.write", "tests.execute", "git.commit", "git.push"],
+            # Local secrets are carved out of workspace/* rather than left to a
+            # rule: reading one is the same as holding it.
+            "protected_resources": ["workspace/.env*", "credentials/*"],
+            # Committing is local and reversible; publishing is the step a human
+            # asked to see, so it is in scope but held.
+            "require_approval": ["git.push"],
+            "permitted_consequence": {"environments": ["workspace", "source"], "max_impact": "medium",
+                                      "customer_facing": False},
+            "maximum_impact": "reversible", "child_authority": "none",
         },
         steps=[
-            Step("incident-agent", "logs.read", "staging/checkout", "allow", "read the failing service's logs"),
-            Step("incident-agent", "metrics.read", "staging/checkout", "allow", "confirm the error rate"),
-            Step("incident-agent", "deployment.restart", "staging/checkout", "allow", "restart the staging workload"),
-            Step("incident-agent", "deployment.restart", "production/checkout", "deny",
-                 "the model proposes restarting production too"),
+            Step("coding-agent", "filesystem.read", "workspace/tests/test_checkout.py", "allow",
+                 "read the failing test"),
+            Step("coding-agent", "filesystem.read", "workspace/agent_plane/checkout/retry.py", "allow",
+                 "read the retry helper the test exercises"),
+            Step("coding-agent", "filesystem.write", "workspace/agent_plane/checkout/retry.py", "allow",
+                 "edit a file inside the workspace"),
+            Step("coding-agent", "tests.execute", "shell/pytest", "allow", "run the suite to confirm the fix"),
+            Step("coding-agent", "git.commit", "github://demo/agent-plane", "allow",
+                 "commit locally: reversible, and nothing has left the machine yet"),
+            Step("coding-agent", "git.push", "github://demo/agent-plane/branches/fix-checkout-flake",
+                 "approval_required", "push the branch: in scope, but a human asked to see it first"),
+            Step("coding-agent", "filesystem.read", "workspace/.env", "deny",
+                 "the model reaches for the local API key to reproduce against the real service"),
+            Step("coding-agent", "repository.delete", "github://demo/agent-plane", "deny",
+                 "then proposes deleting the repository and re-cloning it for a clean tree"),
         ],
-        summary="Same credential, same verb. Staging restart is inside the task; production restart is outside it and would interrupt a customer-facing service.",
+        summary="One session, one credential set. Reading and editing the checkout code is the task; publishing it is held for a human; reading the local .env and deleting the repository were never part of the task at all.",
     ),
     "github-maintenance": Scenario(
         name="github-maintenance",

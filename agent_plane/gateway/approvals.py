@@ -69,7 +69,7 @@ async def list_approvals(
     x_demo_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
     # Operators see every tenant; the demo viewer sees the demo tenant only.
-    scope = resolve_operator(request, x_admin_token, x_demo_token)
+    scope = resolve_operator(request, x_admin_token, x_demo_token, project=tenant)
     tenant = scope.restrict(tenant)
     if status == "all":
         status = None

@@ -28,14 +28,17 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from agent_plane.authority.service import TRACE_SCHEMA, lineage
 from agent_plane.gateway.authz import OperatorScope, require_admin, resolve_operator
-from agent_plane.gateway.identity import IdentityError, resolve_identity
+from agent_plane.gateway.context import resolve_request
 from agent_plane.registry.store import Origin
 
 registry_router = APIRouter(tags=["registry"])
 
 
-def _scope(request: Request, admin: str | None, demo: str | None) -> OperatorScope:
-    return resolve_operator(request, admin, demo)
+def _scope(request: Request, admin: str | None, demo: str | None,
+           project: str | None = None) -> OperatorScope:
+    # ``?tenant=`` and ``?project=`` name the same thing: a project is the tenant.
+    return resolve_operator(request, admin, demo,
+                            project=project or request.query_params.get("tenant"))
 
 
 def _tenant_of(scope: OperatorScope, tenant: str | None) -> str | None:
@@ -68,7 +71,7 @@ def _granted_actions(request: Request, tenant: str, agent: str) -> tuple[list[st
 async def list_agents(request: Request, tenant: str | None = Query(default=None),
                       x_admin_token: str | None = Header(default=None),
                       x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     registry = request.app.state.agent_registry
     items = []
     for rec in registry.agents(_tenant_of(scope, tenant)):
@@ -84,7 +87,7 @@ async def list_agents(request: Request, tenant: str | None = Query(default=None)
 async def get_agent(request: Request, agent_id: str, tenant: str | None = Query(default=None),
                     x_admin_token: str | None = Header(default=None),
                     x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     rec = _agent_or_404(request, scope, _tenant_of(scope, tenant), agent_id)
     granted, leases = _granted_actions(request, rec.tenant, rec.id)
     registry = request.app.state.agent_registry
@@ -134,7 +137,7 @@ async def release_agent(request: Request, agent_id: str, tenant: str | None = Qu
 async def agent_drift(request: Request, agent_id: str, tenant: str | None = Query(default=None),
                       x_admin_token: str | None = Header(default=None),
                       x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     rec = _agent_or_404(request, scope, _tenant_of(scope, tenant), agent_id)
     granted, _ = _granted_actions(request, rec.tenant, rec.id)
     return request.app.state.agent_registry.drift(rec.tenant, rec.id, granted)
@@ -145,7 +148,7 @@ async def agent_suggested_lease(request: Request, agent_id: str, tenant: str | N
                                 task: str | None = Query(default=None),
                                 x_admin_token: str | None = Header(default=None),
                                 x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     rec = _agent_or_404(request, scope, _tenant_of(scope, tenant), agent_id)
     return {"lease": request.app.state.agent_registry.suggested_lease(rec.tenant, rec.id, task)}
 
@@ -157,7 +160,7 @@ async def agent_suggested_lease(request: Request, agent_id: str, tenant: str | N
 async def list_tasks(request: Request, tenant: str | None = Query(default=None),
                      x_admin_token: str | None = Header(default=None),
                      x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     items = [t.model_dump(mode="json") for t in request.app.state.agent_registry.tasks(_tenant_of(scope, tenant))]
     return {"tasks": items, "count": len(items)}
 
@@ -166,7 +169,7 @@ async def list_tasks(request: Request, tenant: str | None = Query(default=None),
 async def get_task(request: Request, task_id: str, tenant: str | None = Query(default=None),
                    x_admin_token: str | None = Header(default=None),
                    x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     registry = request.app.state.agent_registry
     candidates = [tenant] if tenant else sorted({t.tenant for t in registry.tasks(scope.tenant)})
     for t in candidates:
@@ -197,12 +200,12 @@ async def register_task(request: Request, body: dict[str, Any],
     if settings.admin_token and x_admin_token == settings.admin_token:
         tenant = body.get("tenant") or "default"
     else:
-        try:
-            actor = resolve_identity(authorization, settings, request.app.state.revocations)
-        except IdentityError as exc:
-            raise HTTPException(status_code=401, detail=str(exc)) from exc
-        tenant = actor.tenant
-        agent = agent or actor.agent_id or actor.user_id
+        # A Project API Key (the normal case) or a token identity.
+        ctx = resolve_request(request, authorization=authorization,
+                              x_api_key=request.headers.get("X-Api-Key"), body=body)
+        ctx.requires("ingest")
+        tenant = ctx.tenant
+        agent = agent or ctx.agent
     origin_raw = body.get("origin") or {}
     if not isinstance(origin_raw, dict):
         raise HTTPException(status_code=400, detail="'origin' must be an object")
@@ -220,7 +223,7 @@ async def register_task(request: Request, body: dict[str, Any],
 async def list_resources(request: Request, tenant: str | None = Query(default=None),
                          x_admin_token: str | None = Header(default=None),
                          x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     catalog = request.app.state.catalog
     touched = request.app.state.agent_registry.resources(_tenant_of(scope, tenant))
     for entry in touched:
@@ -259,7 +262,7 @@ async def list_decisions(request: Request, tenant: str | None = Query(default=No
                          limit: int = Query(default=50, ge=1, le=500),
                          x_admin_token: str | None = Header(default=None),
                          x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     events = request.app.state.audit.query(tenant=_tenant_of(scope, tenant), limit=limit * 3)
     items = []
     for e in events:
@@ -305,7 +308,7 @@ async def system_state(request: Request, tenant: str | None = Query(default=None
                        x_admin_token: str | None = Header(default=None),
                        x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
     """LIVE telemetry for the console's first screen."""
-    scope = _scope(request, x_admin_token, x_demo_token)
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
     tenant = _tenant_of(scope, tenant)
     registry = request.app.state.agent_registry
     settings = request.app.state.settings
