@@ -1,12 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-labelledby="t">
+  <title id="t">agent-plane</title>
+  <!-- Heavier again, and with a taller arrowhead than the mark: at 16px a
+       head the same weight as the line merges into it and reads as a blob. -->
   <rect width="64" height="64" rx="12" fill="#F4F4EF"/>
-  <g stroke="#11110F" stroke-width="0.9" stroke-opacity="0.55" fill="none">
-    <polygon points="14,14 32,23 32,54 14,45" fill="#11110F" fill-opacity="0.06"/>
-    <polygon points="50,14 32,23 32,54 50,45" fill="#11110F" fill-opacity="0.06"/>
+  <g fill="#11110F">
+    <polygon points="7,8 24,19 24,45 7,56" fill-opacity="0.18"/>
+    <polygon points="57,8 40,19 40,45 57,56" fill-opacity="0.34"/>
   </g>
-  <g stroke="#11110F" stroke-width="2" stroke-linejoin="round" fill="none">
-    <polygon points="32,16 46,24 32,32 18,24" fill="#FAFAF6"/>
-    <polygon points="18,24 32,32 32,48 18,40" fill="#11110F" fill-opacity="0.12"/>
-    <polygon points="32,32 46,24 46,40 32,48" fill="#11110F" fill-opacity="0.28"/>
+  <g fill="#11110F">
+    <rect x="6" y="29.8" width="38" height="4.4"/>
+    <polygon points="43,20 60,32 43,44"/>
+    <rect x="29" y="12" width="6" height="40"/>
   </g>
 </svg>
