@@ -152,3 +152,45 @@ gives the two endpoints it should use:
 ```
 
 No token is minted. The API key remains the credential.
+
+
+## Single sign-on (optional)
+
+The console can sign people in with your identity provider instead of a
+password. It is off until three settings are present, and it changes nothing
+else about the system.
+
+```bash
+OIDC_ISSUER=https://acme.okta.com        # or Auth0, Google, Entra, Keycloak
+OIDC_CLIENT_ID=…
+OIDC_CLIENT_SECRET=…
+```
+
+Register `https://<your-host>/v1/auth/oidc/callback` with the provider. There
+is no provider-specific configuration beyond that: the issuer's discovery
+document supplies the endpoints.
+
+**SSO is the portal door, not the plane's.** It issues exactly the session
+cookie a password login issues. Agents keep authenticating with a Project API
+Key, which means a provider outage cannot stop an agent being governed, and a
+stolen browser session can never act as an agent. The runtime never reads a
+session cookie at all.
+
+Two more settings, both optional:
+
+| | |
+| --- | --- |
+| `OIDC_ALLOWED_DOMAINS` | comma-separated email domains allowed to sign in |
+| `OIDC_ONLY` | stop offering the password form; ignored while SSO is unconfigured, so a typo in the issuer cannot lock everyone out |
+| `OIDC_REDIRECT_URL` | only needed behind a proxy, where the request's host is not the public one |
+
+Accounts are linked by the provider's subject, not the email address. The
+first sign-in adopts a matching account, or creates one if your sign-up mode
+allows it, and records the subject from then on. An email that already belongs
+to a different subject is refused rather than adopted, so a reassigned address
+cannot inherit someone's account. An unverified email is refused outright.
+
+What SSO does not do: no group or role claims are read. It decides who may
+sign in, never what they may do. Project access is still the account model,
+and deployment-wide operations still need the instance owner, a management
+key, or `ADMIN_TOKEN`.

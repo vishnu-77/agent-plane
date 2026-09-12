@@ -11,7 +11,8 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, inspect, select
+from sqlalchemy import text as sql
 from sqlalchemy.orm import Session, sessionmaker
 
 from agent_plane.accounts.models import (
@@ -72,15 +73,31 @@ class AccountStore:
         connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
         self._engine = create_engine(db_url, connect_args=connect_args, future=True)
         Base.metadata.create_all(self._engine)
+        self._migrate()
         self._sessions = sessionmaker(bind=self._engine, class_=Session)
         self._key_secret = key_secret
         self._lock = threading.RLock()
+
+    def _migrate(self) -> None:
+        """Bring a database created by an earlier release up to date.
+
+        0.8 added the linked identity columns for console SSO. Existing rows
+        are password accounts and stay that way: an empty issuer means "not
+        linked", which is exactly what they are.
+        """
+        columns = {c["name"] for c in inspect(self._engine).get_columns("accounts_users")}
+        missing = {"oidc_issuer", "oidc_subject"} - columns
+        if not missing:
+            return
+        with self._engine.begin() as conn:
+            for column in sorted(missing):
+                conn.execute(sql(f"ALTER TABLE accounts_users ADD COLUMN {column} VARCHAR(320) DEFAULT ''"))
 
     # -- conversion ----------------------------------------------------------- #
     @staticmethod
     def _user(row: UserRow) -> User:
         return User(id=row.id, email=row.email, name=row.name, created_at=_aware(row.created_at),
-                    last_login_at=_aware(row.last_login_at))
+                    last_login_at=_aware(row.last_login_at), sso=bool(row.oidc_subject))
 
     @staticmethod
     def _workspace(row: WorkspaceRow) -> Workspace:
@@ -137,10 +154,51 @@ class AccountStore:
             s.commit()
             return self._user(row)
 
+    def user_by_email(self, email: str) -> User | None:
+        with self._sessions() as s:
+            row = s.scalar(select(UserRow).where(UserRow.email == email.strip().lower()))
+            return self._user(row) if row else None
+
+    def user_for_identity(self, *, issuer: str, subject: str, email: str, name: str = "",
+                          create: bool = False) -> User | None:
+        """Resolve a provider identity to an account, linking or creating once.
+
+        Matching order matters. The provider's subject is the stable link, so
+        it wins. Only then is a verified email allowed to adopt an existing
+        password account, and that adoption is what stores the subject, so it
+        happens exactly once. ``create`` is the caller's sign-up decision; this
+        never makes one of its own.
+        """
+        email = email.strip().lower()
+        with self._lock, self._sessions() as s:
+            row = s.scalar(select(UserRow).where(UserRow.oidc_issuer == issuer,
+                                                 UserRow.oidc_subject == subject))
+            if row is None:
+                row = s.scalar(select(UserRow).where(UserRow.email == email))
+                if row is not None and row.oidc_subject and row.oidc_subject != subject:
+                    # Someone else's identity already holds this address.
+                    raise AccountError("That email is already linked to a different identity")
+            if row is None:
+                if not create:
+                    return None
+                row = UserRow(id=new_id("usr"), email=email,
+                              name=name.strip() or email.split("@")[0],
+                              password_hash="",            # no password: SSO only
+                              created_at=_naive(_utcnow()))
+                s.add(row)
+            row.oidc_issuer, row.oidc_subject = issuer, subject
+            if name and not row.name:
+                row.name = name.strip()
+            row.last_login_at = _naive(_utcnow())
+            s.commit()
+            return self._user(row)
+
     def authenticate(self, email: str, password: str) -> User | None:
         with self._sessions() as s:
             row = s.scalar(select(UserRow).where(UserRow.email == email.strip().lower()))
-            if row is None or not verify_password(password, row.password_hash):
+            # An SSO account has no password hash, and an empty one must never
+            # be treated as "matches anything".
+            if row is None or not row.password_hash or not verify_password(password, row.password_hash):
                 return None
             row.last_login_at = _naive(_utcnow())
             s.commit()

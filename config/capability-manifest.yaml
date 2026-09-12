@@ -6,7 +6,7 @@
 #
 # This is deliberately separate from any one agent's AuthorityLease: a lease
 # grants task-scoped authority *within* what's declared possible here.
-version: "6"
+version: "7"
 
 capabilities:
   - edge: consequence
@@ -89,6 +89,15 @@ capabilities:
       name, or `replace` deletes every rule the file does not mention; accepts a console
       session or an ap_mgmt_ key, never an ap_live_ project key; an unknown field is
       rejected rather than ignored, and a file that fails validation changes nothing
+  - edge: console-sso
+    description: >-
+      optional OpenID Connect sign-in for the console only (GET /v1/auth/oidc/start and
+      /callback, absent unless OIDC_ISSUER/CLIENT_ID/CLIENT_SECRET are all set); PKCE plus
+      a signed short-lived handshake cookie carrying state and nonce, id_token verified
+      against the provider's JWKS for signature, issuer, audience, expiry and nonce;
+      an unverified email is refused, the provider's subject is the stable account link,
+      and success issues the same session cookie a password login does - agents are
+      unaffected and still authenticate with a Project API Key
   - edge: connector
     description: >-
       the local connector CLI (`agentplane connect claude|codex|cursor|mcp|sdk`) records

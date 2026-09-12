@@ -4,7 +4,7 @@
 # underneath it via config/instructions. `capability_manifest_version` pins
 # which version of config/capability-manifest.yaml this review covers -
 # `agentplane authority check-freshness` fails CI if they drift apart.
-capability_manifest_version: "6"
+capability_manifest_version: "7"
 
 last_reviewed: "2026-09-12"
 
@@ -97,6 +97,36 @@ last_reviewed: "2026-09-12"
 #     tenants. First-account-wins is a convention, not an authorization model:
 #     a multi-tenant deployment should still put ADMIN_TOKEN behind an operator
 #     boundary and treat SIGNUP_MODE=open as a decision about who may register.
+
+# Manifest 7 review: optional console single sign-on.
+#   - blast radius: SSO is the portal door and nothing else. It issues the same
+#     session cookie a password login issues, and a session has never been able
+#     to authorize an agent action - the runtime resolver does not read cookies
+#     at all. So a provider outage cannot stop agents being governed, and a
+#     stolen session cannot act as an agent. This separation is the reason not
+#     to put the identity provider in the authorize path.
+#   - account takeover: the classic path is registering someone's address at a
+#     sloppy provider, so an id_token whose email_verified is false is refused.
+#     The provider's subject, not the email, is the stable link; an email that
+#     already belongs to a different subject is refused rather than adopted,
+#     which is what stops a reassigned address inheriting an account. Trusting
+#     a single issuer is still a trust decision: whoever controls it controls
+#     every account on the instance.
+#   - handshake: state and nonce are carried in a signed, httponly, ten-minute
+#     cookie rather than server state, so an abandoned sign-in leaves nothing
+#     to clean up and nothing to enumerate. PKCE is used despite this being a
+#     confidential client, which removes the value of an intercepted code.
+#   - what is deliberately not verified: nothing beyond the id_token. No access
+#     token is requested, stored or used, and no provider API is called, so
+#     there is no second credential to leak.
+#   - error text: the provider's own response body can carry the code and the
+#     client id, so failures are reported as fixed strings and never echoed.
+#   - lockout: OIDC_ONLY is ignored unless SSO is actually configured, so a typo
+#     in the issuer cannot close the only remaining door.
+#   - not covered: no group or role claims are read, so SSO decides who may sign
+#     in and never what they may do. Authorization inside a workspace is still
+#     the account model, and deployment-wide operations still require the
+#     instance owner, a management key, or ADMIN_TOKEN.
 
 # 0.6 review (manifest 4): consequence modelling, the agent registry,
 # quarantine, observe mode, lineage, and the hosted demo.

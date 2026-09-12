@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
+from fastapi.responses import RedirectResponse
 
 from agent_plane.accounts.models import (
     DEFAULT_COLLECTION,
@@ -17,6 +19,14 @@ from agent_plane.accounts.models import (
     OPTIONAL_COLLECTION,
     Project,
     User,
+)
+from agent_plane.accounts.oidc import (
+    HANDSHAKE_COOKIE,
+    HANDSHAKE_TTL_SECONDS,
+    Discovery,
+    OidcError,
+    begin,
+    complete,
 )
 from agent_plane.accounts.security import (
     SESSION_COOKIE,
@@ -104,6 +114,8 @@ async def auth_state(request: Request) -> dict[str, Any]:
         "first_run": users == 0,
         "demo_available": settings.demo_enabled,
         "demo_token": settings.demo_token if settings.demo_enabled else None,
+        "sso_available": settings.oidc_enabled,
+        "password_login": settings.password_login_enabled,
     }
 
 
@@ -139,6 +151,117 @@ async def login(request: Request, response: Response, body: dict[str, Any]) -> d
         raise HTTPException(status_code=401, detail="That email and password do not match")
     _set_session(request, response, user)
     return {"user": user.model_dump(mode="json")}
+
+
+# --------------------------------------------------------------------------- #
+# single sign-on (optional; the console door only)
+# --------------------------------------------------------------------------- #
+def _oidc_http(request: Request):
+    """One HTTP client for every provider call.
+
+    Held on app state so a test can hand the whole flow a transport, and so a
+    deployment behind a proxy configures timeouts and trust in one place.
+    """
+    import httpx
+
+    existing = getattr(request.app.state, "oidc_http", None)
+    if existing is None:
+        existing = httpx.Client(timeout=10.0)
+        request.app.state.oidc_http = existing
+    return existing
+
+
+def _discovery(request: Request) -> Discovery:
+    """One cache per process, created on first use."""
+    existing = getattr(request.app.state, "oidc_discovery", None)
+    if existing is None:
+        existing = Discovery(client=_oidc_http(request))
+        request.app.state.oidc_discovery = existing
+    return existing
+
+
+def _redirect_uri(request: Request) -> str:
+    settings = request.app.state.settings
+    if settings.oidc_redirect_url:
+        return settings.oidc_redirect_url
+    return str(request.url_for("oidc_callback"))
+
+
+def _sso_or_404(request: Request) -> None:
+    if not request.app.state.settings.oidc_enabled:
+        raise HTTPException(status_code=404, detail="Single sign-on is not configured")
+
+
+@accounts_router.get("/v1/auth/oidc/start")
+async def oidc_start(request: Request, next: str = Query(default="/")) -> Response:
+    """Send the browser to the identity provider."""
+    _sso_or_404(request)
+    settings = request.app.state.settings
+    try:
+        url, handshake = begin(settings, _discovery(request),
+                               redirect_uri=_redirect_uri(request),
+                               next_path=next if next.startswith("/") else "/")
+    except OidcError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    response = RedirectResponse(url, status_code=302)
+    # The handshake is signed and short-lived rather than kept server-side, so
+    # nothing has to be cleaned up when someone abandons a sign-in.
+    response.set_cookie(HANDSHAKE_COOKIE,
+                        sign_session(handshake, settings.api_key_secret, HANDSHAKE_TTL_SECONDS),
+                        httponly=True, samesite="lax", secure=settings.cookies_secure,
+                        max_age=HANDSHAKE_TTL_SECONDS, path="/")
+    return response
+
+
+@accounts_router.get("/v1/auth/oidc/callback", name="oidc_callback")
+async def oidc_callback(request: Request, code: str = Query(default=""),
+                        state: str = Query(default=""),
+                        error: str = Query(default="")) -> Response:
+    """Finish the handshake, then hand off to the ordinary session."""
+    _sso_or_404(request)
+    settings = request.app.state.settings
+    accounts = _store(request)
+    handshake = read_session(request.cookies.get(HANDSHAKE_COOKIE), settings.api_key_secret)
+
+    def failed(message: str) -> Response:
+        # Back to the console with something a person can act on, never with
+        # the provider's own error text, which can carry the code and client id.
+        out = RedirectResponse(f"/console#/?sso_error={quote(message)}", status_code=302)
+        out.delete_cookie(HANDSHAKE_COOKIE, path="/")
+        return out
+
+    if error:
+        return failed("Your identity provider cancelled this sign-in")
+    if not code:
+        return failed("Your identity provider returned no authorization code")
+
+    try:
+        identity = complete(settings, _discovery(request), code=code, state=state,
+                            handshake=handshake, client=_oidc_http(request))
+    except OidcError as exc:
+        return failed(str(exc))
+
+    users = accounts.user_count()
+    may_create = settings.signup_mode == "open" or (settings.signup_mode == "first_user" and users == 0)
+    try:
+        user = accounts.user_for_identity(issuer=identity.issuer, subject=identity.subject,
+                                          email=identity.email, name=identity.name,
+                                          create=may_create)
+    except AccountError as exc:
+        return failed(str(exc))
+    if user is None:
+        return failed("There is no account for that email, and sign-up is closed on this deployment")
+
+    first_workspace = accounts.workspaces_for(user.id)
+    if not first_workspace:
+        accounts.create_workspace(name=f"{user.name}'s workspace", owner=user.id)
+
+    target = str((handshake or {}).get("next") or "/")
+    response = RedirectResponse(f"/console#{target}", status_code=302)
+    response.delete_cookie(HANDSHAKE_COOKIE, path="/")
+    _set_session(request, response, user)
+    _audit(request, action="auth.sso", detail=f"{user.id} via {identity.issuer}")
+    return response
 
 
 @accounts_router.post("/v1/auth/logout")

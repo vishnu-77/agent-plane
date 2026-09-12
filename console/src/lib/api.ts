@@ -59,14 +59,17 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 // --------------------------------------------------------------------------- //
 // accounts
 // --------------------------------------------------------------------------- //
-export interface User { id: string; email: string; name: string; created_at: string }
+export interface User { id: string; email: string; name: string; created_at: string; sso?: boolean }
 export interface Workspace { id: string; name: string; slug: string }
 export interface Project {
   id: string; workspace_id: string; name: string; slug: string; mode: Mode; demo: boolean;
   collection: Record<string, boolean>; created_at: string;
   keys: number; integrations: number; connected: number; rules: number;
 }
-export interface AuthState { users: number; signup_open: boolean; first_run: boolean; demo_available: boolean; demo_token: string | null }
+export interface AuthState {
+  users: number; signup_open: boolean; first_run: boolean; demo_available: boolean;
+  demo_token: string | null; sso_available?: boolean; password_login?: boolean;
+}
 export interface Me { user: User; workspaces: Workspace[]; projects: Project[]; onboarded: boolean }
 
 export interface ApiKey {

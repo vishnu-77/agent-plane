@@ -110,6 +110,10 @@ class User(BaseModel):
     name: str = ""
     created_at: datetime
     last_login_at: datetime | None = None
+    # True when this account signs in through an identity provider rather than
+    # a password. The console uses it to explain why there is no password to
+    # change, never to decide anything.
+    sso: bool = False
 
 
 class Workspace(BaseModel):
@@ -210,6 +214,11 @@ class UserRow(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Set when the account signs in through an identity provider. The subject
+    # is the stable link: an email can be reassigned at the provider, and
+    # matching on it alone would let the new owner inherit this account.
+    oidc_issuer: Mapped[str] = mapped_column(String(320), default="")
+    oidc_subject: Mapped[str] = mapped_column(String(320), default="", index=True)
 
 
 class WorkspaceRow(Base):

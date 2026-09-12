@@ -183,6 +183,29 @@ class Settings(BaseSettings):
     # Send the session cookie only over HTTPS. Forced on in production.
     secure_cookies: bool = False
 
+    # --- Single sign-on (OIDC) ---
+    # Optional, and only for the console: humans sign in with their identity
+    # provider instead of a password. Agents never use it - they authenticate
+    # with a Project API Key, so a provider outage cannot stop them acting or
+    # being governed. Unset OIDC_ISSUER leaves the feature off entirely.
+    #
+    # Any OpenID Connect provider works (Auth0, Okta, Google, Entra, Keycloak):
+    # the issuer's discovery document supplies the endpoints, so there is no
+    # provider-specific code here.
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    # Where the provider sends the browser back. Empty = derive it from the
+    # request, which is right for a single-origin install; set it explicitly
+    # behind a proxy, and register the same value with the provider.
+    oidc_redirect_url: str = ""
+    # Restrict sign-in to these email domains ("acme.com, acme.co.uk").
+    # Empty allows any domain the provider vouches for.
+    oidc_allowed_domains: str = ""
+    # Turn off password sign-in once SSO works, for organisations that require
+    # it. The console stops offering the form; existing sessions are unaffected.
+    oidc_only: bool = False
+
     # --- Hosted demo ---
     # Enables /demo/* (deterministic scenarios against simulated targets in the
     # isolated "demo" tenant) and lets the console read that tenant with
@@ -227,6 +250,24 @@ class Settings(BaseSettings):
     @property
     def cookies_secure(self) -> bool:
         return self.secure_cookies or self.environment == "production"
+
+    @property
+    def oidc_enabled(self) -> bool:
+        """SSO is configured only when all three halves of it are present."""
+        return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret)
+
+    @property
+    def oidc_domains(self) -> list[str]:
+        return [d.strip().lower().lstrip("@") for d in self.oidc_allowed_domains.split(",") if d.strip()]
+
+    @property
+    def password_login_enabled(self) -> bool:
+        """Password sign-in, unless SSO is working and an operator turned it off.
+
+        `oidc_only` without a configured issuer would lock everyone out, so it
+        is only honoured once SSO can actually let someone in.
+        """
+        return not (self.oidc_only and self.oidc_enabled)
 
     @property
     def audit_db_url(self) -> str:

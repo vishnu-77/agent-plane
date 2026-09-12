@@ -4,14 +4,22 @@ import { useStore } from "@/lib/store";
 import { Button, Input } from "@/components/ui";
 
 /** Sign in, or create the first account on a fresh install. */
+/** The callback hands a failure back in the URL rather than a blank screen. */
+function ssoError(): string | null {
+  const hash = window.location.hash;
+  const at = hash.indexOf("sso_error=");
+  return at === -1 ? null : decodeURIComponent(hash.slice(at + "sso_error=".length).split("&")[0]);
+}
+
 export function AuthPage() {
   const { authState, refreshAccount, setSource } = useStore();
   const firstRun = !!authState?.first_run;
+  const ssoOnly = authState?.sso_available && authState?.password_login === false;
   const [mode, setMode] = useState<"signup" | "login">(firstRun ? "signup" : "login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(ssoError());
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -46,7 +54,27 @@ export function AuthPage() {
             : "Open your workspace."}
         </p>
 
-        <form className="mt-6 space-y-3" onSubmit={submit}>
+        {authState?.sso_available ? (
+          <div className="mt-6">
+            <Button variant="default" className="w-full justify-center"
+              onClick={() => { window.location.href = "/v1/auth/oidc/start"; }}>
+              Continue with single sign-on
+            </Button>
+            {!ssoOnly ? (
+              <div className="mt-4 flex items-center gap-3 text-2xs text-ink-3">
+                <span className="h-px flex-1 bg-hairline" />OR<span className="h-px flex-1 bg-hairline" />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {ssoOnly ? (
+          <p className="mt-4 text-xs text-ink-3">
+            This deployment signs in through its identity provider. Agents still use project API keys.
+          </p>
+        ) : null}
+
+        <form className={ssoOnly ? "hidden" : "mt-6 space-y-3"} onSubmit={submit}>
           {mode === "signup" ? (
             <label className="block">
               <span className="eyebrow">Name</span>
@@ -71,7 +99,7 @@ export function AuthPage() {
         </form>
 
         <div className="mt-4 flex items-center justify-between text-xs text-ink-2">
-          {authState?.signup_open ? (
+          {authState?.signup_open && !ssoOnly ? (
             <button className="underline" onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(null); }}>
               {mode === "signup" ? "I already have an account" : "Create an account"}
             </button>

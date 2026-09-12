@@ -5,6 +5,25 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Optional single sign-on for the console** (`agent_plane/accounts/oidc.py`,
+  `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`): plain OpenID Connect,
+  so Auth0, Okta, Google, Entra and Keycloak are three settings rather than four
+  integrations - the issuer's discovery document supplies the endpoints and there
+  is no provider-specific code. `GET /v1/auth/oidc/start` and `/callback`, both
+  absent unless SSO is configured. PKCE, with state and nonce carried in a signed
+  ten-minute httponly cookie rather than server state.
+- SSO is the portal door only. It issues exactly the session cookie a password
+  login issues; agents keep authenticating with a Project API Key, so a provider
+  outage cannot stop an agent being governed and a stolen session can never act
+  as an agent. The runtime never reads a session cookie.
+- Accounts are linked by the provider's subject, not the email. An unverified
+  email is refused, and an email already linked to a different subject is refused
+  rather than adopted, so a reassigned address cannot inherit an account.
+- `OIDC_ALLOWED_DOMAINS` restricts which email domains may sign in. `OIDC_ONLY`
+  stops offering the password form, and is ignored while SSO is unconfigured so a
+  typo in the issuer cannot lock everyone out.
+
 ## [0.7.0] - 2026-09-12
 
 agent-plane becomes a product a developer can adopt alone, in minutes. Sign up,
