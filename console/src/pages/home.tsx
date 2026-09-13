@@ -59,6 +59,6 @@ export function HomePage() {
         </div>
       </section>
     </main>
-    <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><span className="flex gap-4"><a href="/docs" className="underline underline-offset-4">API documentation</a><a href={feedbackUrl("home page")} target="_blank" rel="noopener" className="underline underline-offset-4">Feedback</a></span></div></footer>
+    <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><span className="flex gap-4"><a href="/docs" className="underline underline-offset-4">API documentation</a><a href={feedbackUrl("home page")} target="_blank" rel="noopener" className="underline underline-offset-4">Feedback</a><a href="https://buymeacoffee.com/vishnuprashanth" target="_blank" rel="noopener" className="underline underline-offset-4">Buy me a coffee</a></span></div></footer>
   </div>;
 }
