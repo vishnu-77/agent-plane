@@ -179,6 +179,11 @@ export interface AgentDetail extends Omit<Agent, "leases"> {
   children: string[];
 }
 
+export interface Session {
+  id: string; agent: string; task: string | null; started_at: string; last_seen: string;
+  actions: number; paused: boolean; paused_by?: string | null;
+}
+
 export interface Rule {
   id: string; project_id: string; name: string; enabled: boolean; source: string;
   scope: { agents: string[]; integrations: string[]; environments: string[] };
@@ -264,6 +269,10 @@ export const Api = {
     api<AgentDetail>(`/v1/agents/${id}?${q({ tenant: project })}`, { source }),
   quarantine: (id: string, project: string, on: boolean) =>
     api<{ agent: Agent }>(`/v1/agents/${id}/quarantine?${q({ tenant: project })}`, { method: on ? "POST" : "DELETE", body: on ? { note: "held from the console" } : undefined }),
+  sessions: (project: string, agent: string, source: Source = "live") =>
+    api<{ sessions: Session[]; count: number }>(`/v1/sessions?${q({ tenant: project, agent })}`, { source }),
+  pauseSession: (id: string, project: string, on: boolean) =>
+    api<{ session: Session }>(`/v1/sessions/${id}/pause?${q({ tenant: project })}`, { method: on ? "POST" : "DELETE", body: on ? { by: "console" } : undefined }),
   approvals: (project: string, source: Source = "live") =>
     api<{ approvals: ApprovalRequest[]; count: number }>(`/v1/approvals?${q({ tenant: project, status: "pending", limit: 100 })}`, { source }),
   decideApproval: (id: string, verb: "approve" | "reject", note?: string) =>

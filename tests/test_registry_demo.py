@@ -143,6 +143,45 @@ def test_quarantine_holds_every_action(client):
 
 
 # --------------------------------------------------------------------------- #
+# Session pause
+# --------------------------------------------------------------------------- #
+def test_pausing_a_session_holds_only_that_session(client):
+    """A per-session hold, not a per-agent one: pausing one session's decide()
+    calls blocks that session, but another session for the same agent - and
+    the same agent quarantined some other way - is untouched."""
+    _lease(client)
+    first = client.post("/v1/authorize", headers=_auth(), json={"task": "incident-1", "action": "logs.read",
+                                                                 "resource": "staging/checkout"})
+    assert first.status_code == 200
+    session_id = "inc-agent:incident-1"  # no context.session_id given -> the deterministic fallback
+
+    missing = client.post(f"/v1/sessions/{session_id}/pause?tenant=acme", headers=ADMIN, json={})
+    # not literally missing - just confirms 404 means "not found", not "any 4xx"
+    assert client.post("/v1/sessions/never-seen/pause?tenant=acme", headers=ADMIN, json={}).status_code == 404
+    assert missing.status_code == 200 and missing.json()["session"]["paused"] is True
+
+    held = client.post("/v1/authorize", headers=_auth(), json={"task": "incident-1", "action": "logs.read",
+                                                                "resource": "staging/checkout"})
+    assert held.status_code == 423
+    assert held.json()["detail"]["decision"] == "quarantine"
+    assert held.json()["detail"]["reason"] == "SESSION_PAUSED"
+
+    # A different session for the same agent (explicit context.session_id) is unaffected.
+    other = client.post("/v1/authorize", headers=_auth(),
+                        json={"task": "incident-1", "action": "logs.read", "resource": "staging/checkout",
+                              "context": {"session_id": "a-different-conversation"}})
+    assert other.status_code == 200
+
+    assert client.delete(f"/v1/sessions/{session_id}/pause?tenant=acme", headers=ADMIN).status_code == 200
+    resumed = client.post("/v1/authorize", headers=_auth(), json={"task": "incident-1", "action": "logs.read",
+                                                                   "resource": "staging/checkout"})
+    assert resumed.status_code == 200
+
+    listed = client.get("/v1/sessions?tenant=acme&agent=inc-agent", headers=ADMIN)
+    assert listed.status_code == 200 and listed.json()["count"] == 2
+
+
+# --------------------------------------------------------------------------- #
 # Lineage
 # --------------------------------------------------------------------------- #
 def test_delegation_records_lineage_and_explains_denial(client):

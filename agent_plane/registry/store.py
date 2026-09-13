@@ -48,6 +48,19 @@ class SessionRecord(BaseModel):
     started_at: datetime
     last_seen: datetime
     actions: int = 0
+    # An operator's hold on this one session, distinct from quarantine (which
+    # holds the whole agent). Same absolute semantics: checked ahead of mode,
+    # binds in observe/govern/enforce alike.
+    paused: bool = False
+    paused_by: str | None = None
+
+
+def resolve_session_id(context: dict[str, str], *, agent: str, task: str | None) -> str:
+    """The one place a session id is derived from a reported event's context,
+    so a pause check (authority.service.decide) and the record it guards
+    (_RegistryOps.observe) can never disagree about which session an action
+    belongs to."""
+    return context.get("session_id") or context.get("conversation_id") or f"{agent}:{task or 'no-task'}"
 
 
 class TaskRecord(BaseModel):
@@ -436,7 +449,7 @@ class _RegistryOps:
             rec.decisions[outcome] = rec.decisions.get(outcome, 0) + 1
             rec.last_action = {"action": action, "resource": resource, "outcome": outcome,
                                "decision_id": decision_id, "at": now.isoformat(), "edge": edge}
-            session_id = context.get("session_id") or context.get("conversation_id") or f"{agent}:{task or 'no-task'}"
+            session_id = resolve_session_id(context, agent=agent, task=task)
             if session_id not in rec.sessions:
                 rec.sessions.append(session_id)
             self._put_agent(rec)
@@ -540,6 +553,9 @@ class _RegistryOps:
     def sessions(self, tenant: str | None = None) -> list[SessionRecord]:
         return self._all_sessions(tenant)
 
+    def session(self, tenant: str, session_id: str) -> SessionRecord | None:
+        return self._get_session(tenant, session_id)
+
     def resources(self, tenant: str | None = None) -> list[dict[str, Any]]:
         touched: dict[str, dict[str, Any]] = {}
         for a in self._all_agents(tenant):
@@ -569,6 +585,25 @@ class _RegistryOps:
     def is_quarantined(self, tenant: str, agent: str) -> bool:
         rec = self._get_agent(tenant, agent)
         return bool(rec and rec.status == "quarantined")
+
+    # -- session pause ------------------------------------------------------------ #
+    def set_session_pause(self, tenant: str, session_id: str, *, on: bool,
+                          by: str = "operator") -> SessionRecord | None:
+        """Unlike quarantine, this never creates the session: pausing one you
+        cannot already see (in the console, or via GET /v1/sessions) is not a
+        thing an operator does."""
+        with self.transaction():
+            rec = self._get_session(tenant, session_id)
+            if rec is None:
+                return None
+            rec.paused = on
+            rec.paused_by = by if on else None
+            self._put_session(tenant, rec)
+            return rec
+
+    def is_session_paused(self, tenant: str, session_id: str) -> bool:
+        rec = self._get_session(tenant, session_id)
+        return bool(rec and rec.paused)
 
     # -- mode (observe / enforce) ---------------------------------------------------- #
     def mode(self, tenant: str, default: str) -> str:
@@ -620,8 +655,8 @@ class _RegistryOps:
 
 
 for _name in ("observe", "register_task", "attach_lease", "agents", "agent", "tasks", "task", "sessions",
-              "resources", "set_quarantine", "is_quarantined", "mode", "set_mode", "drift",
-              "suggested_lease", "reset_tenant"):
+              "session", "resources", "set_quarantine", "is_quarantined", "set_session_pause",
+              "is_session_paused", "mode", "set_mode", "drift", "suggested_lease", "reset_tenant"):
     setattr(MemoryRegistry, _name, getattr(_RegistryOps, _name))
     setattr(SqlRegistry, _name, getattr(_RegistryOps, _name))
 

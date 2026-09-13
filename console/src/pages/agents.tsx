@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Api, type AgentDetail } from "@/lib/api";
+import { Api, type AgentDetail, type Session } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { ago, cn, outcomeLabel, outcomeTone } from "@/lib/format";
 import { ActivityRow, AuthoritySummary, DecisionDrawer } from "@/components/decision";
@@ -100,6 +100,7 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
   const [detail, setDetail] = useState<AgentDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
 
   useEffect(() => {
     if (!agentId) { setDetail(null); return; }
@@ -109,6 +110,19 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
       .catch((e: Error) => alive && setError(e.message));
     return () => { alive = false; };
   }, [agentId, projectId, source, feed.updatedAt]);
+
+  useEffect(() => {
+    if (!agentId) { setSessions([]); return; }
+    let alive = true;
+    Api.sessions(projectId, agentId, source).then((r) => alive && setSessions(r.sessions)).catch(() => {});
+    return () => { alive = false; };
+  }, [agentId, projectId, source, feed.updatedAt]);
+
+  const toggleSession = async (id: string, on: boolean) => {
+    await Api.pauseSession(id, projectId, on);
+    const r = await Api.sessions(projectId, agentId!, source);
+    setSessions(r.sessions);
+  };
 
   const activity = feed.decisions.filter((d) => d.agent === agentId);
   const can = detail?.granted_authority.filter((a) => !detail.leases.some((l) => (l.require_approval as string[] | undefined)?.includes(a))) ?? [];
@@ -126,6 +140,7 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="authority">Authority</TabsTrigger>
+              <TabsTrigger value="sessions">Sessions</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-3">
@@ -191,6 +206,33 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
                   <dt className="text-ink-2">delegated to</dt><dd>{detail.children.join(", ") || "none"}</dd>
                 </dl>
               </details>
+            </TabsContent>
+
+            <TabsContent value="sessions" className="space-y-2">
+              {sessions.length ? sessions.map((s) => (
+                <div key={s.id} className="panel px-3 py-2.5">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="font-mono text-xs">{s.id}</div>
+                      <div className="mt-0.5 text-xs text-ink-2">
+                        {s.task ?? "no task"} · {s.actions} action{s.actions === 1 ? "" : "s"} · last seen {ago(s.last_seen)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {s.paused ? <Badge tone="hold">paused</Badge> : null}
+                      {s.paused ? (
+                        <Button size="sm" disabled={source === "demo"} onClick={() => toggleSession(s.id, false)}>
+                          Resume
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="deny" disabled={source === "demo"} onClick={() => toggleSession(s.id, true)}>
+                          Pause
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )) : <Empty title="No sessions recorded for this agent yet" />}
             </TabsContent>
           </Tabs>
         ) : null}

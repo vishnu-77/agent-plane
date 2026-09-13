@@ -48,6 +48,8 @@ class AuthorityReason(str, Enum):
     CONSEQUENCE_OUTSIDE_TASK_BOUNDARY = "CONSEQUENCE_OUTSIDE_TASK_BOUNDARY"
     # An operator quarantined the agent; nothing proceeds until lifted.
     AGENT_QUARANTINED = "AGENT_QUARANTINED"
+    # An operator paused this one session; nothing proceeds until resumed.
+    SESSION_PAUSED = "SESSION_PAUSED"
     # Approval resume path (POST /v1/authorize with "approval": "<id>")
     ACTION_APPROVED = "ACTION_APPROVED"
     APPROVAL_PENDING = "APPROVAL_PENDING"

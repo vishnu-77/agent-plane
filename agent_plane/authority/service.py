@@ -12,9 +12,11 @@ The chain is recorded on the signed audit event (``agent-plane.trace.v1``),
 fed to the registry (so agents, tasks, and drift are discovered from
 traffic), and served back by ``GET /v1/decisions/{id}``.
 
-Outcomes: ALLOW, DENY, APPROVAL (``approval_required``), QUARANTINE (the
-agent is held by an operator), SIMULATE (observe mode: computed, recorded,
-not enforced; ``would_be`` says what enforce mode would have returned).
+Outcomes: ALLOW, DENY, APPROVAL (``approval_required``), QUARANTINE (an
+operator's hold - the whole agent, via ``AGENT_QUARANTINED``, or just one
+session, via ``SESSION_PAUSED``), SIMULATE (observe mode: computed,
+recorded, not enforced; ``would_be`` says what enforce mode would have
+returned).
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ from agent_plane.authority.provenance import provenance_record
 from agent_plane.consequence import Consequence
 from agent_plane.consequence.envelope import ConsequenceEnvelope
 from agent_plane.consequence.state import TaskFact
+from agent_plane.registry.store import resolve_session_id
 from agent_plane.rules import compile_rules, compiled_lease_id
 from agent_plane.schemas.canonical import Actor, DecisionAction
 
@@ -197,6 +200,8 @@ def explain(outcome: DecisionAction, reason: str, *, task: str, action: str, res
         lines.append(f"The agent's identity does not even declare the capability for {action}; task authority was not consulted.")
     elif reason == AuthorityReason.AGENT_QUARANTINED.value:
         lines.append("An operator quarantined this agent. Every action is held until the quarantine is lifted.")
+    elif reason == AuthorityReason.SESSION_PAUSED.value:
+        lines.append("An operator paused this session. Every action from it is held until it is resumed.")
     elif reason.startswith("APPROVAL_"):
         lines.append({
             "APPROVAL_PENDING": "The approval request is still waiting for a human decision.",
@@ -353,8 +358,13 @@ class AuthorityService:
                 registry_reads.enter_context(registry.read_only())
 
             # 1. Quarantine is absolute: it is an operator's hold on the agent.
+            session_id = resolve_session_id(context, agent=subject, task=task)
             if registry is not None and registry.is_quarantined(actor.tenant, subject):
                 decision = AuthorityDecision(decision=DecisionAction.QUARANTINE, reason=AuthorityReason.AGENT_QUARANTINED,
+                                             decision_id=f"az_{uuid.uuid4().hex[:12]}")
+            # 1b. Same hold, scoped to one session rather than the whole agent.
+            elif registry is not None and registry.is_session_paused(actor.tenant, session_id):
+                decision = AuthorityDecision(decision=DecisionAction.QUARANTINE, reason=AuthorityReason.SESSION_PAUSED,
                                              decision_id=f"az_{uuid.uuid4().hex[:12]}")
             # 2. Resume a granted approval.
             elif approval:

@@ -10,6 +10,9 @@ decision path - it is the explanation of decisions already made.
     DELETE /v1/agents/{id}/quarantine
     GET  /v1/agents/{id}/drift               declared vs granted vs observed
     GET  /v1/agents/{id}/suggested-lease     Observe -> Enforce
+    GET  /v1/sessions?tenant=&agent=         one agent's conversations/runs
+    POST /v1/sessions/{id}/pause             hold one session's actions (operator)
+    DELETE /v1/sessions/{id}/pause
     GET  /v1/tasks, /v1/tasks/{id}
     POST /v1/tasks                           register an intent (origin/prompt)
     GET  /v1/resources
@@ -131,6 +134,45 @@ async def release_agent(request: Request, agent_id: str, tenant: str | None = Qu
     if rec is None:
         raise HTTPException(status_code=404, detail="agent not found")
     return {"agent": rec.model_dump(mode="json")}
+
+
+@registry_router.get("/v1/sessions")
+async def list_sessions(request: Request, tenant: str | None = Query(default=None),
+                        agent: str | None = Query(default=None),
+                        x_admin_token: str | None = Header(default=None),
+                        x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
+    registry = request.app.state.agent_registry
+    items = [s for s in registry.sessions(_tenant_of(scope, tenant)) if agent is None or s.agent == agent]
+    return {"sessions": [s.model_dump(mode="json") for s in items], "count": len(items)}
+
+
+@registry_router.post("/v1/sessions/{session_id}/pause")
+async def pause_session(request: Request, session_id: str, body: dict[str, Any] | None = None,
+                        tenant: str | None = Query(default=None),
+                        x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    require_admin(request, x_admin_token)
+    body = body or {}
+    tenant = tenant or body.get("tenant") or "default"
+    rec = request.app.state.agent_registry.set_session_pause(tenant, session_id, on=True, by=body.get("by") or "admin")
+    if rec is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    request.app.state.audit.record({
+        "decision_id": f"sess_{session_id[:8]}_p", "user_id": "admin", "tenant": tenant, "agent_id": rec.agent,
+        "model_requested": f"session-admin:{session_id}", "model_used": session_id, "data_classification": "",
+        "decision": "quarantine", "reason": "SESSION_PAUSED", "rules_matched": [],
+    })
+    return {"session": rec.model_dump(mode="json")}
+
+
+@registry_router.delete("/v1/sessions/{session_id}/pause")
+async def resume_session(request: Request, session_id: str, tenant: str | None = Query(default=None),
+                         x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    require_admin(request, x_admin_token)
+    rec = request.app.state.agent_registry.set_session_pause(tenant or "default", session_id, on=False)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"session": rec.model_dump(mode="json")}
 
 
 @registry_router.get("/v1/agents/{agent_id}/drift")
