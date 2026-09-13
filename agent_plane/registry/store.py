@@ -9,6 +9,7 @@ that explains a decision after the fact and drives Observe -> Enforce.
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -197,16 +198,61 @@ class SqlRegistry:
         Base.metadata.create_all(self._engine)
         self._session_factory = sessionmaker(bind=self._engine, class_=Session)
         self._lock = threading.RLock()
+        self._local = threading.local()
 
+    @contextmanager
     def transaction(self):
-        return self._lock
+        """One session, one commit, for everything this call does.
+
+        Each ``_get_*``/``_put_*`` used to open and commit its own session, so
+        a single ``register_task`` (get task, put task, get agent, put agent)
+        paid four network round trips where one would do - the cost of every
+        one of those is doubled on a database a region away, which is most of
+        why reporting one action was slow. Calls made outside a ``with
+        transaction():`` block (a plain read) are unaffected: they still open
+        their own session, exactly as before.
+        """
+        depth = getattr(self._local, "depth", 0)
+        self._local.depth = depth + 1
+        try:
+            if depth == 0:
+                with self._lock, self._session_factory() as session:
+                    self._local.session = session
+                    try:
+                        yield self
+                        session.commit()
+                    except BaseException:
+                        session.rollback()
+                        raise
+                    finally:
+                        self._local.session = None
+            else:
+                yield self  # nested call: ride the outer session and commit
+        finally:
+            self._local.depth = depth
+
+    def _active_session(self) -> Session | None:
+        return getattr(self._local, "session", None)
 
     def _get_agent(self, tenant: str, agent: str) -> AgentRecord | None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(AgentRow, (tenant, agent))
+            return AgentRecord.model_validate(row.document) if row else None
         with self._session_factory() as s:
             row = s.get(AgentRow, (tenant, agent))
             return AgentRecord.model_validate(row.document) if row else None
 
     def _put_agent(self, rec: AgentRecord) -> None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(AgentRow, (rec.tenant, rec.id))
+            doc = rec.model_dump(mode="json")
+            if row is None:
+                session.add(AgentRow(tenant=rec.tenant, id=rec.id, last_seen=_naive(rec.last_seen), document=doc))
+            else:
+                row.last_seen, row.document = _naive(rec.last_seen), doc
+            return
         with self._session_factory() as s:
             row = s.get(AgentRow, (rec.tenant, rec.id))
             doc = rec.model_dump(mode="json")
@@ -217,11 +263,24 @@ class SqlRegistry:
             s.commit()
 
     def _get_task(self, tenant: str, task: str) -> TaskRecord | None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(TaskRow, (tenant, task))
+            return TaskRecord.model_validate(row.document) if row else None
         with self._session_factory() as s:
             row = s.get(TaskRow, (tenant, task))
             return TaskRecord.model_validate(row.document) if row else None
 
     def _put_task(self, rec: TaskRecord) -> None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(TaskRow, (rec.tenant, rec.id))
+            doc = rec.model_dump(mode="json")
+            if row is None:
+                session.add(TaskRow(tenant=rec.tenant, id=rec.id, last_activity=_naive(rec.last_activity), document=doc))
+            else:
+                row.last_activity, row.document = _naive(rec.last_activity), doc
+            return
         with self._session_factory() as s:
             row = s.get(TaskRow, (rec.tenant, rec.id))
             doc = rec.model_dump(mode="json")
