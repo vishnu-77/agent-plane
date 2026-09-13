@@ -130,7 +130,22 @@ export function graphFromTrace(trace: Trace, siblings: Agent[] = [], opts: { lin
   const readOnly = !c || c.effect === "read" || c.effect === "list";
   const effect = add({ id: "effect", layer: "effect", label: c?.direct_effect ?? "no state change", sub: c ? `${c.effect} · ${c.reversibility}` : undefined, onPath: true });
   edges.push({ from: resource, to: effect, kind: "consequence", onPath: true });
-  if (c && c.downstream.length) {
+  if (c && c.paths && c.paths.length) {
+    // A typed causal path exists: show the actual chain (step by step, each
+    // edge named by its relation), not just the flat reachable set - this is
+    // what makes "reaches production" become "triggers CI, which enables
+    // production". Longest/most-reaching paths first, capped so the graph
+    // stays readable.
+    [...c.paths].sort((a, b) => b.depth - a.depth).slice(0, 3).forEach((path, pi) => {
+      let from = effect;
+      path.steps.slice(1).forEach((step, i) => {
+        const id = add({ id: `down:p${pi}:${i}`, layer: "downstream", label: step,
+          sub: i === path.steps.length - 2 ? "terminal" : undefined, onPath: true });
+        edges.push({ from, to: id, kind: "consequence", onPath: true, label: path.relations[i] });
+        from = id;
+      });
+    });
+  } else if (c && c.downstream.length) {
     c.downstream.slice(0, 5).forEach((d) => {
       const id = add({ id: `down:${d}`, layer: "downstream", label: d, sub: "dependent", onPath: true });
       edges.push({ from: effect, to: id, kind: "consequence", onPath: true });

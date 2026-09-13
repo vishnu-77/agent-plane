@@ -104,12 +104,18 @@ export interface DecisionSummary {
   environment: string | null; approval_id: string | null;
 }
 
+export interface ConsequencePath {
+  source_action: string; steps: string[]; relations: string[]; terminal: string;
+  depth: number; binding: boolean;
+}
+
 export interface Consequence {
   action: string; resource: string; consequence_class: string; scope: string; effect: string;
   direct_effect: string; environment: string; criticality: string; customer_facing: boolean;
   reversibility: string; persistence: string; protected: boolean; downstream: string[];
   blast_radius: number; environments: string[]; impact: string; business: string;
   resource_profile: string | null; action_profile: string | null; summary: string[];
+  paths?: ConsequencePath[];
 }
 
 export interface LineageLink {

@@ -316,3 +316,18 @@ actions:
       class: configuration_change
       scope: single_service
       reversible: true
+
+# Typed causal edges (optional, additive - see agent_plane/consequence/graph.py).
+# dependents/depends_on above already say "production is reachable from main";
+# transitions say *why*, action-conditioned: git.push specifically triggers
+# CI, and CI - whatever it then does - is what actually enables production,
+# so a decision can explain the chain, not just the flat reachable set.
+transitions:
+  - from: "github://*/branches/main"
+    action: "git.push"
+    to: "ci://*"
+    relation: triggers
+  - from: "ci://*"
+    action: "*"
+    to: "production/*"
+    relation: enables

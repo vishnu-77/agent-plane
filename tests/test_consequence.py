@@ -66,6 +66,64 @@ def test_impact_reflects_the_worst_reachable_resource_not_just_the_root():
     assert "internal/billing" in c.downstream
 
 
+def test_typed_transitions_trace_an_action_conditioned_path():
+    """dependents_of() already says production is *reachable* from main;
+    transitions say what actually gets you there for this specific action,
+    as an ordered, relation-typed chain - not just a flat set."""
+    from agent_plane.consequence.catalog import ActionProfile, ConsequenceCatalog, ResourceProfile
+    from agent_plane.consequence.graph import Transition
+
+    catalog = ConsequenceCatalog(
+        resources=[
+            ResourceProfile(pattern="github://*/branches/main", environment="source", criticality="critical"),
+            ResourceProfile(pattern="ci://*", environment="ci", criticality="high"),
+            ResourceProfile(pattern="production/checkout", environment="production", criticality="critical",
+                            customer_facing=True, reversibility="irreversible"),
+        ],
+        actions=[ActionProfile(pattern="git.push", effect="mutate")],
+        transitions=[
+            Transition(from_="github://*/branches/main", action="git.push", to="ci://*", relation="triggers"),
+            Transition(from_="ci://*", action="*", to="production/checkout", relation="enables"),
+        ],
+    )
+    c = catalog.evaluate("git.push", "github://acme/app/branches/main")
+    assert len(c.paths) == 1
+    assert c.paths[0].terminal == "production/checkout"
+    assert c.paths[0].depth == 2
+    assert c.paths[0].relations == ["triggers", "enables"]
+    assert c.customer_facing is True and c.reversibility == "irreversible"  # folded in like any other downstream hit
+
+    # An unrelated action from the same resource never starts a path - the
+    # entry hop is gated on the action, same as the user's own framing:
+    # "git.push triggers CI" is action-conditioned, not a fact about the
+    # resource in general.
+    other = catalog.evaluate("logs.read", "github://acme/app/branches/main")
+    assert other.paths == []
+
+
+def test_forbidden_terminal_resource_denies_only_when_bounded():
+    from agent_plane.consequence.catalog import ActionProfile, ConsequenceCatalog, ResourceProfile
+    from agent_plane.consequence.graph import Transition
+
+    catalog = ConsequenceCatalog(
+        resources=[
+            ResourceProfile(pattern="github://*/branches/main", environment="source", criticality="critical"),
+            ResourceProfile(pattern="production/*", environment="production", criticality="critical"),
+        ],
+        actions=[ActionProfile(pattern="git.push", effect="mutate")],
+        transitions=[Transition(from_="github://*/branches/main", action="git.push",
+                                to="production/*", relation="enables")],
+    )
+    consequence = catalog.evaluate("git.push", "github://acme/app/branches/main")
+
+    bounded = AuthorityLease(id="l", task="t", subject="a", resources=["*"], actions=["git.push"],
+                             permitted_consequence={"forbidden_terminal_resources": ["production/*"]})
+    assert consequence_violations(bounded, consequence)  # denies: reaches a forbidden terminal
+
+    unbounded = AuthorityLease(id="l2", task="t", subject="a", resources=["*"], actions=["git.push"])
+    assert consequence_violations(unbounded, consequence) == []  # today's exact behavior: no bound, no denial
+
+
 def test_unknown_resources_get_inferred_profiles(catalog):
     c = catalog.evaluate("thing.delete", "prod-db/users")
     assert c.environment == "production" and c.effect == "delete" and c.impact == "high"

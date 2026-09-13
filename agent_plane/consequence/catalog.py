@@ -33,6 +33,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent_plane.consequence.graph import ConsequencePath, Transition, reachable_paths
+
 Impact = Literal["none", "low", "medium", "high", "critical"]
 Reversibility = Literal["reversible", "recoverable", "irreversible"]
 Persistence = Literal["transient", "durable", "permanent"]
@@ -153,6 +155,7 @@ class Consequence(BaseModel):
     downstream: list[str] = Field(default_factory=list)   # resources reachable via dependents
     blast_radius: int = 0                                  # resources affected incl. this one
     environments: list[str] = Field(default_factory=list) # environments in the blast radius
+    paths: list[ConsequencePath] = Field(default_factory=list)  # typed causal chains, if any transitions apply
     impact: Impact = "low"
     business: str = ""
     resource_profile: str | None = None
@@ -176,9 +179,11 @@ class Consequence(BaseModel):
 
 class ConsequenceCatalog:
     def __init__(self, resources: list[ResourceProfile] | None = None,
-                 actions: list[ActionProfile] | None = None):
+                 actions: list[ActionProfile] | None = None,
+                 transitions: list[Transition] | None = None):
         self.resources = list(resources or [])
         self.actions = list(actions or [])
+        self.transitions = list(transitions or [])
 
     # -- lookups ------------------------------------------------------------ #
     def resource_profile(self, resource: str) -> ResourceProfile | None:
@@ -239,7 +244,13 @@ class ConsequenceCatalog:
 
         downstream = self.dependents_of(resource) if mutating else []
         blast = 1 + len(downstream) if mutating else 0
-        downstream_profiles = [self.resource_profile(d) or ResourceProfile(pattern=d) for d in downstream]
+        # transitions: is a precision overlay on top of dependents_of(), not a
+        # replacement - a catalog with no transitions: declared (every one
+        # today) always gets paths == [] here, changing nothing below.
+        paths = reachable_paths(self, action, resource)
+        path_terminals = [p.terminal for p in paths if p.terminal not in downstream and p.terminal != resource]
+        downstream_profiles = [self.resource_profile(d) or ResourceProfile(pattern=d)
+                               for d in (*downstream, *path_terminals)]
         environments = sorted({environment, *[p.environment for p in downstream_profiles]}) if mutating else []
         # A resource this action reaches downstream may be worse than the one
         # it's aimed at - a config change to production/checkout that only
@@ -297,7 +308,7 @@ class ConsequenceCatalog:
             effect=effect, direct_effect=direct,
             environment=environment, criticality=criticality, customer_facing=worst_customer_facing,
             reversibility=worst_reversibility, persistence=persistence, protected=worst_protected,
-            downstream=downstream, blast_radius=blast, environments=environments,
+            downstream=downstream, blast_radius=blast, environments=environments, paths=paths,
             impact=impact, business=(rp.business if rp else ""),
             resource_profile=rp.pattern if rp else None,
             action_profile=ap.pattern if ap else None, summary=summary,
@@ -346,6 +357,7 @@ def load_catalog(path: str) -> ConsequenceCatalog:
     return ConsequenceCatalog(
         [ResourceProfile.model_validate(r) for r in doc.get("resources", [])],
         [ActionProfile.model_validate(a) for a in doc.get("actions", [])],
+        [Transition.model_validate(t) for t in doc.get("transitions", [])],
     )
 
 
