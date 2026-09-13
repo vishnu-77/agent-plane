@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { Agent, DecisionSummary } from "@/lib/api";
-import { ago, asDate, cn, outcomeLabel, outcomeTone } from "@/lib/format";
+import { ago, asDate, cn, outcomeLabel, outcomeTone, verdictTone, type Tone } from "@/lib/format";
 import { Badge } from "./ui";
 
 const TONE_BADGE = { allow: "allow", deny: "deny", review: "approval", hold: "hold", neutral: "neutral" } as const;
@@ -67,24 +67,41 @@ export function RunningAgents({ agents }: { agents: Agent[] }) {
 }
 
 // --------------------------------------------------------------------------- //
-// ActivitySparkline - one series (action volume), one minute per bar, over
-// the last half hour. Magnitude over time -> bars, not a line: counts are
-// discrete and there are few enough buckets that bars read cleanly at this
-// size. A single series needs no legend; the tile title names it.
+// DecisionTimeline - not "actions over time" (that tells you activity, not
+// authority): each bar is a minute of decisions stacked by verdict, the same
+// tones as every Badge and lamp elsewhere in the console. The shape of the
+// stack *is* the story - a bar that's all quiet gray is unruled traffic
+// nobody has judged yet; a red cap growing is enforcement doing its job.
+// Composition over time -> a stacked bar, one tile per bucket; a legend
+// names the tones once since color is the only encoding.
 // --------------------------------------------------------------------------- //
 const BUCKETS = 30;
 const BUCKET_MS = 60_000;
+// Bottom -> top: quiet fact of the project first, most consequential last,
+// so a bar that needed a human or a block visibly caps the stack.
+const TONE_STACK: Tone[] = ["neutral", "allow", "review", "hold", "deny"];
+const TONE_HEX: Record<Tone, string> = {
+  neutral: "#9B9B93", allow: "#3E6B50", review: "#9A6B12", hold: "#4A4A8A", deny: "#B4322A",
+};
+const TONE_LABEL: Record<Tone, string> = {
+  neutral: "No rule", allow: "Allowed", review: "Review", hold: "Held", deny: "Blocked",
+};
 
-export function ActivitySparkline({ decisions, now }: { decisions: DecisionSummary[]; now: number }) {
+export function DecisionTimeline({ decisions, now }: { decisions: DecisionSummary[]; now: number }) {
   const start = now - BUCKETS * BUCKET_MS;
-  const counts = new Array(BUCKETS).fill(0);
+  // counts[bucket][tone]
+  const counts: Record<Tone, number>[] = Array.from({ length: BUCKETS },
+    () => ({ neutral: 0, allow: 0, review: 0, hold: 0, deny: 0 }));
   for (const d of decisions) {
     const t = asDate(d.created_at)?.getTime();
     if (t == null || t < start || t > now) continue;
-    counts[Math.min(BUCKETS - 1, Math.floor((t - start) / BUCKET_MS))] += 1;
+    const bucket = Math.min(BUCKETS - 1, Math.floor((t - start) / BUCKET_MS));
+    counts[bucket][verdictTone(d)] += 1;
   }
-  const total = counts.reduce((a, b) => a + b, 0);
-  const max = Math.max(1, ...counts);
+  const totals = counts.map((c) => TONE_STACK.reduce((sum, tone) => sum + c[tone], 0));
+  const total = totals.reduce((a, b) => a + b, 0);
+  const max = Math.max(1, ...totals);
+  const present = TONE_STACK.filter((tone) => counts.some((c) => c[tone] > 0));
   const [hover, setHover] = useState<number | null>(null);
 
   const width = 300, height = 40, gap = 2;
@@ -93,33 +110,50 @@ export function ActivitySparkline({ decisions, now }: { decisions: DecisionSumma
   return (
     <div className="panel px-3.5 py-3">
       <div className="flex items-baseline justify-between">
-        <div className="eyebrow">Actions · last 30 min</div>
+        <div className="eyebrow">Decisions · last 30 min</div>
         <div className="dot text-xl font-semibold leading-none">{total}</div>
       </div>
       <div className="relative mt-2">
         <svg viewBox={`0 0 ${width} ${height}`} className="block w-full" onMouseLeave={() => setHover(null)}>
-          {counts.map((c, i) => {
-            const live = i === BUCKETS - 1 && c > 0;
-            const h = c ? Math.max(2, (c / max) * (height - 4)) : 1;
+          {counts.map((bucket, i) => {
+            const x = i * (barWidth + gap);
+            const live = i === BUCKETS - 1 && totals[i] > 0;
+            if (!totals[i]) {
+              return <rect key={i} x={x} y={height - 1} width={barWidth} height={1} className="fill-hairline" onMouseEnter={() => setHover(i)} />;
+            }
+            let y = height;
             return (
-              <rect
-                key={i}
-                x={i * (barWidth + gap)} y={height - h} width={barWidth} height={h} rx={Math.min(1.5, barWidth / 2)}
-                className={cn(live ? "fill-ink animate-pulse2" : c ? "fill-ink" : "fill-hairline", !c && !live && "opacity-70")}
-                onMouseEnter={() => setHover(i)}
-              />
+              <g key={i} onMouseEnter={() => setHover(i)} className={live ? "animate-pulse2" : undefined}>
+                {TONE_STACK.filter((tone) => bucket[tone] > 0).map((tone) => {
+                  const h = Math.max(1, (bucket[tone] / max) * (height - 4));
+                  y -= h;
+                  return <rect key={tone} x={x} y={y} width={barWidth} height={h} fill={TONE_HEX[tone]} rx={Math.min(1, barWidth / 2)} />;
+                })}
+              </g>
             );
           })}
         </svg>
         {hover !== null ? (
           <div
-            className="pointer-events-none absolute -top-6 -translate-x-1/2 whitespace-nowrap rounded border border-hairline-strong bg-paper-raised px-1.5 py-0.5 font-mono text-2xs shadow-hairline"
+            className="pointer-events-none absolute -top-8 -translate-x-1/2 whitespace-nowrap rounded border border-hairline-strong bg-paper-raised px-1.5 py-1 font-mono text-2xs shadow-hairline"
             style={{ left: `${((hover + 0.5) / BUCKETS) * 100}%` }}
           >
-            {counts[hover]} · {new Date(start + hover * BUCKET_MS).toISOString().slice(11, 16)}
+            {new Date(start + hover * BUCKET_MS).toISOString().slice(11, 16)}
+            {TONE_STACK.filter((tone) => counts[hover][tone] > 0)
+              .map((tone) => ` · ${TONE_LABEL[tone].toLowerCase()} ${counts[hover][tone]}`).join("") || " · nothing"}
           </div>
         ) : null}
       </div>
+      {present.length ? (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+          {present.map((tone) => (
+            <span key={tone} className="flex items-center gap-1 text-2xs text-ink-2">
+              <span className="lamp" style={{ backgroundColor: TONE_HEX[tone] }} />
+              {TONE_LABEL[tone]}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

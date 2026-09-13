@@ -4,7 +4,7 @@ import { Api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { MODE_COPY, cn, unruled } from "@/lib/format";
 import { ActivityGroups, DecisionDrawer } from "@/components/decision";
-import { ActivitySparkline, RunningAgents, StatTile } from "@/components/dashboard";
+import { DecisionTimeline, RunningAgents, StatTile } from "@/components/dashboard";
 import { Button, Empty } from "@/components/ui";
 
 const FILTERS = [
@@ -104,7 +104,7 @@ export function ActivityPage() {
       </div>
 
       <div className="mb-4">
-        <ActivitySparkline decisions={feed.decisions} now={feed.updatedAt ?? Date.now()} />
+        <DecisionTimeline decisions={feed.decisions} now={feed.updatedAt ?? Date.now()} />
       </div>
 
       <RunningAgents agents={feed.agents} />
