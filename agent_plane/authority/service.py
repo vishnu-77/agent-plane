@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import time
 import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -337,67 +338,77 @@ class AuthorityService:
         would_be: str | None = None
         enforced = True
 
-        # 1. Quarantine is absolute: it is an operator's hold on the agent.
-        if registry is not None and registry.is_quarantined(actor.tenant, subject):
-            decision = AuthorityDecision(decision=DecisionAction.QUARANTINE, reason=AuthorityReason.AGENT_QUARANTINED,
-                                         decision_id=f"az_{uuid.uuid4().hex[:12]}")
-        # 2. Resume a granted approval.
-        elif approval:
-            decision, approval_ref = self._resume(actor, approval, task=task, action=action, resource=resource, impact=impact)
-        # 3. Fresh evaluation: authority, then consequence, then use reservation.
-        else:
-            with leases.transaction():
-                decision = evaluate_authority(leases, actor, task=task, action=action, resource=resource,
-                                              impact=impact, consume=False, lease_ids=lease_ids)
-                lease = leases.get(decision.lease_id) if decision.lease_id else None
-                if decision.decision in (DecisionAction.ALLOW, DecisionAction.APPROVAL_REQUIRED) and lease is not None:
-                    if consequence is not None:
-                        violations = consequence_violations(lease, consequence)
-                    if violations:
-                        decision = AuthorityDecision(decision=DecisionAction.DENY,
-                                                     reason=AuthorityReason.CONSEQUENCE_OUTSIDE_TASK_BOUNDARY,
-                                                     lease_id=lease.id, decision_id=decision.decision_id)
-                    elif consume and mode == "enforce":
-                        # Legacy behaviour: an approval-required check also spends a use.
-                        if not leases.try_consume(lease.id, action, lease.max_uses.get(action)):
+        # registry.is_quarantined (below) and registry.task (at the end of this
+        # method) are two registry reads with the whole authority evaluation -
+        # hundreds of milliseconds of unrelated work - between them. Sharing one
+        # connection across that span, the same way leases.read_only() does,
+        # saves a second connection open; ExitStack rather than nesting the rest
+        # of this method one level deeper under a `with`.
+        with ExitStack() as registry_reads:
+            if registry is not None:
+                registry_reads.enter_context(registry.read_only())
+
+            # 1. Quarantine is absolute: it is an operator's hold on the agent.
+            if registry is not None and registry.is_quarantined(actor.tenant, subject):
+                decision = AuthorityDecision(decision=DecisionAction.QUARANTINE, reason=AuthorityReason.AGENT_QUARANTINED,
+                                             decision_id=f"az_{uuid.uuid4().hex[:12]}")
+            # 2. Resume a granted approval.
+            elif approval:
+                decision, approval_ref = self._resume(actor, approval, task=task, action=action, resource=resource, impact=impact)
+            # 3. Fresh evaluation: authority, then consequence, then use reservation.
+            else:
+                with leases.transaction():
+                    decision = evaluate_authority(leases, actor, task=task, action=action, resource=resource,
+                                                  impact=impact, consume=False, lease_ids=lease_ids)
+                    lease = leases.get(decision.lease_id) if decision.lease_id else None
+                    if decision.decision in (DecisionAction.ALLOW, DecisionAction.APPROVAL_REQUIRED) and lease is not None:
+                        if consequence is not None:
+                            violations = consequence_violations(lease, consequence)
+                        if violations:
                             decision = AuthorityDecision(decision=DecisionAction.DENY,
-                                                         reason=AuthorityReason.ACTION_LIMIT_EXCEEDED,
+                                                         reason=AuthorityReason.CONSEQUENCE_OUTSIDE_TASK_BOUNDARY,
                                                          lease_id=lease.id, decision_id=decision.decision_id)
-                    elif consume and mode == "observe" and decision.decision == DecisionAction.ALLOW:
-                        leases.try_consume(lease.id, action, lease.max_uses.get(action))
-            if decision.decision == DecisionAction.APPROVAL_REQUIRED and mode == "enforce":
+                        elif consume and mode == "enforce":
+                            # Legacy behaviour: an approval-required check also spends a use.
+                            if not leases.try_consume(lease.id, action, lease.max_uses.get(action)):
+                                decision = AuthorityDecision(decision=DecisionAction.DENY,
+                                                             reason=AuthorityReason.ACTION_LIMIT_EXCEEDED,
+                                                             lease_id=lease.id, decision_id=decision.decision_id)
+                        elif consume and mode == "observe" and decision.decision == DecisionAction.ALLOW:
+                            leases.try_consume(lease.id, action, lease.max_uses.get(action))
+                if decision.decision == DecisionAction.APPROVAL_REQUIRED and mode == "enforce":
+                    lease = leases.get(decision.lease_id) if decision.lease_id else None
+                    req = new_request(tenant=actor.tenant, subject=subject, task=task, action=action, resource=resource,
+                                      lease_id=decision.lease_id, evidence_id=decision.decision_id,
+                                      ttl_seconds=settings.approval_ttl_seconds, context=context,
+                                      lease_expires_at=lease.expires_at if lease else None)
+                    self.state.approvals.create(req)
+                    approval_ref = req.id
+
+            # 4. Only enforce mode binds. Observe reports SIMULATE and hides nothing;
+            #    govern reports the real decision but leaves execution to the caller.
+            if mode != "enforce" and decision.decision in (DecisionAction.DENY, DecisionAction.APPROVAL_REQUIRED):
+                would_be = decision.decision.value
+                enforced = False
+                if mode == "observe":
+                    decision = AuthorityDecision(decision=DecisionAction.SIMULATE, reason=decision.reason,
+                                                 lease_id=decision.lease_id, decision_id=decision.decision_id)
+
+            with leases.read_only():
                 lease = leases.get(decision.lease_id) if decision.lease_id else None
-                req = new_request(tenant=actor.tenant, subject=subject, task=task, action=action, resource=resource,
-                                  lease_id=decision.lease_id, evidence_id=decision.decision_id,
-                                  ttl_seconds=settings.approval_ttl_seconds, context=context,
-                                  lease_expires_at=lease.expires_at if lease else None)
-                self.state.approvals.create(req)
-                approval_ref = req.id
-
-        # 4. Only enforce mode binds. Observe reports SIMULATE and hides nothing;
-        #    govern reports the real decision but leaves execution to the caller.
-        if mode != "enforce" and decision.decision in (DecisionAction.DENY, DecisionAction.APPROVAL_REQUIRED):
-            would_be = decision.decision.value
-            enforced = False
-            if mode == "observe":
-                decision = AuthorityDecision(decision=DecisionAction.SIMULATE, reason=decision.reason,
-                                             lease_id=decision.lease_id, decision_id=decision.decision_id)
-
-        with leases.read_only():
-            lease = leases.get(decision.lease_id) if decision.lease_id else None
-            if lease is None:
-                # No lease matched the resource/action: the agent may still hold
-                # authority for this task. Show it, so the trace can say "the task
-                # permits X only against staging/*" instead of "no authority".
-                # This is the common case for an unruled project - every action
-                # lands here - so it is worth not paying for a fresh connection
-                # on top of the one evaluate_authority already opened moments ago.
-                held = [ls for ls in leases.for_subject_task(subject, task, actor.tenant)
-                        if lease_ids is None or ls.id in lease_ids]
-                held = [ls for ls in held if not ls.revoked] or held
-                lease = held[0] if held else None
-            chain = lineage(leases, lease.id) if lease else []
-        task_record = registry.task(actor.tenant, task) if registry is not None else None
+                if lease is None:
+                    # No lease matched the resource/action: the agent may still hold
+                    # authority for this task. Show it, so the trace can say "the task
+                    # permits X only against staging/*" instead of "no authority".
+                    # This is the common case for an unruled project - every action
+                    # lands here - so it is worth not paying for a fresh connection
+                    # on top of the one evaluate_authority already opened moments ago.
+                    held = [ls for ls in leases.for_subject_task(subject, task, actor.tenant)
+                            if lease_ids is None or ls.id in lease_ids]
+                    held = [ls for ls in held if not ls.revoked] or held
+                    lease = held[0] if held else None
+                chain = lineage(leases, lease.id) if lease else []
+            task_record = registry.task(actor.tenant, task) if registry is not None else None
         explanation = explain(decision.decision, decision.reason.value, task=task, action=action, resource=resource,
                               lease=lease, consequence=consequence, chain=chain, violations=violations,
                               would_be=would_be)

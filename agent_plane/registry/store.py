@@ -143,6 +143,11 @@ class MemoryRegistry:
     def transaction(self):
         return self._lock
 
+    @contextmanager
+    def read_only(self):
+        """No separate session to share in-process; matches SqlRegistry's interface."""
+        yield self
+
     # shared behaviour
     observe = None  # assigned below
     register_task = None
@@ -233,6 +238,30 @@ class SqlRegistry:
 
     def _active_session(self) -> Session | None:
         return getattr(self._local, "session", None)
+
+    @contextmanager
+    def read_only(self):
+        """Share one session for the reads in this block - no process lock,
+        just one connection instead of one per read.
+
+        decide() checks quarantine (one agent read) at the top and resolves
+        the task record (one task read) at the bottom, with the whole
+        authority evaluation - hundreds of milliseconds of unrelated work -
+        in between. transaction()'s in-process lock would serialize every
+        other registry access for that whole span if used here; this shares
+        only the connection, not the lock.
+        """
+        if self._active_session() is not None:
+            yield self  # already inside a transaction() or an outer read_only(): ride it
+            return
+        session = self._session_factory()
+        try:
+            self._local.session = session
+            yield self
+        finally:
+            self._local.session = None
+            session.commit()
+            session.close()
 
     def _get_agent(self, tenant: str, agent: str) -> AgentRecord | None:
         session = self._active_session()
