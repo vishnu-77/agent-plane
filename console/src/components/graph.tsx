@@ -180,14 +180,18 @@ interface Placed extends GNode {
 const NODE_H = 46;
 const TITLE_H = 30;
 
-function layout(graph: Graph, availW: number, availH: number) {
+function layout(graph: Graph, availW: number, availH: number, compact?: boolean) {
   const byLayer = new Map<Layer, GNode[]>();
   for (const n of graph.nodes) byLayer.set(n.layer, [...(byLayer.get(n.layer) ?? []), n]);
   const active = LAYERS.filter((l) => byLayer.has(l));
   const bands: Array<Layer[]> = [active.filter((l) => BAND_OF[l] === 0), active.filter((l) => BAND_OF[l] === 1)].filter((b) => b.length);
   const cols = Math.max(...bands.map((b) => b.length));
-  // Columns fill the available width; below a legible minimum the canvas scrolls.
-  const colW = Math.max(132, Math.floor(availW / cols));
+  // Columns fill the available width; below a legible minimum the canvas
+  // scrolls. A drawer-width caller (compact) gets a lower floor, since
+  // labels now truncate to whatever width a column actually has (see
+  // charsFor) rather than a fixed character count - a narrower column is
+  // terser, not broken, so it's worth fitting more of them before scrolling.
+  const colW = Math.max(compact ? 100 : 132, Math.floor(availW / cols));
   const gutter = Math.max(18, Math.round(colW * 0.14));
   const bandH = Math.max(150, Math.floor((availH - 8) / bands.length));
   const placed: Placed[] = [];
@@ -233,10 +237,9 @@ export function AuthorityConsequenceGraph({
     return () => ro.disconnect();
   }, []);
 
-  const model = useMemo(() => (graph ? layout(graph, size.w, size.h) : null), [graph, size.w, size.h]);
+  const model = useMemo(() => (graph ? layout(graph, size.w, size.h, compact) : null), [graph, size.w, size.h, compact]);
   const svgW = model ? Math.max(size.w, model.width) : size.w;
   const svgH = model ? Math.max(size.h, model.height) : size.h;
-  const labelChars = compact ? 20 : 24;
 
   return (
     <div ref={ref} className={cn("relative h-full w-full overflow-auto bg-paper-raised", className)}>
@@ -302,7 +305,7 @@ export function AuthorityConsequenceGraph({
                 <path d={d} fill="none" stroke={stroke} strokeWidth={onPath ? 1.1 : 0.7}
                   strokeDasharray={e.kind === "consequence" ? "3 3" : e.kind === "sibling" ? "1.5 3" : undefined}
                   className={cn(live && onPath && "edge-live")} markerEnd={marker} />
-                {e.label ? (
+                {e.label && !compact ? (
                   <text x={lx} y={ly} textAnchor="middle" fontSize="8.5" fill={stroke} className="font-mono" letterSpacing="0.6">
                     {e.label}
                   </text>
@@ -322,11 +325,11 @@ export function AuthorityConsequenceGraph({
                 {sel ? <rect x={-3} y={-3} width={n.w + 6} height={n.h + 6} rx={4} fill="none" stroke="#11110F" strokeWidth={0.6} strokeDasharray="2 2" /> : null}
                 <circle cx={10} cy={n.h / 2} r={2.6} fill={border} />
                 <text x={20} y={isDecision ? n.h / 2 + 4 : 19} fontSize={isDecision ? 12 : 11} fontWeight={600} fill={isDecision ? border : "#11110F"} className={isDecision ? "dot" : ""} letterSpacing={isDecision ? 1.8 : 0}>
-                  {clip(n.label, isDecision ? 14 : labelChars)}
+                  {clip(n.label, isDecision ? charsFor(n.w - 24, 12, 0.66) : charsFor(n.w - 24, 11))}
                 </text>
                 {!isDecision && n.sub ? (
                   <text x={20} y={33} fontSize="9" fill="#66665F" className="font-mono">
-                    {clip(n.sub, labelChars + 6)}
+                    {clip(n.sub, charsFor(n.w - 24, 9, 0.6))}
                   </text>
                 ) : null}
               </g>
@@ -340,6 +343,15 @@ export function AuthorityConsequenceGraph({
 
 function clip(s: string, n: number) {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+// A fixed character budget only fits the box it was tuned against - once a
+// narrow container (the drawer's "View authority path" panel, well under
+// this graph's usual width) pushes colW down to its floor, that budget
+// stops matching the box and the text bleeds into the next column instead
+// of stopping at its own edge. Deriving the budget from the box's actual
+// pixel width keeps every label inside its own node at any width.
+function charsFor(widthPx: number, fontSize: number, avgCharWidth = 0.58) {
+  return Math.max(3, Math.floor(widthPx / (fontSize * avgCharWidth)));
 }
 function pad2(n: number) {
   return String(n).padStart(2, "0");
