@@ -21,7 +21,7 @@ implies agent-plane blocked what a connector cannot block.
 | `cursor` | partial | advisory | Reports what happened; it cannot interrupt the editor. |
 | `mcp` | full | full | Every `tools/list` and `tools/call` passes through agent-plane, which holds the upstream credential. |
 | `langgraph` | application-defined | advisory | Whatever your graph reports through the SDK; your code decides whether to honour a decision. |
-| `gateway` | full | full | OpenAI-compatible and brokered tool traffic routed through agent-plane, which holds the provider credential. |
+| `gateway` | full | full | Tool traffic routed through agent-plane, which holds the provider credential. |
 | `custom` | application-defined | advisory | Actions your application reports and authorizes through the SDK. |
 
 `binding` in a decision response is `true` only when the decision was

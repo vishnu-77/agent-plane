@@ -61,7 +61,7 @@ INTEGRATION_CATALOG: dict[str, dict[str, Any]] = {
         "label": "API / model gateway",
         "observation": "full",
         "enforcement": "full",
-        "summary": "OpenAI-compatible and brokered tool traffic routed through agent-plane.",
+        "summary": "",
         "enforcement_note": "agent-plane holds the provider credential and forwards only approved traffic.",
         "connect": "base_url = {base_url}/v1",
     },
