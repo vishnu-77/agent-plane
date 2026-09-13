@@ -172,6 +172,12 @@ class Settings(BaseSettings):
     # events (HMAC-SHA256 with AUDIT_SIGNING_KEY in X-AgentPlane-Signature).
     approval_webhook_url: str | None = None
 
+    # --- Feedback ("Send feedback" in the console) ---
+    # GitHub personal access token with `issues:write` on feedback_repo. Unset ->
+    # the endpoint is disabled (404) rather than silently dropping feedback.
+    github_feedback_token: str | None = None
+    feedback_repo: str = "vishnu-77/agent-plane"
+
     # --- Resource / consequence catalog ---
     # YAML resource + action profiles that turn an action into a consequence.
     # Unset -> config/resources.yaml if present, else the packaged defaults.

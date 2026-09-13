@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Api } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { cn, unruled } from "@/lib/format";
-import { ActivityRow, DecisionDrawer } from "@/components/decision";
+import { MODE_COPY, cn, unruled } from "@/lib/format";
+import { ActivityGroups, DecisionDrawer } from "@/components/decision";
+import { ActivitySparkline, RunningAgents, StatTile } from "@/components/dashboard";
 import { Button, Empty } from "@/components/ui";
 
 const FILTERS = [
@@ -42,6 +43,7 @@ export function ActivityPage() {
   }), [feed.decisions, filter]);
 
   const agentCount = feed.agents.length;
+  const activeCount = feed.agents.filter((a) => a.status === "active").length;
   const pending = feed.approvals.length;
   // Default-deny is a fact about the project, not about any one action: state it once.
   const unruledCount = useMemo(() => feed.decisions.filter(unruled).length, [feed.decisions]);
@@ -93,6 +95,20 @@ export function ActivityPage() {
         </div>
       </div>
 
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile label="Mode" value={MODE_COPY[project.mode].label} />
+        <StatTile label="Agents" value={String(agentCount)}
+          sub={activeCount ? `${activeCount} running now` : "none running"} />
+        <StatTile label="Pending review" value={String(pending)} tone={pending ? "approval" : undefined} />
+        <StatTile label="Rules" value={String(project.rules)} />
+      </div>
+
+      <div className="mb-4">
+        <ActivitySparkline decisions={feed.decisions} now={feed.updatedAt ?? Date.now()} />
+      </div>
+
+      <RunningAgents agents={feed.agents} />
+
       {source === "demo" && !feed.decisions.length && scenarios.length ? (
         <div className="mb-4 rounded border border-hairline bg-paper-raised p-4">
           <p className="text-sm">Run a scenario to see real decisions from the real authority engine.</p>
@@ -136,7 +152,7 @@ export function ActivityPage() {
 
       <div className="panel">
         {decisions.length ? (
-          decisions.map((d) => <ActivityRow key={d.decision_id} decision={d} onOpen={setOpen} />)
+          <ActivityGroups decisions={decisions} onOpen={setOpen} />
         ) : feed.decisions.length ? (
           <Empty title="Nothing matches that filter">
             <button className="underline" onClick={() => setFilter("all")}>Show everything</button>

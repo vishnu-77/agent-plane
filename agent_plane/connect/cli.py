@@ -37,6 +37,14 @@ def nl() -> str:
     return chr(10)
 
 
+def _kv(*pairs: tuple[str, str]) -> list[str]:
+    """Right-pad "label   value" rows to one column, however long the labels
+    are - so adding a row (like the console link below) never throws the rest
+    out of alignment the way hand-typed spaces would."""
+    width = max(len(label) for label, _ in pairs)
+    return [f"  {label.ljust(width)}   {value}" for label, value in pairs]
+
+
 def _handshake(url: str, key: str, integration: str, host: str | None) -> dict[str, Any]:
     import httpx
 
@@ -131,17 +139,23 @@ def _connect_hooked(args: argparse.Namespace, kind: str) -> int:
         installed = f"pre-exec hook in {target}"
 
     project, integration = session["project"], session["integration"]
+    console_url = f"{args.url.rstrip('/')}/console"
     _say(
         "",
         f"Connected {integration['kind']} to {project['name']} ({project['id']}).",
-        f"  credential   {credentials_path()}",
-        f"  installed    {installed}",
-        f"  mode         {project['mode'].upper()}",
-        f"  observation  {integration['observation']}    enforcement  {integration['enforcement']}",
+        "",
+        *_kv(
+            ("credential", str(credentials_path())),
+            ("installed", installed),
+            ("console", console_url),
+            ("mode", project["mode"].upper()),
+            ("observation", integration["observation"]),
+            ("enforcement", integration["enforcement"]),
+        ),
         "",
     )
     if project["mode"] == "observe":
-        _say("Nothing will be blocked. Open the console and watch Activity fill up.", "")
+        _say(f"Nothing will be blocked. Watch Activity fill up at {console_url}.", "")
     elif integration["enforcement"] == "partial":
         _say("A tool that runs outside the hook is observed but cannot be stopped.", "")
     return 0

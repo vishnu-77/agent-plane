@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
@@ -328,6 +329,41 @@ async def exchange(request: Request, body: dict[str, Any] | None = None,
 # --------------------------------------------------------------------------- #
 # projects
 # --------------------------------------------------------------------------- #
+@accounts_router.post("/v1/feedback")
+async def send_feedback(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    """Files the console's "Send feedback" form as a GitHub issue, server-side,
+    so a reporter never sees or needs a GitHub account."""
+    # Public: the homepage footer links here before anyone has signed in.
+    # Attribute to the session if there is one, otherwise file it anonymously
+    # rather than force a sign-in just to report a bug.
+    settings = request.app.state.settings
+    payload = read_session(request.cookies.get(SESSION_COOKIE), settings.api_key_secret)
+    user = _store(request).user(str(payload["sub"])) if payload and payload.get("sub") else None
+    if not settings.github_feedback_token:
+        raise HTTPException(status_code=404, detail="Feedback is not configured")
+    message = str(body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Say what happened")
+    context = str(body.get("context") or "").strip()
+    issue_body = f"{message}\n\n---\nFrom: {user.email if user else 'anonymous'}"
+    if context:
+        issue_body += f"\nOpened from: {context}"
+    try:
+        resp = httpx.post(
+            f"https://api.github.com/repos/{settings.feedback_repo}/issues",
+            json={"title": message.splitlines()[0][:80], "body": issue_body},
+            headers={"Authorization": f"Bearer {settings.github_feedback_token}",
+                     "Accept": "application/vnd.github+json"},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Could not file feedback right now") from exc
+    issue = resp.json()
+    _audit(request, action="feedback.sent", detail=issue.get("html_url", ""))
+    return {"url": issue.get("html_url")}
+
+
 @accounts_router.get("/v1/projects")
 async def list_projects(request: Request) -> dict[str, Any]:
     user = _current_user(request)

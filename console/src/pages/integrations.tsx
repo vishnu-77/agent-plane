@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Api, type ApiKey, type CatalogEntry, type Integration } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { ago, capabilityText, cn, feedbackUrl, shortDate } from "@/lib/format";
+import { ago, capabilityText, cn, shortDate } from "@/lib/format";
+import { FeedbackDialog } from "@/components/feedback";
 import { Badge, Button, Dialog, DialogContent, Empty, Input } from "@/components/ui";
 
 export function IntegrationsPage() {
@@ -126,21 +127,34 @@ function CopyField({ value, label }: { value: string; label?: string }) {
   );
 }
 
+const KEY_KIND = [
+  { key: "live", label: "Agent key", blurb: "Connect an agent, MCP server, or gateway. This is almost always what you want." },
+  { key: "test", label: "Test key", blurb: "Same as an agent key, marked test so you can tell it apart in the list." },
+  { key: "mgmt", label: "Management key", blurb: "Manage this project by API instead of the console - pull or push rules, read decisions and agents. Cannot connect an agent." },
+] as const;
+
 function CreateKey({ projectId, onCreated }: { projectId: string; onCreated: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [environment, setEnvironment] = useState<(typeof KEY_KIND)[number]["key"]>("live");
   const [secret, setSecret] = useState<string | null>(null);
+  const kind = KEY_KIND.find((k) => k.key === environment)!;
 
   return (
     <>
-      <Button size="sm" onClick={() => { setSecret(null); setName(""); setOpen(true); }}>New key</Button>
+      <Button size="sm" onClick={() => { setSecret(null); setName(""); setEnvironment("live"); setOpen(true); }}>New key</Button>
       <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSecret(null); }}>
         <DialogContent title={secret ? "Copy your key" : "New API key"}
-          description={secret ? "This is the only time it is shown." : "Name it after the machine or environment that will use it."}>
+          description={secret ? "This is the only time it is shown." : "Name it after the machine, environment, or script that will use it."}>
           {secret ? (
             <div className="space-y-3">
               <CopyField value={secret} />
-              <p className="text-xs text-ink-2">Store it somewhere safe. If you lose it, rotate the key rather than creating another.</p>
+              <p className="text-xs text-ink-2">
+                Store it somewhere safe. If you lose it, rotate the key rather than creating another.
+                {environment === "mgmt" ? (
+                  <> Use it as <code>X-Admin-Token</code>, e.g. <code>agentplane rules pull --project {projectId} --key ...</code>.</>
+                ) : null}
+              </p>
               <div className="flex justify-end">
                 <Button variant="default" onClick={() => { setOpen(false); setSecret(null); }}>Done</Button>
               </div>
@@ -150,7 +164,7 @@ function CreateKey({ projectId, onCreated }: { projectId: string; onCreated: () 
               className="space-y-3"
               onSubmit={async (e) => {
                 e.preventDefault();
-                const created = await Api.createKey({ project: projectId, name: name || "api key" });
+                const created = await Api.createKey({ project: projectId, name: name || "api key", environment });
                 setSecret(created.secret);
                 await onCreated();
               }}
@@ -159,6 +173,19 @@ function CreateKey({ projectId, onCreated }: { projectId: string; onCreated: () 
                 <span className="eyebrow">Name</span>
                 <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="personal-laptop" className="mt-1" />
               </label>
+              <div>
+                <span className="eyebrow">Kind</span>
+                <div className="mt-1 flex gap-1">
+                  {KEY_KIND.map((k) => (
+                    <button key={k.key} type="button" onClick={() => setEnvironment(k.key)}
+                      className={cn("dot flex-1 rounded-sm border px-2 py-1.5 text-2xs",
+                        environment === k.key ? "border-ink bg-ink text-paper" : "border-hairline-strong text-ink-2 hover:text-ink")}>
+                      {k.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-xs text-ink-2">{kind.blurb}</p>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
                 <Button type="submit" variant="default">Create key</Button>
@@ -209,6 +236,7 @@ export function ConnectionWizard({ entry, projectId, onClose, onConnected }: {
   const [secret, setSecret] = useState<string | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [arrived, setArrived] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     if (!entry) { setSecret(null); setWaiting(false); setArrived(false); return; }
@@ -293,19 +321,25 @@ export function ConnectionWizard({ entry, projectId, onClose, onConnected }: {
           </div>
           <p className="text-xs text-ink-3">{entry.enforcement_note}</p>
           {!arrived ? (
-            <p className="text-xs text-ink-3">
-              Command not working?{" "}
-              <a className="underline" target="_blank" rel="noopener"
-                href={feedbackUrl(`connecting ${entry.label}`)}>
-                Send feedback
-              </a>
-            </p>
+            <div className="space-y-1">
+              {usesCli ? (
+                <p className="text-xs text-ink-3">
+                  <code>agentplane</code> not found even after installing? Its Scripts folder isn't on your PATH -
+                  run <code>python -m agent_plane.cli</code> instead.
+                </p>
+              ) : null}
+              <p className="text-xs text-ink-3">
+                Command not working?{" "}
+                <button type="button" className="underline" onClick={() => setFeedbackOpen(true)}>Send feedback</button>
+              </p>
+            </div>
           ) : null}
           <div className="flex justify-end">
             <Button variant={arrived ? "default" : "outline"} onClick={onClose}>{arrived ? "Done" : "Close"}</Button>
           </div>
         </div>
       </DialogContent>
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} context={`connecting ${entry.label}`} />
     </Dialog>
   );
 }

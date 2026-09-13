@@ -224,6 +224,8 @@ export const Api = {
     api<{ user: User }>("/v1/auth/login", { method: "POST", body }),
   logout: () => api<{ signed_out: boolean }>("/v1/auth/logout", { method: "POST" }),
   me: () => api<Me>("/v1/auth/me"),
+  sendFeedback: (body: { message: string; context?: string }) =>
+    api<{ url: string }>("/v1/feedback", { method: "POST", body }),
 
   createProject: (body: { name: string; mode?: Mode }) => api<{ project: Project }>("/v1/projects", { method: "POST", body }),
   updateProject: (id: string, body: Record<string, unknown>) =>

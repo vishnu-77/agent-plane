@@ -13,9 +13,12 @@ const TONE_BADGE: Record<Tone, "allow" | "deny" | "approval" | "hold" | "neutral
 };
 
 // --------------------------------------------------------------------------- //
-// ActivityRow - time, agent, action, resource, decision. Nothing else.
+// ActivityRow - time, action, resource, decision. `compact` drops the agent
+// line: the group header above it (see ActivityGroups) already says whose
+// task this is, so repeating it on every row is exactly the clutter grouping
+// exists to remove.
 // --------------------------------------------------------------------------- //
-export function ActivityRow({ decision, onOpen }: { decision: DecisionSummary; onOpen: (id: string) => void }) {
+export function ActivityRow({ decision, onOpen, compact }: { decision: DecisionSummary; onOpen: (id: string) => void; compact?: boolean }) {
   const tone = verdictTone(decision);
   const quiet = unruled(decision);
   return (
@@ -26,8 +29,8 @@ export function ActivityRow({ decision, onOpen }: { decision: DecisionSummary; o
     >
       <span className="pt-[2px] font-mono text-2xs text-ink-2">{clock(decision.created_at)}</span>
       <span className="min-w-0">
-        <span className="block text-sm font-medium">{decision.agent}</span>
-        <span className="mt-1 block truncate font-mono text-sm">{decision.action}</span>
+        {compact ? null : <span className="block text-sm font-medium">{decision.agent}</span>}
+        <span className="block truncate font-mono text-sm">{decision.action}</span>
         <span className="block truncate font-mono text-xs text-ink-2">{decision.resource}</span>
       </span>
       <span className="flex flex-col items-end gap-1">
@@ -39,6 +42,39 @@ export function ActivityRow({ decision, onOpen }: { decision: DecisionSummary; o
         ) : null}
       </span>
     </button>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+// ActivityGroups - the feed grouped into consecutive runs by agent + task, so
+// a burst of actions from one agent working one task reads as one block
+// ("agent · task") instead of repeating both on every row. Order is
+// unchanged - a run breaks the moment agent or task changes, it never
+// reorders decisions to cluster distant ones.
+// --------------------------------------------------------------------------- //
+export function ActivityGroups({ decisions, onOpen, showAgent = true }: { decisions: DecisionSummary[]; onOpen: (id: string) => void; showAgent?: boolean }) {
+  const groups = useMemo(() => {
+    const runs: Array<{ agent: string; task: string; items: DecisionSummary[] }> = [];
+    for (const d of decisions) {
+      const last = runs[runs.length - 1];
+      if (last && last.agent === d.agent && last.task === d.task) last.items.push(d);
+      else runs.push({ agent: d.agent, task: d.task, items: [d] });
+    }
+    return runs;
+  }, [decisions]);
+
+  return (
+    <>
+      {groups.map((g) => (
+        <div key={g.items[0].decision_id}>
+          <div className="flex items-baseline justify-between gap-3 bg-paper-sunk px-4 py-1.5">
+            {showAgent ? <span className="truncate text-xs font-medium">{g.agent}</span> : null}
+            <span className="truncate font-mono text-2xs text-ink-2">{g.task || "no task"}</span>
+          </div>
+          {g.items.map((d) => <ActivityRow key={d.decision_id} decision={d} onOpen={onOpen} compact />)}
+        </div>
+      ))}
+    </>
   );
 }
 

@@ -4,7 +4,8 @@ import { Check, ChevronDown } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Api, type Mode } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { MODE_COPY, ago, cn, feedbackUrl } from "@/lib/format";
+import { MODE_COPY, ago, cn } from "@/lib/format";
+import { FeedbackDialog } from "./feedback";
 import { Badge, Button, Dialog, DialogContent, Input } from "./ui";
 
 // Four things a developer does, in the order they do them. Everything else
@@ -136,6 +137,7 @@ export function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const connectedAgents = feed.agents.filter((a) => a.status !== "idle").length;
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -199,7 +201,7 @@ export function Shell() {
                 </DropdownMenu.Item>
                 <DropdownMenu.Item onSelect={() => void refresh()} className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-paper-sunk">Refresh now</DropdownMenu.Item>
                 <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
-                <DropdownMenu.Item onSelect={() => window.open(feedbackUrl(location.pathname), "_blank", "noopener")}
+                <DropdownMenu.Item onSelect={() => setFeedbackOpen(true)}
                   className="cursor-pointer rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-paper-sunk">
                   Send feedback
                 </DropdownMenu.Item>
@@ -210,6 +212,8 @@ export function Shell() {
           </DropdownMenu.Root>
         </div>
       </header>
+
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} context={location.pathname} />
 
       <nav className="flex items-center gap-1 border-b border-hairline bg-paper-raised px-4 py-1.5 md:hidden" aria-label="Main">
         {NAV.map((item) => (

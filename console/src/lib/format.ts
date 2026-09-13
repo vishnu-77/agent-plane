@@ -109,7 +109,7 @@ export function pad(n: number, width = 2): string {
   return String(n).padStart(width, "0");
 }
 
-function asDate(iso: string | null | undefined): Date | null {
+export function asDate(iso: string | null | undefined): Date | null {
   if (!iso) return null;
   const d = new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(iso) ? iso : `${iso}Z`);
   return Number.isNaN(d.getTime()) ? null : d;

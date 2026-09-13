@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui";
-import { feedbackUrl } from "@/lib/format";
+import { FeedbackDialog } from "@/components/feedback";
 
 export function PublicBrand() {
   return <Link to="/" aria-label="agent-plane home" className="inline-flex items-center gap-2.5">
@@ -13,6 +14,7 @@ export function PublicBrand() {
 export function HomePage() {
   const { authState, setSource } = useStore();
   const signup = authState?.signup_open && authState?.password_login !== false;
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   return <div className="min-h-screen">
     <header className="border-b border-hairline">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-5 sm:px-8">
@@ -59,6 +61,7 @@ export function HomePage() {
         </div>
       </section>
     </main>
-    <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><span className="flex gap-4"><a href="/docs" className="underline underline-offset-4">API documentation</a><a href={feedbackUrl("home page")} target="_blank" rel="noopener" className="underline underline-offset-4">Feedback</a><a href="https://buymeacoffee.com/vishnuprashanth" target="_blank" rel="noopener" className="underline underline-offset-4">Buy me a coffee</a></span></div></footer>
+    <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><span className="flex gap-4"><a href="/docs" className="underline underline-offset-4">API documentation</a><button type="button" onClick={() => setFeedbackOpen(true)} className="underline underline-offset-4">Feedback</button><a href="https://buymeacoffee.com/vishnuprashanth" target="_blank" rel="noopener" className="underline underline-offset-4">Buy me a coffee</a></span></div></footer>
+    <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} context="home page" />
   </div>;
 }

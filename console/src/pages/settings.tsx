@@ -210,9 +210,14 @@ function Advanced({ project }: { project: Project }) {
         <dl className="mt-2 grid grid-cols-[150px_1fr] gap-x-3 gap-y-1 font-mono text-xs text-ink-2">
           <dt>decision api</dt><dd className="text-ink">POST /v1/authorize</dd>
           <dt>ingestion</dt><dd className="text-ink">POST /v1/events/action</dd>
+          <dt>rules as a file</dt><dd className="text-ink">agentplane rules pull / push --key ap_mgmt_...</dd>
           <dt>api reference</dt><dd><a className="text-ink underline" href="/docs" target="_blank" rel="noreferrer">/docs</a></dd>
           <dt>metrics</dt><dd><a className="text-ink underline" href="/metrics" target="_blank" rel="noreferrer">/metrics</a></dd>
         </dl>
+        <p className="mt-2 text-xs text-ink-2">
+          A management key (Integrations → API keys → New key → Management) drives all of this from a script or CI
+          job instead of the console - it can read and write this project, but it cannot connect an agent.
+        </p>
       </section>
       <section className="border-t border-hairline pt-4">
         <h3 className="text-sm font-medium text-deny">Delete this project</h3>

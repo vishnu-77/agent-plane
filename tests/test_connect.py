@@ -206,6 +206,15 @@ def test_post_never_confirms_a_decision_the_pre_hook_did_not_get_an_id_for(home,
     assert code == 0 and sent == {}
 
 
+def test_kv_aligns_labels_regardless_of_length():
+    from agent_plane.connect.cli import _kv
+
+    pairs = [("credential", "/path"), ("console", "https://x/console"), ("mode", "OBSERVE")]
+    rows = _kv(*pairs)
+    # Every value starts in the same column, however long its label is.
+    assert len({row.index(value) for row, (_, value) in zip(rows, pairs)}) == 1
+
+
 # --------------------------------------------------------------------------- #
 # installation
 # --------------------------------------------------------------------------- #

@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { Api, type AgentDetail, type Session } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { ago, cn, outcomeLabel, outcomeTone } from "@/lib/format";
-import { ActivityRow, AuthoritySummary, DecisionDrawer } from "@/components/decision";
+import { ActivityGroups, AuthoritySummary, DecisionDrawer } from "@/components/decision";
 import { Badge, Button, Empty, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
 
 const TONE_BADGE = { allow: "allow", deny: "deny", review: "approval", hold: "hold", neutral: "neutral" } as const;
@@ -181,7 +181,7 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
 
             <TabsContent value="activity">
               {activity.length
-                ? activity.map((d) => <ActivityRow key={d.decision_id} decision={d} onOpen={setDecision} />)
+                ? <ActivityGroups decisions={activity} onOpen={setDecision} showAgent={false} />
                 : <Empty title="Nothing recorded for this agent yet" />}
             </TabsContent>
 

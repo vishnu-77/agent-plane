@@ -280,3 +280,52 @@ def test_five_steps_to_first_activity(client):
     integrations = client.get(f"/v1/integrations?project={project['id']}").json()["integrations"]
     assert integrations[0]["status"] == "connected" and integrations[0]["host"] == "macbook-pro"
     assert client.get("/v1/auth/me").json()["onboarded"] is True
+
+
+# --------------------------------------------------------------------------- #
+# feedback
+# --------------------------------------------------------------------------- #
+def test_feedback_is_disabled_without_a_github_token(client):
+    response = client.post("/v1/feedback", json={"message": "the connect wizard broke"})
+    assert response.status_code == 404
+
+
+def test_feedback_files_a_github_issue_and_attributes_the_signed_in_user(client, monkeypatch):
+    from agent_plane.config import get_settings
+    from agent_plane.gateway import accounts_router
+
+    get_settings().github_feedback_token = "gh_fake_token"
+    signup(client)  # signed in as dev@example.com for the rest of this test
+
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"html_url": "https://github.com/vishnu-77/agent-plane/issues/42"}
+
+    def fake_post(url, *, json, headers, timeout):
+        calls.append((url, json, headers))
+        return FakeResponse()
+
+    monkeypatch.setattr(accounts_router.httpx, "post", fake_post)
+
+    response = client.post("/v1/feedback", json={"message": "the connect wizard broke", "context": "connecting claude"})
+    assert response.status_code == 200
+    assert response.json()["url"] == "https://github.com/vishnu-77/agent-plane/issues/42"
+
+    url, body, headers = calls[0]
+    assert url == "https://api.github.com/repos/vishnu-77/agent-plane/issues"
+    assert body["title"] == "the connect wizard broke"
+    assert "dev@example.com" in body["body"] and "connecting claude" in body["body"]
+    assert headers["Authorization"] == "Bearer gh_fake_token"
+
+
+def test_feedback_requires_a_message(client, monkeypatch):
+    from agent_plane.config import get_settings
+
+    get_settings().github_feedback_token = "gh_fake_token"
+    response = client.post("/v1/feedback", json={"message": "  "})
+    assert response.status_code == 400
