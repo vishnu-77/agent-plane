@@ -188,6 +188,46 @@ Executable Authority =
 
 Outcomes: `ALLOW` · `DENY` · `APPROVAL` · `QUARANTINE` · `SIMULATE`.
 
+## What's new
+
+**Typed consequence envelopes, and a causal reachability graph.**
+`permitted_consequence` is a real type now (`ConsequenceEnvelope`), not an
+untyped dict merged by whichever rule happens to iterate first. An optional
+`transitions:` graph traces *why* a resource is reachable, not just that it
+is — `git.push` on `main` triggers CI, which enables a production deploy — so
+a bound like `forbidden_terminal_resources` denies the push itself, before
+CI ever runs.
+
+**Task-state composition.** A single action's consequence, evaluated alone,
+misses composition: editing a workflow definition is unremarkable, pushing
+to main is unremarkable, the two together make a production deploy reachable
+in a way neither step shows on its own. A task now accumulates what it has
+already done — `proposed` from a pre-tool hook's intent, `confirmed` once a
+completion signal verifies it actually happened — and a `requires_task_fact`
+edge only becomes traversable once that fact is confirmed.
+
+**Confirmed execution enforcement.** The Claude Code and Codex integrations
+install a `PostToolUse` hook alongside the existing `PreToolUse` one, so a
+binding deny that depends on task state only fires once its precondition is
+confirmed to have actually happened — never on proposed intent alone.
+
+**Suggested rules, grounded in real evidence.** `suggest_rule` now
+synthesizes a permitted-consequence envelope from a project's own recorded
+decisions, not just an allow/ask/never split — a suggested rule carries the
+same typed bound a hand-written one would, and you review it before it
+takes effect either way.
+
+**Per-session pause.** Quarantine holds a whole agent. A narrower hold —
+`POST /v1/sessions/{id}/pause` — stops just one session, so you are not
+choosing between holding every session an agent runs and revoking its API
+key (which stops monitoring, not execution — a revoked key fails open).
+Console: **Agents → an agent → Sessions**.
+
+**Benchmark harness.** `agent_plane/benchmarks` scores composition-attack
+scenarios against four baselines — prompt-only, context-engineered, a
+stateless harness, and agent-plane itself — on violation-prevention rate,
+false-positive rate, and latency.
+
 ## See it before you connect anything
 
 The console has a **DEMO** switch. It runs the real authority engine against
@@ -230,9 +270,11 @@ Once the story is clear, the mechanics are ordinary and documented:
 | `AuthorityLease` | that task-scoped grant: actions, resources, protected resources, use limits, approval, expiry, permitted consequence, lineage · [spec](spec/authority-lease.md) |
 | Gateways | OpenAI-compatible, MCP, tool broker, retrieval · [integration](docs/integration/README.md) |
 | Delegation | child leases and child identities that only attenuate · [authorization](docs/integration/authorization.md) |
-| Revocation | narrow or revoke a live lease, quarantine an agent; every replica sees it |
+| Revocation | narrow or revoke a live lease, quarantine an agent, or pause one session; every replica sees it |
+| Task state | `proposed` → `confirmed` facts a task has accumulated, compare-and-swapped by revision |
 | Approvals | a tracked request, a human decision, one resume · [approvals](docs/integration/approvals.md) |
 | Audit | hash-chained, HMAC-signed decisions with the full trace · [api](docs/api-reference.md) |
+| Benchmarks | violation-prevention / false-positive / latency vs. four baselines · `agent_plane/benchmarks` |
 | SDKs | Python and TypeScript clients, framework adapters, a fail-closed conformance kit · [python](sdk/python/README.md) · [typescript](sdk/typescript/README.md) |
 | Deployment | Docker, Compose, Helm · [deploy](deploy/README.md) |
 | Security model | what binds, what is advisory, and the limits · [SECURITY.md](SECURITY.md) |

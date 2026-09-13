@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Api } from "@/lib/api";
+import { Api, type CatalogEntry, type Integration } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Button, Input } from "@/components/ui";
+import { capabilityText } from "@/lib/format";
 import { PublicBrand } from "./home";
+import { ConnectionWizard } from "./integrations";
 
 /** Sign in, or create the first account on a fresh install. */
 /** The callback hands a failure back in the URL rather than a blank screen. */
@@ -127,10 +129,10 @@ export function AuthPage({ mode }: { mode: "signup" | "login" }) {
   );
 }
 
-/** Steps 2-4 of onboarding: name a project, pick a mode, connect something. */
+/** Three steps on first signup: name a project, pick a mode, connect an agent. */
 export function OnboardingPage() {
-  const { refreshAccount, selectProject, setSource, authState } = useStore();
-  const [step, setStep] = useState<1 | 2>(1);
+  const { refreshAccount, selectProject, project, setSource, authState } = useStore();
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [name, setName] = useState("personal-coding");
   const [mode, setMode] = useState<"observe" | "govern" | "enforce">("observe");
   const [busy, setBusy] = useState(false);
@@ -143,7 +145,7 @@ export function OnboardingPage() {
       const created = await Api.createProject({ name, mode });
       await refreshAccount();
       selectProject(created.project.id);
-      location.hash = "#/integrations";
+      setStep(3);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -153,11 +155,12 @@ export function OnboardingPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md">
+      <div className={step === 3 ? "w-full max-w-lg" : "w-full max-w-md"}>
         <div className="mb-8 flex items-center gap-2.5">
           <img src="/brand/mark.svg" alt="" width={28} height={28} />
           <span className="dot text-sm font-semibold tracking-[0.2em]">AGENT-PLANE</span>
         </div>
+        <p className="eyebrow mb-1">Step {step} of 3</p>
 
         {step === 1 ? (
           <>
@@ -174,7 +177,7 @@ export function OnboardingPage() {
               Continue
             </Button>
           </>
-        ) : (
+        ) : step === 2 ? (
           <>
             <h1 className="text-xl font-medium tracking-tight">How should agent-plane start?</h1>
             <div className="mt-5 space-y-2">
@@ -202,14 +205,66 @@ export function OnboardingPage() {
               </Button>
             </div>
           </>
+        ) : (
+          <IntegrationStep projectId={project?.id ?? null} onDone={() => { location.hash = "#/"; }} />
         )}
 
-        {authState?.demo_available ? (
+        {step !== 3 && authState?.demo_available ? (
           <button className="mt-6 text-xs text-ink-2 underline" onClick={() => setSource("demo")}>
             Or look at the demo project first
           </button>
         ) : null}
       </div>
     </div>
+  );
+}
+
+/** Onboarding's step 3: pick an integration kind, get the connect command,
+ * see it arrive. The same catalog and wizard the Integrations page uses -
+ * this just frames it as "finish setting up" instead of a page you find later. */
+function IntegrationStep({ projectId, onDone }: { projectId: string | null; onDone: () => void }) {
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [connect, setConnect] = useState<CatalogEntry | null>(null);
+
+  const load = async () => {
+    if (!projectId) return;
+    const data = await Api.integrations(projectId);
+    setCatalog(data.catalog);
+    setIntegrations(data.integrations);
+  };
+  useEffect(() => { void load(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const connectedKinds = new Set(integrations.filter((i) => i.status === "connected").map((i) => i.kind));
+  const anyConnected = connectedKinds.size > 0;
+
+  return (
+    <>
+      <h1 className="text-xl font-medium tracking-tight">Connect your first agent</h1>
+      <p className="mt-2 text-sm text-ink-2">
+        Pick what you're running. Each one says plainly what it can observe and whether it can block.
+      </p>
+      <div className="mt-5 max-h-[360px] space-y-2 overflow-y-auto pr-0.5">
+        {catalog.map((entry) => (
+          <button key={entry.kind} type="button" onClick={() => setConnect(entry)}
+            className={`panel block w-full px-4 py-3 text-left ${connectedKinds.has(entry.kind) ? "border-ink" : ""}`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="dot text-xs font-semibold">{entry.label}</span>
+              {connectedKinds.has(entry.kind) ? <span className="text-2xs text-allow">connected</span> : null}
+            </div>
+            <p className="mt-1 text-sm text-ink-2">{entry.summary}</p>
+            <p className="mt-0.5 font-mono text-2xs text-ink-3">{capabilityText(entry.observation, entry.enforcement)}</p>
+          </button>
+        ))}
+      </div>
+      <div className="mt-5 flex items-center justify-between gap-2">
+        <button className="text-xs text-ink-2 underline" onClick={onDone}>
+          {anyConnected ? "Skip the rest, take me in" : "Skip for now"}
+        </button>
+        {anyConnected ? <Button variant="default" onClick={onDone}>Go to activity</Button> : null}
+      </div>
+      <ConnectionWizard entry={connect} projectId={projectId ?? ""} onClose={() => setConnect(null)}
+        onConnected={load} />
+    </>
   );
 }

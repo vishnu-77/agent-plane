@@ -46,6 +46,17 @@ export function HomePage() {
       <section aria-label="How agent-plane works" className="mt-16 grid border-t border-hairline md:mt-24 md:grid-cols-3">
         {[["01 / Connect", "Bring your agent", "Create a project, then follow the integration steps for your coding agent or application."], ["02 / Observe", "See what it actually does", "Inspect attempted actions and the files, tools, and services involved before choosing restrictions."], ["03 / Set rules", "Choose allow, ask, or never", "Review permissions, enable enforcement on a supported connection, and inspect why each action was allowed or stopped."]].map(([label, title, body]) => <div key={label} className="py-7 md:pr-8"><p className="eyebrow">{label}</p><h2 className="mt-3 text-base font-medium">{title}</h2><p className="mt-2 max-w-xs text-sm leading-relaxed text-ink-2">{body}</p></div>)}
       </section>
+      <section aria-label="Recently shipped" className="mt-16 border-t border-hairline pt-10 md:mt-24">
+        <p className="eyebrow">Recently shipped</p>
+        <div className="mt-6 grid gap-x-8 gap-y-7 sm:grid-cols-2">
+          {[
+            ["Causal reachability", "An action's consequence now traces what it makes reachable, not just what it touches directly — a push to main that enables a production deploy is bounded before the deploy runs."],
+            ["Task-state composition", "Edits and actions accumulate within a task, so two unremarkable steps that add up to something else are caught together, not evaluated one at a time in isolation."],
+            ["Confirmed execution", "A binding deny keyed on what a task already did only fires once that precondition is confirmed to have actually happened — never on intent alone."],
+            ["Per-session pause", "Hold one session's actions without quarantining the whole agent, or disconnecting it and losing visibility entirely."],
+          ].map(([title, body]) => <div key={title}><h2 className="text-sm font-medium">{title}</h2><p className="mt-1.5 max-w-sm text-sm leading-relaxed text-ink-2">{body}</p></div>)}
+        </div>
+      </section>
     </main>
     <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><a href="/docs" className="underline underline-offset-4">API documentation</a></div></footer>
   </div>;
