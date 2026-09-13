@@ -6,6 +6,15 @@ All notable changes to this project are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Fixed
+- **The container ignored the port its platform assigned it.** The Dockerfile
+  passed `--port 8000` explicitly, so `PORT` was overridden and the health check
+  probed a port nothing was listening on. Railway, Heroku, Cloud Run and App
+  Runner all assign a port this way, which made a deploy fail its health check
+  whatever the application did. Both the command and the health check read
+  `PORT` now, still defaulting to 8000.
+- CI ran its own Node command for the TypeScript SDK instead of the package's
+  own test script, and Node 22 resolves a bare `test/` as a CJS module, so the
+  job died with `MODULE_NOT_FOUND` before loading a test. It runs `npm test`.
 - **A protected resource was not protected when another grant reached it.** The
   check only read a lease's `protected_resources` if that same lease also
   granted the resource, so a lease protecting `workspace/.env*` while granting

@@ -60,7 +60,10 @@ jobs:
           node-version: "22"
       - name: Test the TypeScript SDK (no build step; Node strips types)
         working-directory: sdk/typescript
-        run: node --experimental-strip-types --test test/
+        # Run what the package itself defines, so this cannot drift from it
+        # again: Node 22 resolves a bare "test/" as a CJS module and dies with
+        # MODULE_NOT_FOUND before loading a single test.
+        run: npm test
 
   helm:
     runs-on: ubuntu-latest

@@ -59,7 +59,12 @@ COPY --chown=appuser:appuser config ./config
 USER appuser
 VOLUME ["/data"]
 EXPOSE 8000
+# Both read PORT, because that is how a platform tells a container where to
+# listen. Hardcoding 8000 meant the container ignored Railway's assigned
+# port and its health check could never pass, whatever the app did.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status==200 else 1)"]
+  CMD ["python", "-c", "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT','8000') + '/healthz').status==200 else 1)"]
 
-CMD ["agentplane", "serve", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# No --port: `agentplane serve` defaults to PORT, then 8000. --host defaults
+# to HOST, then 0.0.0.0, which is what a container needs either way.
+CMD ["agentplane", "serve", "--workers", "1"]
