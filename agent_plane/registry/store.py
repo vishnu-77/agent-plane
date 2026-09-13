@@ -291,11 +291,24 @@ class SqlRegistry:
             s.commit()
 
     def _get_session(self, tenant: str, sid: str) -> SessionRecord | None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(SessionRow, (tenant, sid))
+            return SessionRecord.model_validate(row.document) if row else None
         with self._session_factory() as s:
             row = s.get(SessionRow, (tenant, sid))
             return SessionRecord.model_validate(row.document) if row else None
 
     def _put_session(self, tenant: str, rec: SessionRecord) -> None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(SessionRow, (tenant, rec.id))
+            doc = rec.model_dump(mode="json")
+            if row is None:
+                session.add(SessionRow(tenant=tenant, id=rec.id, last_seen=_naive(rec.last_seen), document=doc))
+            else:
+                row.last_seen, row.document = _naive(rec.last_seen), doc
+            return
         with self._session_factory() as s:
             row = s.get(SessionRow, (tenant, rec.id))
             doc = rec.model_dump(mode="json")
