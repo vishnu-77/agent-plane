@@ -236,10 +236,16 @@ export function ConnectionWizard({ entry, projectId, onClose, onConnected }: {
   }, [waiting, entry, projectId, onConnected]);
 
   if (!entry) return null;
+  // The CLI defaults to 127.0.0.1:8000. Anywhere else, the command has to say
+  // so, or it silently talks to whatever is on that port instead of the
+  // service the person is reading this in.
+  const origin = window.location.origin;
+  const needsUrl = origin !== "http://127.0.0.1:8000" && origin !== "http://localhost:8000";
   const command = entry.connect
     .replace("{key}", secret ?? "ap_live_...")
     .replace("{upstream}", "https://your-mcp-server/mcp")
-    .replace("{base_url}", window.location.origin);
+    .replace("{base_url}", origin)
+    + (needsUrl && entry.connect.startsWith("agentplane") ? ` --url ${origin}` : "");
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>

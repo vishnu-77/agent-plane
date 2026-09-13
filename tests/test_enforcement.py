@@ -56,6 +56,36 @@ def test_protected_override_independent_of_lease_order(setup):
         assert store.use_count("broad", "branch.delete") == 0
 
 
+def test_a_protection_does_not_depend_on_its_own_lease_reaching_the_resource(setup):
+    """A carve-out is a statement about the resource, not a qualifier on a grant.
+
+    The protection used to be read only when the lease that declared it also
+    granted the resource, so a lease protecting repo/main while granting
+    elsewhere protected nothing, and any second grant that did reach repo/main
+    allowed it straight through.
+    """
+    s = setup
+    narrow = s.lease.model_copy(update={"id": "narrow", "resources": ["repo/feature-*"],
+                                        "protected_resources": ["repo/main"]})
+    wide = s.lease.model_copy(update={"id": "wide", "resources": ["repo/*"],
+                                      "protected_resources": []})
+    for leases in ([narrow, wide], [wide, narrow]):
+        store = LeaseStore(leases)
+        result = evaluate_authority(store, s.actor, task="cleanup",
+                                    action="branch.delete", resource="repo/main")
+        assert result.decision == DecisionAction.DENY
+        assert result.reason.value == "RESOURCE_PROTECTED"
+        assert store.use_count("wide", "branch.delete") == 0
+
+    # A protected resource nothing reaches is reported as out of scope, which is
+    # the more accurate answer and keeps the two reasons meaningfully different.
+    only_narrow = LeaseStore([narrow])
+    outside = evaluate_authority(only_narrow, s.actor, task="cleanup",
+                                 action="branch.delete", resource="repo/main")
+    assert outside.decision == DecisionAction.DENY
+    assert outside.reason.value == "RESOURCE_OUTSIDE_DELEGATED_SCOPE"
+
+
 def test_preview_and_atomic_one_use(setup):
     s = setup
     for _ in range(3):

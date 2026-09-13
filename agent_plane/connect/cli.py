@@ -32,14 +32,38 @@ def _say(*lines: str) -> None:
         print(line)
 
 
+def nl() -> str:
+    """A newline, named, so these messages stay readable in source."""
+    return chr(10)
+
+
 def _handshake(url: str, key: str, integration: str, host: str | None) -> dict[str, Any]:
     import httpx
 
-    response = httpx.post(f"{url.rstrip('/')}/v1/auth/exchange", timeout=10.0,
-                          headers={"Authorization": f"Bearer {key}"},
-                          json={"integration": integration, "host": host})
+    base = url.rstrip("/")
+    try:
+        response = httpx.post(f"{base}/v1/auth/exchange", timeout=10.0,
+                              headers={"Authorization": f"Bearer {key}"},
+                              json={"integration": integration, "host": host})
+    except httpx.HTTPError as exc:
+        raise SystemExit(nl().join([
+            f"Could not reach agent-plane at {base} ({exc.__class__.__name__}).",
+            "Start it with:  agentplane serve --host 127.0.0.1",
+            "or point this at a different one with --url.",
+        ])) from exc
     if response.status_code == 401:
         raise SystemExit("That API key was rejected. Copy it again from Integrations in the console.")
+    if response.status_code == 404:
+        # The endpoint is missing rather than the request being wrong. Almost
+        # always a server that predates accounts and is still running: the
+        # console is read from disk, so a stale process serves a current UI
+        # against an API that has none of these routes.
+        raise SystemExit(nl().join([
+            f"{base} answered, but has no /v1/auth/exchange.",
+            "That is usually an agent-plane started before this version and still running.",
+            "Restart it, then try again.",
+            "If something else is listening there, use --url to point at the right one.",
+        ]))
     if response.status_code >= 400:
         raise SystemExit(f"agent-plane replied {response.status_code}: {response.text[:200]}")
     return response.json()

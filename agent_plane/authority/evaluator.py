@@ -142,13 +142,27 @@ def _evaluate_authority(
                                      reason=AuthorityReason.ACTION_REFUSED_BY_RULE,
                                      lease_id=lease.id, decision_id=decision_id)
 
-    # Protection is a deny override across all active matching grants, independent
-    # of insertion order. No use may be consumed before checking this override.
+    # Protection is a deny override across every active grant for this task,
+    # independent of insertion order, and independent of whether the lease that
+    # declared it also happens to grant the resource. Requiring that made a
+    # carve-out depend on its own lease's scope: a lease protecting
+    # workspace/.env* while granting only workspace/src/* protected nothing,
+    # and a second lease granting workspace/* then allowed the read. A
+    # protection is a statement about the resource, like a NEVER rule, not a
+    # qualifier on one grant. No use may be consumed before checking it.
     for lease in active:
-        if resource_matches(lease.resources, resource) and resource_matches(lease.protected_resources, resource):
-            return AuthorityDecision(decision=DecisionAction.DENY,
-                                     reason=AuthorityReason.RESOURCE_PROTECTED,
-                                     lease_id=lease.id, decision_id=decision_id)
+        if resource_matches(lease.protected_resources, resource):
+            # The denial is the same either way; the reason describes the caller's
+            # actual situation. "Protected" means carved out of something this
+            # task can otherwise reach, which is the useful thing to hear. If no
+            # grant reaches the resource at all, saying so is more accurate than
+            # implying a carve-out was the only thing in the way.
+            reachable = any(resource_matches(other.resources, resource) for other in active)
+            return AuthorityDecision(
+                decision=DecisionAction.DENY,
+                reason=(AuthorityReason.RESOURCE_PROTECTED if reachable
+                        else AuthorityReason.RESOURCE_OUTSIDE_DELEGATED_SCOPE),
+                lease_id=lease.id, decision_id=decision_id)
 
     best_reason = AuthorityReason.RESOURCE_OUTSIDE_DELEGATED_SCOPE
     for lease in active:

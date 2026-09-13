@@ -5,6 +5,26 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- **A protected resource was not protected when another grant reached it.** The
+  check only read a lease's `protected_resources` if that same lease also
+  granted the resource, so a lease protecting `workspace/.env*` while granting
+  `workspace/src/*` protected nothing, and a second lease granting
+  `workspace/*` then allowed the read. A carve-out is a statement about the
+  resource, like a NEVER rule, not a qualifier on one grant, and it is now
+  checked across every active grant for the task. The reason still distinguishes
+  the two cases: `RESOURCE_PROTECTED` when the task can otherwise reach the
+  resource, `RESOURCE_OUTSIDE_DELEGATED_SCOPE` when nothing reaches it at all.
+- `agentplane connect` explains the two failures people actually hit. A 404 on
+  `/v1/auth/exchange` now says the server is probably an older one still
+  running, and to restart it - the console is read from disk, so a stale
+  process serves a current UI against an API that has none of these routes. An
+  unreachable host says how to start one, instead of raising the transport
+  error.
+- The console prints `--url` in the connect command whenever it is not being
+  served from the CLI's default `127.0.0.1:8000`, so the copied line reaches
+  the service the person is reading it in.
+
 ### Added
 - **Optional single sign-on for the console** (`agent_plane/accounts/oidc.py`,
   `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`): plain OpenID Connect,
