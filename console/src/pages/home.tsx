@@ -16,7 +16,10 @@ export function HomePage() {
     <header className="border-b border-hairline">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-5 sm:px-8">
         <PublicBrand />
-        <Link to="/login" className="text-sm underline underline-offset-4">Sign in</Link>
+        <nav aria-label="Account" className="flex items-center gap-4">
+          <Link to="/login" className="text-sm underline underline-offset-4">Sign in</Link>
+          <Link to="/signup" className="inline-flex min-h-10 items-center justify-center bg-ink px-4 py-2 text-sm text-paper hover:opacity-90">Sign up</Link>
+        </nav>
       </div>
     </header>
     <main className="mx-auto max-w-6xl px-5 py-14 sm:px-8 sm:py-24">
@@ -24,12 +27,12 @@ export function HomePage() {
         <section>
           <p className="eyebrow">Runtime authority for AI agents</p>
           <h1 className="mt-5 max-w-xl text-4xl font-medium leading-tight tracking-tight sm:text-5xl">Every action.<br />Explicit authority.</h1>
-          <p className="mt-6 max-w-md text-base leading-relaxed text-ink-2">See what your agents are doing. Define what each task permits. Inspect the decision before an action reaches your systems.</p>
+          <p className="mt-6 max-w-md text-base leading-relaxed text-ink-2">A control console for your AI agents. Connect your coding agent, see which files and tools it touches, and set rules for what it can do. Review risky actions before they run through an enforced connection.</p>
           <div className="mt-8 flex flex-wrap items-center gap-4">
             <Link to={signup ? "/signup" : "/login"} className="inline-flex min-h-10 items-center justify-center bg-ink px-5 py-3 text-sm text-paper hover:opacity-90">{signup ? "Create an account" : "Open your workspace"}</Link>
             {authState?.demo_available ? <Button onClick={() => setSource("demo")}>Explore the demo</Button> : null}
           </div>
-          <p className="mt-4 text-xs text-ink-2">Capability is not authority. A credential is only the outer boundary.</p>
+          <p className="mt-4 text-xs text-ink-2">Start by observing activity. Enable enforcement when your connection and rules are ready.</p>
           {!authState ? <p role="status" className="mt-6 border border-hairline p-3 text-sm">Cannot reach the account service. <button className="underline" onClick={() => window.location.reload()}>Retry connection</button></p> : null}
         </section>
         <section aria-label="Illustrative runtime decision" className="border border-hairline bg-paper-raised">
@@ -41,7 +44,7 @@ export function HomePage() {
         </section>
       </div>
       <section aria-label="How agent-plane works" className="mt-16 grid border-t border-hairline md:mt-24 md:grid-cols-3">
-        {[["01 / Observe", "Understand agent activity", "Inspect actions, resources, and recorded authority in one workspace."], ["02 / Define", "Set the task boundary", "Scope permissions to the agent, task, resources, and runtime constraints."], ["03 / Inspect", "Explain each decision", "Trace permissions and audit evidence. Keep authorization separate from execution."]].map(([label, title, body]) => <div key={label} className="py-7 md:pr-8"><p className="eyebrow">{label}</p><h2 className="mt-3 text-base font-medium">{title}</h2><p className="mt-2 max-w-xs text-sm leading-relaxed text-ink-2">{body}</p></div>)}
+        {[["01 / Connect", "Bring your agent", "Create a project, then follow the integration steps for your coding agent or application."], ["02 / Observe", "See what it actually does", "Inspect attempted actions and the files, tools, and services involved before choosing restrictions."], ["03 / Set rules", "Choose allow, ask, or never", "Review permissions, enable enforcement on a supported connection, and inspect why each action was allowed or stopped."]].map(([label, title, body]) => <div key={label} className="py-7 md:pr-8"><p className="eyebrow">{label}</p><h2 className="mt-3 text-base font-medium">{title}</h2><p className="mt-2 max-w-xs text-sm leading-relaxed text-ink-2">{body}</p></div>)}
       </section>
     </main>
     <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><a href="/docs" className="underline underline-offset-4">API documentation</a></div></footer>

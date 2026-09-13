@@ -19,6 +19,9 @@ export function RulesPage() {
   const [suggestions, setSuggestions] = useState<Array<Record<string, unknown>>>([]);
   const [editing, setEditing] = useState<Rule | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<Record<string, unknown> | null>(null);
+  const [savingSuggestion, setSavingSuggestion] = useState(false);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!project) return;
@@ -52,10 +55,16 @@ export function RulesPage() {
   };
 
   const applySuggestion = async (draft: Record<string, unknown>) => {
-    if (!project) return;
-    await Api.createRule({ ...draft, project: project.id });
-    await load();
-    await refresh();
+    if (!project || savingSuggestion || source === "demo") return;
+    setSavingSuggestion(true);
+    setSuggestionError(null);
+    try {
+      await Api.createRule({ ...draft, project: project.id });
+      setReviewing(null);
+      await load();
+      await refresh();
+    } catch (e) { setSuggestionError((e as Error).message); }
+    finally { setSavingSuggestion(false); }
   };
 
   if (!project) return <Empty title="No project yet" />;
@@ -127,14 +136,14 @@ export function RulesPage() {
 
       {suggestions.length ? (
         <section className="mt-6">
-          <h2 className="text-sm font-medium">Suggested from what your agents actually did</h2>
-          <p className="mt-0.5 text-xs text-ink-2">Reads are proposed as Allow, changes as Ask, destructive actions as Never. Review before applying.</p>
+          <h2 className="text-sm font-medium">Suggested from recorded activity</h2>
+          <p className="mt-0.5 text-xs text-ink-2">Known low-risk reads may be allowed. Changes and unknowns need review. Resources and consequence bounds come from recorded decision evidence, not execution frequency.</p>
           <div className="mt-3 space-y-3">
             {suggestions.map((draft, i) => (
               <div key={i} className="panel px-4 py-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="text-sm">{String(draft.name)}</div>
-                  <Button size="sm" disabled={readOnly} onClick={() => void applySuggestion(draft)}>Apply</Button>
+                  <Button size="sm" onClick={() => { setReviewing(draft); setSuggestionError(null); }}>Review</Button>
                 </div>
                 <div className="mt-2 grid grid-cols-1 gap-3 font-mono text-xs sm:grid-cols-3">
                   <div><span className="text-allow">allow</span> {(draft.allow as string[]).join(", ") || "—"}</div>
@@ -146,6 +155,21 @@ export function RulesPage() {
           </div>
         </section>
       ) : null}
+
+      <Dialog open={reviewing !== null} onOpenChange={(open) => { if (!open && !savingSuggestion) setReviewing(null); }}>
+        <DialogContent title="Review suggested rule" description="Nothing changes until you save. These are decision-time consequence models, not proof that an action completed.">
+          {reviewing ? <div className="space-y-4">
+            <p className="text-sm font-medium">{String(reviewing.name)}</p>
+            <p className="text-xs text-ink-2">The listed actions apply across the listed resources, within these consequence bounds. No resource wildcard is inferred from frequency. Production, sensitive, and incomplete evidence cannot widen the suggested envelope.</p>
+            <div className="max-h-[50vh] space-y-4 overflow-auto">
+              {["scope", "allow", "ask", "never", "resources", "protected_resources", "permitted_consequence"].map(field => <div key={field}><h3 className="eyebrow">{field.replaceAll("_", " ")}</h3><pre className="mt-1 whitespace-pre-wrap break-all font-mono text-xs">{JSON.stringify(reviewing[field], null, 2)}</pre></div>)}
+              <details><summary className="cursor-pointer text-sm">Evidence and exclusions</summary><pre className="mt-2 whitespace-pre-wrap break-all font-mono text-2xs">{JSON.stringify(reviewing.basis, null, 2)}</pre></details>
+            </div>
+            {suggestionError ? <p role="alert" className="text-sm text-deny">{suggestionError}</p> : null}
+            <div className="flex justify-end gap-2"><Button disabled={savingSuggestion} onClick={() => setReviewing(null)}>Cancel</Button><Button variant="default" disabled={readOnly || savingSuggestion} onClick={() => void applySuggestion(reviewing)}>{savingSuggestion ? "Saving…" : "Save reviewed rule"}</Button></div>
+          </div> : null}
+        </DialogContent>
+      </Dialog>
 
       {!rules.length && templates.length ? (
         <section className="mt-6">

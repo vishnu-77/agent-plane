@@ -652,6 +652,7 @@ async def suggested_rules(request: Request, project: str = Query(...),
     if not agents:
         return {"suggestions": []}
     existing = request.app.state.rules.list(project_id, enabled_only=True)
+    evidence = request.app.state.audit.query(tenant=project_id, limit=1000)
     suggestions = []
     for record in agents:
         # Never re-propose what a rule already decides for this agent: a
@@ -666,5 +667,7 @@ async def suggested_rules(request: Request, project: str = Query(...),
                   if not action_matches(covered, action)}
         suggestions.append(suggest_rule(
             project_id=project_id, observed=observed,
-            denied=denied, resources=list(record.resources), agent=record.id))
+            denied=denied, resources=list(record.resources), agent=record.id, evidence=evidence))
+        suggestions[-1]["basis"]["window"] = {"limit": 1000, "records": len(evidence),
+                                               "possibly_truncated": len(evidence) == 1000}
     return {"suggestions": suggestions}

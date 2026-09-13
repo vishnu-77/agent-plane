@@ -16,6 +16,7 @@ from agent_plane.authority.lease import AuthorityLease
 from agent_plane.config import Settings
 from agent_plane.consequence.envelope import ConsequenceEnvelope
 from agent_plane.storage import create_sql_engine
+from agent_plane.rules.synthesis import synthesize_envelope
 
 
 def _utcnow() -> datetime:
@@ -271,12 +272,13 @@ def compile_rules(
 
 
 def suggest_rule(*, project_id: str, observed: dict[str, int], denied: dict[str, int],
-                 resources: list[str], agent: str | None = None) -> dict[str, Any]:
+                 resources: list[str], agent: str | None = None,
+                 evidence: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Turn observed behaviour into a reviewable rule draft.
 
-    Read-shaped actions are proposed as ALLOW, writes and deletes as ASK, and
-    anything already refused stays out of the draft entirely. A human reviews
-    it before it becomes authority.
+    Known low-risk reads may be ALLOW, changes/unknowns ASK, destructive
+    verbs NEVER. Resource scope and consequence ceilings come from recorded
+    models, not frequency or wildcard generalization. A human must save it.
     """
     def bucket(action: str) -> str:
         verb = action.rsplit(".", 1)[-1].lower()
@@ -292,12 +294,28 @@ def suggest_rule(*, project_id: str, observed: dict[str, int], denied: dict[str,
     for action in sorted(denied):
         if action not in never and action not in ask and action not in allow:
             ask.append(action)
+    synthesis = synthesize_envelope(evidence or [], project=project_id, agent=agent,
+                                   actions=set(observed) | set(denied))
+    for action in list(allow):
+        if action not in synthesis["known_actions"]:
+            allow.remove(action)
+            ask.append(action)
     return {
         "name": f"{agent or 'agents'} — suggested from observed activity",
         "project_id": project_id,
         "scope": {"agents": [agent] if agent else ["*"]},
         "allow": allow, "ask": ask, "never": never,
-        "resources": sorted({r.rsplit("/", 1)[0] + "/*" if "/" in r else r for r in resources}) or ["*"],
+        "resources": synthesis["resources"],
+        "protected_resources": synthesis["protected_resources"],
+        "permitted_consequence": synthesis["envelope"],
         "source": "suggested",
-        "basis": {"observed": observed, "denied": denied},
+        "requires_review": True,
+        "basis": {"observed": observed, "denied": denied,
+                  "schema": "agent-plane.rule-synthesis.v1",
+                  "provenance": "recorded decision-time consequence models; not proof of execution",
+                  "evidence": synthesis["evidence"],
+                  "eligible_count": synthesis["eligible_count"],
+                  "unrecorded_actions": synthesis["unrecorded_actions"],
+                  "review_actions": sorted(synthesis["review_actions"]),
+                  "resource_generalization": "none; exact observed names escaped as glob literals"},
     }

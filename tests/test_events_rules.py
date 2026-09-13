@@ -323,4 +323,7 @@ def test_out_of_scope_explanation_does_not_invent_authority(connected):
 def test_suggest_rule_never_proposes_destructive_actions():
     draft = suggest_rule(project_id="p", observed={"repository.delete": 3, "logs.read": 2},
                          denied={}, resources=["github://a/b"])
-    assert draft["never"] == ["repository.delete"] and draft["allow"] == ["logs.read"]
+    assert draft["never"] == ["repository.delete"]
+    assert draft["allow"] == []  # A read-shaped verb alone is not low-risk evidence.
+    assert draft["ask"] == ["logs.read"]
+    assert draft["permitted_consequence"]["environments"] == []

@@ -177,6 +177,8 @@ class ConsequenceEnvelope(BaseModel):
             errors.append(f"{consequence.reversibility} effect exceeds permitted {self.max_reversibility}")
         if self.max_blast_radius is not None and consequence.blast_radius > self.max_blast_radius:
             errors.append(f"blast radius {consequence.blast_radius} exceeds permitted {self.max_blast_radius}")
+        if self.max_persistence and PERSISTENCE_RANK[consequence.persistence] > PERSISTENCE_RANK[self.max_persistence]:
+            errors.append(f"{consequence.persistence} persistence exceeds permitted {self.max_persistence}")
         paths = getattr(consequence, "paths", None) or []
         if self.max_depth is not None:
             over = [p for p in paths if p.depth > self.max_depth]

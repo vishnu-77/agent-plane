@@ -274,6 +274,8 @@ class ConsequenceCatalog:
         worst_customer_facing = customer_facing or any(p.customer_facing for p in downstream_profiles)
         worst_reversibility = max([reversibility, *(p.reversibility for p in downstream_profiles)],
                                   key=lambda r: REVERSIBILITY_RANK[r])
+        persistence = max([persistence, *(p.persistence for p in downstream_profiles)],
+                          key=lambda p: PERSISTENCE_RANK[p])
         worst_criticality = max([criticality, *(p.criticality for p in downstream_profiles)],
                                 key=lambda c: IMPACT_RANK[c])
         worst_protected = protected or any(p.protected for p in downstream_profiles)
