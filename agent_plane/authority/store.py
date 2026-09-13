@@ -71,6 +71,11 @@ class LeaseStore:
         with self._lock:
             yield self
 
+    @contextmanager
+    def read_only(self):
+        """No separate session to share in-process; matches SqlLeaseStore's interface."""
+        yield self
+
     def add(self, lease: AuthorityLease) -> None:
         with self._lock:
             self._leases[lease.id] = lease
@@ -244,6 +249,31 @@ class SqlLeaseStore:
 
     def _read_session(self) -> Session | None:
         return getattr(self._local, "read_session", None)
+
+    @contextmanager
+    def read_only(self):
+        """Share one session across the reads in this block - no advisory lock,
+        no serialization, just one connection instead of one per read.
+
+        For read-before-decide checks (rule compilation's staleness lookup)
+        that do not themselves need the cross-process guarantee transaction()
+        provides. Deliberately a separate, lock-free entry point rather than
+        widening transaction()'s scope to cover them: the advisory lock there
+        is a single global key serializing every decision across the whole
+        deployment, and holding it longer to save a connection on an unrelated
+        read would trade single-request latency for system-wide throughput -
+        the wrong side of that trade as this store starts to matter."""
+        if self._read_session() is not None:
+            yield self  # already inside a transaction() or an outer read_only(): ride it
+            return
+        session = self._session_factory()
+        try:
+            self._local.read_session = session
+            yield self
+        finally:
+            self._local.read_session = None
+            session.commit()
+            session.close()
 
     # -- leases ---------------------------------------------------------------- #
     @staticmethod

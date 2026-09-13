@@ -329,8 +329,9 @@ class AuthorityService:
 
         consequence: Consequence | None = catalog.evaluate(action, resource) if catalog is not None else None
         if lease_ids is None:
-            self._apply_rules(actor, task, integration=integration,
-                              environment=consequence.environment if consequence else None)
+            with leases.read_only():
+                self._apply_rules(actor, task, integration=integration,
+                                  environment=consequence.environment if consequence else None)
         violations: list[str] = []
         approval_ref: str | None = None
         would_be: str | None = None
@@ -382,16 +383,20 @@ class AuthorityService:
                 decision = AuthorityDecision(decision=DecisionAction.SIMULATE, reason=decision.reason,
                                              lease_id=decision.lease_id, decision_id=decision.decision_id)
 
-        lease = leases.get(decision.lease_id) if decision.lease_id else None
-        if lease is None:
-            # No lease matched the resource/action: the agent may still hold
-            # authority for this task. Show it, so the trace can say "the task
-            # permits X only against staging/*" instead of "no authority".
-            held = [ls for ls in leases.for_subject_task(subject, task, actor.tenant)
-                    if lease_ids is None or ls.id in lease_ids]
-            held = [ls for ls in held if not ls.revoked] or held
-            lease = held[0] if held else None
-        chain = lineage(leases, lease.id) if lease else []
+        with leases.read_only():
+            lease = leases.get(decision.lease_id) if decision.lease_id else None
+            if lease is None:
+                # No lease matched the resource/action: the agent may still hold
+                # authority for this task. Show it, so the trace can say "the task
+                # permits X only against staging/*" instead of "no authority".
+                # This is the common case for an unruled project - every action
+                # lands here - so it is worth not paying for a fresh connection
+                # on top of the one evaluate_authority already opened moments ago.
+                held = [ls for ls in leases.for_subject_task(subject, task, actor.tenant)
+                        if lease_ids is None or ls.id in lease_ids]
+                held = [ls for ls in held if not ls.revoked] or held
+                lease = held[0] if held else None
+            chain = lineage(leases, lease.id) if lease else []
         task_record = registry.task(actor.tenant, task) if registry is not None else None
         explanation = explain(decision.decision, decision.reason.value, task=task, action=action, resource=resource,
                               lease=lease, consequence=consequence, chain=chain, violations=violations,
