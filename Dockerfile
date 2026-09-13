@@ -26,11 +26,12 @@ RUN apt-get update \
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE MANIFEST.in ./
 COPY agent_plane ./agent_plane
-RUN --mount=type=cache,id=pip,target=/root/.cache/pip \
-    pip install build \
+# No BuildKit cache mount here on purpose: Railway's builder requires its
+# own cache-key prefix inside the mount id, which no other builder
+# understands, and the mount only ever saved download time.
+RUN pip install build \
  && python -m build --wheel --outdir /dist
-RUN --mount=type=cache,id=pip,target=/root/.cache/pip \
-    python -m venv /opt/venv \
+RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-compile "$(ls /dist/*.whl)[${EXTRAS}]" \
  && /opt/venv/bin/pip uninstall -y pip setuptools wheel \
  && find /opt/venv -depth \( -name '__pycache__' -o -name '*.pyc' -o -name '*.pyo' \
