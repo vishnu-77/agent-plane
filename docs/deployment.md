@@ -8,6 +8,42 @@ decision guide.
 A single developer does not need any of this: `agentplane serve` on a laptop
 stores everything in `audit.db` and needs no configuration.
 
+## Deploy it somewhere (three variables)
+
+Any host that runs a container and gives you a Postgres works the same way.
+Point it at this repository's `Dockerfile` and set:
+
+| | |
+| --- | --- |
+| `SECRET_KEY` | one high-entropy value; the internal secrets derive from it |
+| `DATABASE_URL` | the Postgres connection string, as the provider hands it out |
+| `ENVIRONMENT` | `production`, so unsafe configuration refuses to start |
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"   # SECRET_KEY
+```
+
+That is the whole list. The port comes from `PORT`, which the platform sets.
+`SECRET_KEY` must never change: rotating it signs every session out and stops
+every issued API key verifying. If you prefer separate secrets, set
+`JWT_SECRET`, `AUDIT_SIGNING_KEY` and `API_KEY_SECRET_VALUE` yourself and they
+win over the derived ones.
+
+**Railway with a Supabase database.** Connect the repository; `railway.json`
+selects the Dockerfile. Take the connection string from Supabase under Project
+Settings, Database, and paste it as `DATABASE_URL`. Percent-encode the password
+if it has punctuation: `#` is `%23` and `@` is `%40`, and a raw `#` silently
+truncates the URL. Add `SECURE_COOKIES=true` because Railway terminates TLS in
+front of you, and `TRUST_FORWARDED_FOR=true` so client addresses are read from
+the header rather than the proxy.
+
+**Serverless hosts cannot run this.** On Vercel, Lambda or Cloud Run without a
+database, the filesystem does not outlive the request that wrote to it, so
+accounts and keys disappear at the next cold start. With `ENVIRONMENT=production`
+the service now refuses to start in that configuration rather than losing data
+quietly.
+
+
 ## Topologies
 
 | Topology | State | Replicas | Command |

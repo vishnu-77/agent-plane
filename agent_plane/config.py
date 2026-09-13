@@ -5,11 +5,14 @@ Backends are selectable so the same code runs against zero-setup local stores
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +20,19 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", env_ignore_empty=True, extra="ignore"
     )
+
+    # --- The short path ---
+    # A deployment needs three things, and these are two of them.
+    #
+    # SECRET_KEY is one high-entropy value the three internal secrets are
+    # derived from, so nobody has to generate and keep three in step. Setting
+    # any of them explicitly still wins. It must not change: rotating it signs
+    # every session out and stops every issued API key verifying.
+    secret_key: str = ""
+    # DATABASE_URL is what every platform calls it, and Railway's Postgres
+    # injects it by that name. Setting it selects Postgres; no STORAGE_BACKEND
+    # needed. Accepts postgres:// and postgresql:// as handed out.
+    database_url: str = ""
 
     # --- Runtime ---
     # "production" turns on fail-closed startup checks (no default secrets, etc.).
@@ -277,10 +293,37 @@ class Settings(BaseSettings):
         return not (self.oidc_only and self.oidc_enabled)
 
     @property
+    def uses_postgres(self) -> bool:
+        return bool(self.database_url) or self.storage_backend == "postgres"
+
+    @property
     def audit_db_url(self) -> str:
+        if self.database_url:
+            return self.database_url          # normalised when the engine is made
         if self.storage_backend == "postgres":
             return self.postgres_url
         return f"sqlite:///{self.sqlite_path}"
+
+    @model_validator(mode="after")
+    def _derive_secrets(self) -> Settings:
+        """Fill the three internal secrets from SECRET_KEY when it is set.
+
+        Separate keys for separate jobs, without asking a person to generate
+        and keep three of them in step. An explicitly set value always wins, so
+        an existing deployment is untouched.
+        """
+        if not self.secret_key:
+            return self
+        for field, label in (("jwt_secret", "jwt"), ("audit_signing_key", "audit")):
+            if getattr(self, field) == self._DEFAULT_SECRETS[field]:
+                setattr(self, field, self._derive(label))
+        if not self.api_key_secret_value:
+            self.api_key_secret_value = self._derive("api-keys")
+        return self
+
+    def _derive(self, label: str) -> str:
+        return hmac.new(self.secret_key.encode("utf-8"),
+                        f"agent-plane/{label}".encode(), hashlib.sha256).hexdigest()
 
     # Platforms whose filesystem does not survive the request that wrote to it.
     # Storing accounts, keys and audit records on one means losing them at the
@@ -292,7 +335,7 @@ class Settings(BaseSettings):
     def uses_redis(self) -> bool:
         if self.cache_backend != "auto":
             return self.cache_backend == "redis"
-        return self.storage_backend == "postgres" and self.redis_url_configured
+        return self.uses_postgres and self.redis_url_configured
 
     @property
     def redis_url_configured(self) -> bool:
@@ -307,7 +350,7 @@ class Settings(BaseSettings):
     @property
     def storage_is_ephemeral(self) -> bool:
         """True when state is being written somewhere that will not survive."""
-        return self.storage_backend == "local" and self.serverless_platform is not None
+        return not self.uses_postgres and self.serverless_platform is not None
 
     @property
     def cors_origin_list(self) -> list[str]:

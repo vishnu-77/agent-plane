@@ -104,3 +104,55 @@ def test_a_long_lived_host_is_not_treated_as_serverless(monkeypatch):
         monkeypatch.delenv(marker, raising=False)
     assert settings().storage_is_ephemeral is False
     assert settings().serverless_platform is None
+
+
+# --------------------------------------------------------------------------- #
+# the short path: one secret, one database url
+# --------------------------------------------------------------------------- #
+MASTER = "one-master-secret-0123456789abcdef"
+
+
+def test_database_url_selects_postgres_without_a_second_variable():
+    """Every platform calls it DATABASE_URL, and Railway's Postgres injects it."""
+    s = Settings(secret_key=MASTER, database_url="postgres://u:p@host:5432/db")
+    assert s.uses_postgres is True
+    assert s.audit_db_url == "postgres://u:p@host:5432/db"
+    assert normalise_db_url(s.audit_db_url).startswith("postgresql+psycopg://")
+
+    # The older pair still works, untouched.
+    old = Settings(jwt_secret="x" * 40, storage_backend="postgres",
+                   postgres_url="postgresql+psycopg://u:p@h:5432/db")
+    assert old.uses_postgres is True and old.audit_db_url.endswith("/db")
+
+
+def test_one_secret_becomes_three_distinct_and_stable_ones():
+    a = Settings(secret_key=MASTER)
+    b = Settings(secret_key=MASTER)
+    assert len({a.jwt_secret, a.audit_signing_key, a.api_key_secret}) == 3
+    # Stable across processes, or every restart signs everyone out.
+    assert (a.jwt_secret, a.audit_signing_key, a.api_key_secret) ==            (b.jwt_secret, b.audit_signing_key, b.api_key_secret)
+    # And not the insecure defaults it replaced.
+    assert a.jwt_secret != "dev-secret-change-me"
+    assert a.audit_signing_key != "dev-audit-key-change-me"
+
+
+def test_a_different_master_gives_different_secrets():
+    assert Settings(secret_key=MASTER).jwt_secret != Settings(secret_key=MASTER + "!").jwt_secret
+
+
+def test_an_explicit_secret_still_wins():
+    s = Settings(secret_key=MASTER, jwt_secret="chosen-by-hand-0123456789")
+    assert s.jwt_secret == "chosen-by-hand-0123456789"
+    assert s.audit_signing_key != "dev-audit-key-change-me"   # still derived
+
+
+def test_the_short_path_passes_the_production_checks():
+    s = Settings(secret_key=MASTER, database_url="postgres://u:p@host:5432/db",
+                 environment="production")
+    assert s.production_errors() == []
+
+
+def test_database_url_also_satisfies_the_serverless_guard(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    assert Settings(secret_key=MASTER, database_url="postgres://u:p@h:5432/db",
+                    environment="production").production_errors() == []
