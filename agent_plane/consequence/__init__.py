@@ -14,12 +14,14 @@ from agent_plane.consequence.catalog import (
     ResourceProfile,
     build_consequence_catalog,
 )
+from agent_plane.consequence.envelope import ConsequenceEnvelope
 
 __all__ = [
     "IMPACT_RANK",
     "ActionProfile",
     "Consequence",
     "ConsequenceCatalog",
+    "ConsequenceEnvelope",
     "ResourceProfile",
     "build_consequence_catalog",
 ]

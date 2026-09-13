@@ -14,6 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 from agent_plane.accounts.security import new_id
 from agent_plane.authority.lease import AuthorityLease
 from agent_plane.config import Settings
+from agent_plane.consequence.envelope import ConsequenceEnvelope
 from agent_plane.storage import create_sql_engine
 
 
@@ -237,7 +238,11 @@ def compile_rules(
     resources: list[str] = []
     protected: list[str] = []
     max_uses: dict[str, int] = {}
-    consequence: dict[str, Any] = {}
+    # The narrowest bound across applicable rules wins, on every dimension -
+    # including max_impact/max_reversibility, which used to be plain strings
+    # that a per-key list/bool/int merge silently skipped (first rule with
+    # the key won; later rules' values were never even looked at).
+    consequence = ConsequenceEnvelope()
     for rule in applicable:
         for src, dst in ((rule.allow, allow), (rule.ask, ask), (rule.never, never),
                          (rule.resources, resources), (rule.protected_resources, protected)):
@@ -246,16 +251,7 @@ def compile_rules(
                     dst.append(item)
         for action, limit in rule.max_uses.items():
             max_uses[action] = min(limit, max_uses.get(action, limit))
-        for key, value in rule.permitted_consequence.items():
-            # The narrowest bound across applicable rules wins.
-            if key not in consequence:
-                consequence[key] = value
-            elif isinstance(value, list) and isinstance(consequence[key], list):
-                consequence[key] = [v for v in consequence[key] if v in value]
-            elif isinstance(value, bool):
-                consequence[key] = consequence[key] and value
-            elif isinstance(value, int) and not isinstance(value, bool):
-                consequence[key] = min(consequence[key], value)
+        consequence = consequence.meet(ConsequenceEnvelope.model_validate(rule.permitted_consequence))
     return AuthorityLease(
         id=compiled_lease_id(project_id, agent, task),
         task=task, subject=agent, tenant=project_id,
@@ -265,7 +261,7 @@ def compile_rules(
         protected_resources=sorted(set(protected)),
         require_approval=sorted(set(ask)),
         max_uses=max_uses,
-        permitted_consequence=consequence,
+        permitted_consequence=consequence.model_dump(exclude_none=True, exclude_defaults=True),
         expires_at=_utcnow() + timedelta(seconds=ttl_seconds),
         child_authority="subset_only",
         origin={"kind": "rules", "created_by": "project rules",

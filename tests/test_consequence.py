@@ -81,6 +81,29 @@ def test_permitted_consequence_only_attenuates():
     assert lease_attenuation_errors(parent, dropped)  # silently dropping every bound widens
 
 
+def test_compiled_rules_narrow_string_valued_consequence_bounds():
+    """Two rules bounding max_impact/max_reversibility must narrow, not
+    "first rule wins" - these are strings, which a naive list/bool/int
+    per-key merge doesn't touch at all."""
+    from datetime import UTC, datetime
+
+    from agent_plane.rules.store import AuthorityRule, compile_rules
+
+    now = datetime.now(UTC)
+    medium = AuthorityRule(id="r1", project_id="p", name="medium", allow=["x.do"],
+                           permitted_consequence={"max_impact": "medium", "max_reversibility": "recoverable"},
+                           created_at=now, updated_at=now)
+    high = AuthorityRule(id="r2", project_id="p", name="high", allow=["x.do"],
+                         permitted_consequence={"max_impact": "high", "max_reversibility": "irreversible"},
+                         created_at=now, updated_at=now)
+    # Order must not matter: whichever order they're evaluated in, the
+    # compiled lease ends up with the narrower (medium/recoverable) bound.
+    for rules in ([medium, high], [high, medium]):
+        lease = compile_rules(rules, project_id="p", agent="a", task="t")
+        assert lease.permitted_consequence["max_impact"] == "medium"
+        assert lease.permitted_consequence["max_reversibility"] == "recoverable"
+
+
 # --------------------------------------------------------------------------- #
 # Through the API
 # --------------------------------------------------------------------------- #

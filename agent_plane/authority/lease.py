@@ -138,32 +138,17 @@ def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> l
     return errors
 
 
-_CONSEQUENCE_IMPACT = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
-_CONSEQUENCE_REVERSIBILITY = {"reversible": 0, "recoverable": 1, "irreversible": 2}
-
-
 def consequence_attenuation_errors(parent: dict[str, Any], child: dict[str, Any]) -> list[str]:
-    """A child's permitted consequence may only be narrower than its parent's."""
-    errors: list[str] = []
-    if "max_impact" in parent:
-        child_impact = child.get("max_impact", "critical")
-        if _CONSEQUENCE_IMPACT.get(child_impact, 4) > _CONSEQUENCE_IMPACT.get(parent["max_impact"], 4):
-            errors.append(f"permitted_consequence.max_impact {child_impact} exceeds parent {parent['max_impact']}")
-    if "environments" in parent:
-        child_envs = child.get("environments")
-        if child_envs is None or any(e not in parent["environments"] for e in child_envs):
-            errors.append("permitted_consequence.environments widens the parent's environments")
-    if parent.get("customer_facing") is False and child.get("customer_facing", True) is not False:
-        errors.append("permitted_consequence.customer_facing widens the parent's")
-    if "max_reversibility" in parent:
-        child_rev = child.get("max_reversibility", "irreversible")
-        if _CONSEQUENCE_REVERSIBILITY.get(child_rev, 2) > _CONSEQUENCE_REVERSIBILITY.get(parent["max_reversibility"], 2):
-            errors.append("permitted_consequence.max_reversibility widens the parent's")
-    if "max_blast_radius" in parent:
-        child_blast = child.get("max_blast_radius")
-        if child_blast is None or int(child_blast) > int(parent["max_blast_radius"]):
-            errors.append("permitted_consequence.max_blast_radius widens the parent's")
-    return errors
+    """A child's permitted consequence may only be narrower than its parent's.
+
+    Delegates to ``ConsequenceEnvelope.narrows`` - the same lattice used to
+    compile a project's rules into one lease (``rules.store.compile_rules``)
+    and to check a computed consequence against a lease's bound
+    (``authority.service.consequence_violations``), instead of this file's
+    own separate copy of the rank tables.
+    """
+    from agent_plane.consequence.envelope import ConsequenceEnvelope
+    return ConsequenceEnvelope.model_validate(child).narrows(ConsequenceEnvelope.model_validate(parent))
 
 
 def _parse_dt(value: Any) -> datetime | None:

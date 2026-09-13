@@ -34,8 +34,8 @@ from agent_plane.authority.evaluator import (
 )
 from agent_plane.authority.lease import AuthorityLease, action_matches, resource_matches
 from agent_plane.authority.provenance import provenance_record
-from agent_plane.consequence import IMPACT_RANK, Consequence
-from agent_plane.consequence.catalog import REVERSIBILITY_RANK
+from agent_plane.consequence import Consequence
+from agent_plane.consequence.envelope import ConsequenceEnvelope
 from agent_plane.rules import compile_rules, compiled_lease_id
 from agent_plane.schemas.canonical import Actor, DecisionAction
 
@@ -109,28 +109,14 @@ def consequence_violations(lease: AuthorityLease, consequence: Consequence) -> l
     """Why ``consequence`` exceeds what ``lease`` permits (empty = within bounds)."""
     if not consequence.mutating:
         return []
-    bounds = dict(lease.permitted_consequence)
     errors: list[str] = []
     # Ceiling from the lease's own maximum_impact: a reversible-only lease may not
-    # cause an irreversible effect, whatever the caller declared.
+    # cause an irreversible effect, whatever the caller declared. Separate from
+    # permitted_consequence (a different, older field on the lease itself), so
+    # it isn't part of ConsequenceEnvelope.
     if lease.maximum_impact == "reversible" and consequence.reversibility == "irreversible":
         errors.append("irreversible effect under a reversible-only lease")
-    max_impact = bounds.get("max_impact")
-    if max_impact and IMPACT_RANK.get(consequence.impact, 4) > IMPACT_RANK.get(max_impact, 4):
-        errors.append(f"impact {consequence.impact} exceeds permitted {max_impact}")
-    envs = bounds.get("environments")
-    if envs is not None:
-        outside = [e for e in (consequence.environments or [consequence.environment]) if e not in envs]
-        if outside:
-            errors.append(f"mutates {', '.join(outside)} but only {', '.join(envs)} is permitted")
-    if bounds.get("customer_facing") is False and consequence.customer_facing:
-        errors.append("customer-facing workload is not permitted for this task")
-    max_rev = bounds.get("max_reversibility")
-    if max_rev and REVERSIBILITY_RANK.get(consequence.reversibility, 2) > REVERSIBILITY_RANK.get(max_rev, 2):
-        errors.append(f"{consequence.reversibility} effect exceeds permitted {max_rev}")
-    max_blast = bounds.get("max_blast_radius")
-    if max_blast is not None and consequence.blast_radius > int(max_blast):
-        errors.append(f"blast radius {consequence.blast_radius} exceeds permitted {max_blast}")
+    errors.extend(ConsequenceEnvelope.model_validate(lease.permitted_consequence).violated_by(consequence))
     return errors
 
 
