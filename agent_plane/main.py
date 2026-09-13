@@ -267,12 +267,12 @@ def create_app() -> FastAPI:
     @app.get("/console", include_in_schema=False)
     async def console() -> HTMLResponse:
         # The built Vite console (agent_plane/console/dist). It is committed and
-        # shipped in the wheel; `npm --prefix console run build` regenerates it.
+        # shipped in the wheel; `pnpm --dir console run build` regenerates it.
         if dist_index.is_file():
             return HTMLResponse(dist_index.read_text(encoding="utf-8"))
         return HTMLResponse(
             "<!doctype html><title>agent-plane</title><p>The console is not built. "
-            "Run <code>npm --prefix console install &amp;&amp; npm --prefix console run build</code> "
+            "Run <code>pnpm --dir console install &amp;&amp; pnpm --dir console run build</code> "
             "or install a release wheel.</p>", status_code=503)
 
     @app.get("/console/{path:path}", include_in_schema=False)

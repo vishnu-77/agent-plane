@@ -38,18 +38,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: console/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: console/package-lock.json
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
       - name: Build the console (type-check + Vite)
         working-directory: console
         run: |
-          npm ci --no-audit --no-fund
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm run build
       - name: Committed bundle is current
-        run: git diff --stat --exit-code -- agent_plane/console/dist || (echo "agent_plane/console/dist is stale; run 'npm --prefix console run build' and commit" && exit 1)
+        run: git diff --stat --exit-code -- agent_plane/console/dist || (echo "agent_plane/console/dist is stale; run 'pnpm --dir console run build' and commit" && exit 1)
 
   sdk-typescript:
     runs-on: ubuntu-latest

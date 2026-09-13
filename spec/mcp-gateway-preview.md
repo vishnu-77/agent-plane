@@ -146,5 +146,5 @@ authority ordering, non-consuming preview, concurrent caps, protected/expired/
 revoked/out-of-scope authority, binding and argument checks, policy denial, audit
 failure, deduplication, cancellation, protocol metadata, origin and body limits.
 
-The console is a Vite application under `console/`; `npm --prefix console run build`
+The console is a Vite application under `console/`; `pnpm --dir console run build`
 regenerates `agent_plane/console/dist`, which is committed and shipped in the wheel.

@@ -212,7 +212,7 @@ def test_kv_aligns_labels_regardless_of_length():
     pairs = [("credential", "/path"), ("console", "https://x/console"), ("mode", "OBSERVE")]
     rows = _kv(*pairs)
     # Every value starts in the same column, however long its label is.
-    assert len({row.index(value) for row, (_, value) in zip(rows, pairs)}) == 1
+    assert len({row.index(value) for row, (_, value) in zip(rows, pairs, strict=True)}) == 1
 
 
 # --------------------------------------------------------------------------- #
