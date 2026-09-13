@@ -47,6 +47,26 @@ def test_psycopg2_urls_never_get_a_psycopg3_argument():
     assert connect_args_for("postgresql+psycopg2://u:p@host:6543/db") == {}
 
 
+def test_a_missing_postgres_driver_says_what_to_install(monkeypatch):
+    """"Can't load plugin: sqlalchemy.dialects:postgresql.psycopg" tells nobody
+    what to do, and a base install has no driver, so asking for Postgres on a
+    host that installs only the core dependencies produced exactly that."""
+    import builtins
+
+    from agent_plane.storage import create_sql_engine
+
+    real = builtins.__import__
+
+    def blocked(name, *args, **kwargs):
+        if name.startswith("psycopg"):
+            raise ModuleNotFoundError("No module named 'psycopg'")
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked)
+    with pytest.raises(RuntimeError, match=r"agent-plane\[postgres\]"):
+        create_sql_engine("postgresql://u:p@localhost:5432/db")
+
+
 # --------------------------------------------------------------------------- #
 # choosing a cache, and refusing to lose state
 # --------------------------------------------------------------------------- #

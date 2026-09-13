@@ -24,6 +24,7 @@ from typing import Any
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import NoSuchModuleError
 
 # Enough to recognise a transaction-mode pooler. 6543 is Supavisor's transaction
 # port; pgbouncer=true is the flag Prisma and friends put on the URL.
@@ -51,4 +52,16 @@ def connect_args_for(db_url: str) -> dict[str, Any]:
 def create_sql_engine(db_url: str, **kwargs: Any) -> Engine:
     """The engine every store should use."""
     url = normalise_db_url(db_url)
-    return create_engine(url, connect_args=connect_args_for(url), future=True, **kwargs)
+    try:
+        return create_engine(url, connect_args=connect_args_for(url), future=True, **kwargs)
+    except NoSuchModuleError as exc:
+        # "Can't load plugin: sqlalchemy.dialects:postgresql.psycopg" tells
+        # nobody what to do. The driver is an optional extra, so a base install
+        # asked for Postgres and got a plugin error instead of an instruction.
+        if "psycopg" in str(exc):
+            raise RuntimeError(
+                "STORAGE_BACKEND=postgres needs the Postgres driver, which is an "
+                "optional extra: install agent-plane[postgres] (the container image "
+                "already includes it)."
+            ) from exc
+        raise
