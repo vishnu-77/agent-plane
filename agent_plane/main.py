@@ -20,6 +20,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from sqlalchemy.exc import OperationalError
 
 from agent_plane.accounts import build_account_store
 from agent_plane.approvals.notify import ApprovalNotifier
@@ -52,6 +53,7 @@ from agent_plane.routing.knowledge import build_knowledge_store
 from agent_plane.routing.registry import ModelRegistry
 from agent_plane.routing.tools import build_tool_registry
 from agent_plane.rules import build_rule_store
+from agent_plane.storage import explain_connection_error
 from agent_plane.usage.store import build_usage_store
 
 logger = logging.getLogger("agent_plane")
@@ -120,16 +122,23 @@ async def lifespan(app: FastAPI):
     app.state.engine = engine
     app.state.tools = build_tool_registry(settings)
     app.state.knowledge = build_knowledge_store(settings)
-    app.state.leases = build_lease_store(settings)
-    app.state.lease_templates = build_template_catalog(settings)
-    app.state.approvals = build_approval_store(settings)
+    # Every store opens the same database, so a connection problem is reported
+    # once, in words, rather than as the same wall of SQLAlchemy frames on every
+    # restart - which on a platform with a log rate limit buries the one line
+    # that says what to change.
+    try:
+        app.state.leases = build_lease_store(settings)
+        app.state.lease_templates = build_template_catalog(settings)
+        app.state.approvals = build_approval_store(settings)
+        app.state.catalog = build_consequence_catalog(settings)
+        app.state.agent_registry = build_registry(settings)
+        app.state.accounts = build_account_store(settings)
+        app.state.rules = build_rule_store(settings)
+    except OperationalError as exc:
+        raise RuntimeError(explain_connection_error(exc, settings.audit_db_url)) from None
     app.state.approval_notifier = ApprovalNotifier(
         settings.approval_webhook_url, settings.audit_signing_key
     )
-    app.state.catalog = build_consequence_catalog(settings)
-    app.state.agent_registry = build_registry(settings)
-    app.state.accounts = build_account_store(settings)
-    app.state.rules = build_rule_store(settings)
     app.state.rule_templates = load_rule_templates(settings)
     app.state.cache = build_cache_store(settings)
     app.state.audit = build_audit_store(settings)

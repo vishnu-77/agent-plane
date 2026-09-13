@@ -156,3 +156,37 @@ def test_database_url_also_satisfies_the_serverless_guard(monkeypatch):
     monkeypatch.setenv("VERCEL", "1")
     assert Settings(secret_key=MASTER, database_url="postgres://u:p@h:5432/db",
                     environment="production").production_errors() == []
+
+
+# --------------------------------------------------------------------------- #
+# connection failures, in words
+# --------------------------------------------------------------------------- #
+SUPABASE_IPV6 = ('connection is bad: connection to server at '
+                 '"2a05:d018:cb1:bb00:2a4a:dbc2:a243:5cc9", port 5432 failed: '
+                 'Network is unreachable')
+
+
+def test_an_ipv6_only_database_names_the_pooler():
+    """Supabase's direct connection is IPv6-only and most hosts have no IPv6
+    route, so this arrives as a thousand lines of traceback saying nothing."""
+    from agent_plane.storage import explain_connection_error
+
+    out = explain_connection_error(Exception(SUPABASE_IPV6), SUPABASE_DIRECT)
+    assert "IPv6" in out and "pooler" in out
+    assert "db.abcdefgh.supabase.co:5432" in out
+
+
+def test_a_rejected_password_mentions_encoding():
+    from agent_plane.storage import explain_connection_error
+
+    out = explain_connection_error(
+        Exception('FATAL: password authentication failed for user "postgres"'), SUPABASE_DIRECT)
+    assert "%23" in out and "%40" in out
+
+
+def test_an_unreachable_host_says_so_without_a_traceback():
+    from agent_plane.storage import explain_connection_error
+
+    out = explain_connection_error(Exception("Connection refused"), RAILWAY)
+    assert "Cannot reach the database" in out
+    assert len(out.splitlines()) == 1

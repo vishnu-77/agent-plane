@@ -65,3 +65,39 @@ def create_sql_engine(db_url: str, **kwargs: Any) -> Engine:
                 "already includes it)."
             ) from exc
         raise
+
+
+def explain_connection_error(exc: Exception, db_url: str) -> str:
+    """One line a person can act on, instead of a thousand of traceback.
+
+    The common failures here are environmental and each has a specific
+    remedy, but they arrive as the same wall of SQLAlchemy frames repeated on
+    every restart, which on a platform with a log rate limit buries the one
+    line that matters.
+    """
+    message = str(exc)
+    host = db_url.split("@")[-1].split("/")[0] if "@" in db_url else db_url
+
+    if "Network is unreachable" in message and _looks_ipv6(message):
+        return (
+            f"Cannot reach the database at {host}: the address it resolves to is IPv6 "
+            "and this host has no IPv6 route. Supabase's direct connection is IPv6-only; "
+            "use the connection pooler instead (Project Settings, Database, Connection "
+            "pooling), which is reachable over IPv4."
+        )
+    if "Network is unreachable" in message or "Connection refused" in message:
+        return f"Cannot reach the database at {host}. Check DATABASE_URL and that the database accepts connections from here."
+    if "password authentication failed" in message:
+        return (
+            f"The database at {host} rejected the credentials. If the password contains "
+            "punctuation it must be percent-encoded in the URL: # is %23, @ is %40."
+        )
+    if "does not exist" in message and "database" in message:
+        return f"The database named in DATABASE_URL does not exist on {host}."
+    return f"Cannot open the database at {host}: {message.splitlines()[0]}"
+
+
+def _looks_ipv6(message: str) -> bool:
+    """An IPv6 address in the "at "..."" part of a psycopg error."""
+    between = message.split('at "', 1)[-1].split('"', 1)[0] if 'at "' in message else ""
+    return between.count(":") >= 2
