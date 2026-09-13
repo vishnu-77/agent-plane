@@ -132,7 +132,7 @@ export function AuthPage({ mode }: { mode: "signup" | "login" }) {
 /** Three steps on first signup: name a project, pick a mode, connect an agent. */
 export function OnboardingPage() {
   const { refreshAccount, selectProject, project, setSource, authState } = useStore();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
   const [name, setName] = useState("personal-coding");
   const [mode, setMode] = useState<"observe" | "govern" | "enforce">("observe");
   const [busy, setBusy] = useState(false);
@@ -155,14 +155,45 @@ export function OnboardingPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className={step === 3 ? "w-full max-w-lg" : "w-full max-w-md"}>
+      <div className={step === 3 || step === 0 ? "w-full max-w-lg" : "w-full max-w-md"}>
         <div className="mb-8 flex items-center gap-2.5">
           <img src="/brand/mark.svg" alt="" width={28} height={28} />
           <span className="dot text-sm font-semibold tracking-[0.2em]">AGENT-PLANE</span>
         </div>
-        <p className="eyebrow mb-1">Step {step} of 3</p>
+        <p className="eyebrow mb-1">{step === 0 ? "What agent-plane does" : `Step ${step} of 3`}</p>
 
-        {step === 1 ? (
+        {step === 0 ? (
+          <>
+            <h1 className="text-xl font-medium tracking-tight">Capability isn't authority.</h1>
+            <p className="mt-2 text-sm text-ink-2">
+              Your agent's credentials say what it can technically do - delete a repo, restart a service, call any
+              of forty tools. An AuthorityLease says what it's authorised to do, right now, for this task.
+              agent-plane only lets an action through when both agree.
+            </p>
+            {/* Same illustrative example as the homepage (home.tsx) - keep the two in sync. */}
+            <section aria-label="Illustrative runtime decision" className="mt-5 border border-hairline bg-paper">
+              <div className="flex flex-wrap justify-between gap-2 border-b border-hairline px-4 py-3">
+                <span className="eyebrow">One action. One decision.</span>
+                <span className="text-2xs text-ink-2">ILLUSTRATIVE EXAMPLE</span>
+              </div>
+              <dl className="divide-y divide-hairline px-4">
+                {[["Agent", "repo-agent"], ["Task", "Clean up stale branches"], ["AuthorityLease", "Branch cleanup · main protected"], ["Proposed action", "branch.delete → main"]].map(([label, value], i) => (
+                  <div key={label} className="grid grid-cols-[100px_minmax(0,1fr)] gap-3 py-3">
+                    <dt className="text-xs text-ink-2">0{i + 1} / {label}</dt>
+                    <dd className="break-words font-mono text-sm">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="border-t border-hairline bg-deny-bg px-4 py-4">
+                <p className="font-mono text-sm text-deny">DENY · RESOURCE_PROTECTED</p>
+                <p className="mt-2 text-sm">This task does not permit deleting the protected branch.</p>
+              </div>
+            </section>
+            <Button className="mt-4 w-full justify-center" variant="default" onClick={() => setStep(1)}>
+              Continue
+            </Button>
+          </>
+        ) : step === 1 ? (
           <>
             <h1 className="text-xl font-medium tracking-tight">Create a project</h1>
             <p className="mt-2 text-sm text-ink-2">
