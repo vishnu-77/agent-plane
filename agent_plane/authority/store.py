@@ -209,23 +209,41 @@ class SqlLeaseStore:
         """Serialize admission across threads (process lock) and, on Postgres,
         across processes (transaction-scoped advisory lock). SQLite serializes
         writers itself and use reservation is a single atomic statement, so a
-        multi-process SQLite deployment stays correct, just less concurrent."""
+        multi-process SQLite deployment stays correct, just less concurrent.
+
+        The session opened here (for the advisory lock, on Postgres) is also
+        made available to read calls (``get``, ``for_subject_task``,
+        ``use_count``) made while this block is open, so evaluating a decision
+        - which reads the same lease two or three times over - pays one
+        network round trip per read instead of one per read *plus* a fresh
+        connection each time. ``try_consume`` deliberately does not use it: it
+        keeps its own dedicated session and commits immediately, exactly as
+        before - it is the one call that actually spends a use, the advisory
+        lock already makes it impossible for anything else to race it while
+        held, and sharing it would buy no further speed for real risk to that
+        guarantee."""
         with self._lock:
             depth = getattr(self._local, "depth", 0)
             self._local.depth = depth + 1
             lock_session: Session | None = None
             try:
-                if depth == 0 and self._is_postgres:
+                if depth == 0:
                     lock_session = self._session_factory()
-                    lock_session.execute(
-                        text("SELECT pg_advisory_xact_lock(:k)"), {"k": _LEASE_LOCK_KEY}
-                    )
+                    if self._is_postgres:
+                        lock_session.execute(
+                            text("SELECT pg_advisory_xact_lock(:k)"), {"k": _LEASE_LOCK_KEY}
+                        )
+                    self._local.read_session = lock_session
                 yield self
             finally:
                 self._local.depth = depth
                 if lock_session is not None:
-                    lock_session.commit()  # releases the advisory lock
+                    self._local.read_session = None
+                    lock_session.commit()  # releases the advisory lock (Postgres) and any reads
                     lock_session.close()
+
+    def _read_session(self) -> Session | None:
+        return getattr(self._local, "read_session", None)
 
     # -- leases ---------------------------------------------------------------- #
     @staticmethod
@@ -274,6 +292,10 @@ class SqlLeaseStore:
             return True
 
     def get(self, lease_id: str) -> AuthorityLease | None:
+        session = self._read_session()
+        if session is not None:
+            row = session.get(LeaseRow, lease_id)
+            return self._to_lease(row) if row else None
         with self._session_factory() as session:
             row = session.get(LeaseRow, lease_id)
             return self._to_lease(row) if row else None
@@ -284,16 +306,21 @@ class SqlLeaseStore:
             return [self._to_lease(r) for r in rows]
 
     def for_subject_task(self, subject: str, task: str, tenant: str = "default") -> list[AuthorityLease]:
-        with self._session_factory() as session:
-            rows = session.scalars(
-                select(LeaseRow).where(LeaseRow.subject == subject, LeaseRow.task == task,
+        stmt = (select(LeaseRow).where(LeaseRow.subject == subject, LeaseRow.task == task,
                                        LeaseRow.tenant == tenant)
-                .order_by(LeaseRow.created_at)
-            ).all()
-            return [self._to_lease(r) for r in rows]
+                .order_by(LeaseRow.created_at))
+        session = self._read_session()
+        if session is not None:
+            return [self._to_lease(r) for r in session.scalars(stmt).all()]
+        with self._session_factory() as session:
+            return [self._to_lease(r) for r in session.scalars(stmt).all()]
 
     # -- use counters ------------------------------------------------------------ #
     def use_count(self, lease_id: str, action: str) -> int:
+        session = self._read_session()
+        if session is not None:
+            row = session.get(LeaseUseRow, (lease_id, action))
+            return int(row.count) if row else 0
         with self._session_factory() as session:
             row = session.get(LeaseUseRow, (lease_id, action))
             return int(row.count) if row else 0
