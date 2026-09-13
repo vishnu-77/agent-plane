@@ -95,6 +95,8 @@ def main(argv: list[str] | None = None) -> None:
     rules = sub.add_parser("rules", add_help=False,
                            help="permissions as a file: check, pull, push")
     rules.add_argument("args", nargs=argparse.REMAINDER)
+    benchmark = sub.add_parser("benchmark", add_help=False, help="evaluate consequence-composition baselines")
+    benchmark.add_argument("args", nargs=argparse.REMAINDER)
 
     args = parser.parse_args(argv)
 
@@ -148,6 +150,10 @@ def main(argv: list[str] | None = None) -> None:
         from agent_plane.rules import cli as rules_cli
 
         raise SystemExit(rules_cli.main(args.args))
+    elif args.cmd == "benchmark":
+        from agent_plane.benchmarks.__main__ import main as benchmark_main
+
+        raise SystemExit(benchmark_main(args.args))
 
 
 if __name__ == "__main__":
