@@ -205,12 +205,25 @@ def _verify(settings: Settings, document: dict[str, Any], token: str,
     return claims
 
 
+def _is_false(value: Any) -> bool:
+    """Is this claim explicitly false?
+
+    Some providers send booleans as strings - older Auth0 rules and several
+    SAML-to-OIDC bridges do - and ``"false" is False`` is False, so a plain
+    identity check would wave an unverified address straight through.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() in ("false", "0", "no")
+    return value is False or value == 0
+
+
 def _identity(settings: Settings, claims: dict[str, Any]) -> Identity:
     email = str(claims.get("email") or "").strip().lower()
     if not email:
         raise OidcError("Your identity provider did not share an email address")
-    # An unverified address is an address someone else may own.
-    if claims.get("email_verified") is False:
+    # An unverified address is an address someone else may own. Absent means the
+    # provider does not assert it either way; explicitly false is a refusal.
+    if _is_false(claims.get("email_verified")):
         raise OidcError("Your email address is not verified with your identity provider")
     domains = settings.oidc_domains
     if domains and email.rsplit("@", 1)[-1] not in domains:

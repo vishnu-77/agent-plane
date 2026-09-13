@@ -170,6 +170,29 @@ Register `https://<your-host>/v1/auth/oidc/callback` with the provider. There
 is no provider-specific configuration beyond that: the issuer's discovery
 document supplies the endpoints.
 
+The only thing that differs per provider is the issuer URL and what that
+provider calls the application type. agent-plane is a confidential web
+application in every one of them, because it holds a client secret:
+
+| Provider | `OIDC_ISSUER` | Register the callback under |
+| --- | --- | --- |
+| Auth0 | `https://TENANT.REGION.auth0.com/` | Regular Web Application → Allowed Callback URLs |
+| Okta | `https://ORG.okta.com/oauth2/default` | Web application → Sign-in redirect URIs |
+| Google | `https://accounts.google.com` | OAuth client, Web application → Authorised redirect URIs |
+| Entra ID | `https://login.microsoftonline.com/TENANT_ID/v2.0` | App registration, Web platform → Redirect URI |
+| Keycloak | `https://HOST/realms/REALM` | Client, OpenID Connect, client authentication on → Valid redirect URIs |
+
+Check the issuer is right before wiring anything up. The discovery document
+is public, so this needs no credentials:
+
+```bash
+curl -s "$OIDC_ISSUER/.well-known/openid-configuration" | head -c 200
+```
+
+If that returns JSON with an `authorization_endpoint`, the issuer is correct.
+A trailing slash does not matter to agent-plane; the `iss` claim is verified
+against whatever the discovery document itself declares.
+
 **SSO is the portal door, not the plane's.** It issues exactly the session
 cookie a password login issues. Agents keep authenticating with a Project API
 Key, which means a provider outage cannot stop an agent being governed, and a

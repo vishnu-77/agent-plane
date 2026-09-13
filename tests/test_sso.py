@@ -210,6 +210,30 @@ def test_an_unverified_email_is_refused(client, idp):
     assert client.get("/v1/auth/me").status_code == 401
 
 
+@pytest.mark.parametrize("claimed", [False, "false", "False", "0", 0, "no"])
+def test_email_verified_is_refused_however_the_provider_spells_it(client, idp, claimed):
+    """Some providers send booleans as strings, and "false" is not False."""
+    idp.claims = {"email_verified": claimed}
+    state, handshake = start(client, idp)
+    assert "not verified" in error_of(callback(client, state, handshake)), claimed
+
+
+@pytest.mark.parametrize("claimed", [True, "true", 1])
+def test_a_verified_email_is_accepted_however_it_is_spelled(client, idp, claimed):
+    idp.claims = {"email_verified": claimed}
+    state, handshake = start(client, idp)
+    assert error_of(callback(client, state, handshake)) == "", claimed
+
+
+def test_a_provider_that_does_not_assert_email_verified_is_allowed(client, idp):
+    """Not asserted is not a denial: several providers never send the claim,
+    and trusting the issuer is a decision already made in configuration."""
+    idp.claims = {"email_verified": None}
+    state, handshake = start(client, idp)
+    r = callback(client, state, handshake)
+    assert error_of(r) == ""
+
+
 def test_a_token_for_another_audience_is_refused(client, idp):
     idp.claims = {"aud": "some-other-app"}
     state, handshake = start(client, idp)
