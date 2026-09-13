@@ -179,6 +179,46 @@ def test_lease_issuance_requires_admin_token(client):
     assert r.status_code in (401, 404)
 
 
+def test_a_management_key_is_scoped_to_its_own_project(client):
+    """A management key (ap_mgmt_...) is issued for one project. It must not
+    let its holder read, revoke, or shrink another project's lease, and it
+    must never satisfy a genuinely deployment-wide check like /v1/audit -
+    only its own project's leases, and only ADMIN_TOKEN/the instance owner
+    for the rest."""
+    signup = client.post("/v1/auth/signup",
+                         json={"email": "mgmt-scope@example.com", "password": "correct-horse-battery"})
+    assert signup.status_code == 200, signup.text
+
+    proj_a = client.post("/v1/projects", json={"name": "project-a", "mode": "enforce"}).json()["project"]
+    proj_b = client.post("/v1/projects", json={"name": "project-b", "mode": "enforce"}).json()["project"]
+    key_a = client.post("/v1/api-keys",
+                        json={"project": proj_a["id"], "name": "k", "environment": "mgmt"}).json()["secret"]
+    headers_a = {"X-Admin-Token": key_a}
+
+    admin = {"X-Admin-Token": "test-admin"}
+    for pid, lease_id in ((proj_a["id"], "lease-a1"), (proj_b["id"], "lease-b1")):
+        r = client.post("/v1/leases", headers=admin,
+                        json={"id": lease_id, "task": "t", "agent": "a", "tenant": pid,
+                              "resources": ["*"], "actions": ["read"]})
+        assert r.status_code == 200, r.text
+
+    # Another project's lease: forbidden, whatever the operation.
+    assert client.get("/v1/leases/lease-b1", headers=headers_a).status_code == 403
+    assert client.patch("/v1/leases/lease-b1", headers=headers_a, json={"actions": ["read"]}).status_code == 403
+    assert client.delete("/v1/leases/lease-b1", headers=headers_a).status_code == 403
+
+    # Its own project's lease: allowed.
+    assert client.get("/v1/leases/lease-a1", headers=headers_a).status_code == 200
+    assert client.delete("/v1/leases/lease-a1", headers=headers_a).status_code == 200
+
+    # Cross-tenant registry mutation: forbidden even for a different project's agent.
+    r = client.post(f"/v1/agents/some-agent/quarantine?tenant={proj_b['id']}", headers=headers_a, json={})
+    assert r.status_code == 403
+
+    # Genuinely deployment-wide (cross-tenant, no project of its own): never a mgmt key.
+    assert client.get("/v1/audit", headers=headers_a).status_code == 403
+
+
 # --- lease delegation (v0.3: attenuated child leases) ---------------------
 
 

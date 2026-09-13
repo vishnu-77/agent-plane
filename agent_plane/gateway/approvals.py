@@ -103,11 +103,11 @@ async def get_approval(
 
 def _decide(request: Request, approval_id: str, body: dict[str, Any] | None,
             *, status: str, x_admin_token: str | None) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
     store = request.app.state.approvals
     current = store.get(approval_id)
     if current is None:
         raise HTTPException(status_code=404, detail="approval not found")
+    require_admin(request, x_admin_token, tenant=current.tenant)
     if current.status != "pending":
         raise HTTPException(status_code=409, detail={
             "error": "approval_not_pending", "status": current.status})

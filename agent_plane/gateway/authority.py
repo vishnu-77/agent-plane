@@ -101,11 +101,11 @@ async def issue_lease(
     body: dict[str, Any],
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
     try:
         lease = parse_lease(body or {})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid lease: {exc}") from exc
+    require_admin(request, x_admin_token, tenant=lease.tenant)
     if not lease.origin:
         lease = lease.model_copy(update={"origin": {"kind": "api", "created_by": "admin"}})
     request.app.state.leases.add(lease)
@@ -132,7 +132,6 @@ async def issue_lease_from_template(
     body: dict[str, Any],
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
     body = body or {}
     name, subject, task = body.get("template"), body.get("subject"), body.get("task")
     if not name or not subject or not task:
@@ -149,6 +148,7 @@ async def issue_lease_from_template(
     tenant = body.get("tenant") or "default"
     if not isinstance(tenant, str) or not tenant:
         raise HTTPException(status_code=400, detail="'tenant' must be a non-empty string")
+    require_admin(request, x_admin_token, tenant=tenant)
     try:
         lease = template.render(subject=subject, task=task, tenant=tenant,
                                 variables=variables, lease_id=lease_id)
@@ -271,10 +271,10 @@ async def get_lease(
     lease_id: str,
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
     lease = request.app.state.leases.get(lease_id)
     if lease is None:
         raise HTTPException(status_code=404, detail="lease not found")
+    require_admin(request, x_admin_token, tenant=lease.tenant)
     return lease.model_dump(mode="json")
 
 
@@ -286,9 +286,12 @@ async def revoke_lease(
 ) -> dict[str, Any]:
     """Revoke a lease outright, effective immediately. Kept in the store, not
     deleted, so `GET /v1/leases/{id}` still shows it for audit."""
-    require_admin(request, x_admin_token)
-    if not request.app.state.leases.revoke(lease_id):
+    store = request.app.state.leases
+    existing = store.get(lease_id)
+    if existing is None:
         raise HTTPException(status_code=404, detail="lease not found")
+    require_admin(request, x_admin_token, tenant=existing.tenant)
+    store.revoke(lease_id)
     _audit_admin(request, decision="deny", reason="LEASE_REVOKED", lease_id=lease_id)
     return {"revoked": True, "lease": lease_id}
 
@@ -303,12 +306,12 @@ async def shrink_lease(
     """Narrow an active lease's authority in place. Only a subset of the
     lease's current resources/actions/max_uses/maximum_impact/expiry - same
     "never grants more" rule as delegation; widening is refused."""
-    require_admin(request, x_admin_token)
     store = request.app.state.leases
     with store.transaction():
         current = store.get(lease_id)
         if current is None:
             raise HTTPException(status_code=404, detail="lease not found")
+        require_admin(request, x_admin_token, tenant=current.tenant)
 
         body = body or {}
         # model_copy(update=...) does NOT validate in pydantic v2 - a string

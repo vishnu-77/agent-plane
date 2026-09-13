@@ -113,9 +113,9 @@ async def get_agent(request: Request, agent_id: str, tenant: str | None = Query(
 async def quarantine_agent(request: Request, agent_id: str, body: dict[str, Any] | None = None,
                            tenant: str | None = Query(default=None),
                            x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
     body = body or {}
     tenant = tenant or body.get("tenant") or "default"
+    require_admin(request, x_admin_token, tenant=tenant)
     rec = request.app.state.agent_registry.set_quarantine(tenant, agent_id, on=True, by=body.get("by") or "admin",
                                                     note=body.get("note"))
     request.app.state.audit.record({
@@ -129,8 +129,9 @@ async def quarantine_agent(request: Request, agent_id: str, body: dict[str, Any]
 @registry_router.delete("/v1/agents/{agent_id}/quarantine")
 async def release_agent(request: Request, agent_id: str, tenant: str | None = Query(default=None),
                         x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
-    rec = request.app.state.agent_registry.set_quarantine(tenant or "default", agent_id, on=False)
+    tenant = tenant or "default"
+    require_admin(request, x_admin_token, tenant=tenant)
+    rec = request.app.state.agent_registry.set_quarantine(tenant, agent_id, on=False)
     if rec is None:
         raise HTTPException(status_code=404, detail="agent not found")
     return {"agent": rec.model_dump(mode="json")}
@@ -151,9 +152,9 @@ async def list_sessions(request: Request, tenant: str | None = Query(default=Non
 async def pause_session(request: Request, session_id: str, body: dict[str, Any] | None = None,
                         tenant: str | None = Query(default=None),
                         x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
     body = body or {}
     tenant = tenant or body.get("tenant") or "default"
+    require_admin(request, x_admin_token, tenant=tenant)
     rec = request.app.state.agent_registry.set_session_pause(tenant, session_id, on=True, by=body.get("by") or "admin")
     if rec is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -168,8 +169,9 @@ async def pause_session(request: Request, session_id: str, body: dict[str, Any] 
 @registry_router.delete("/v1/sessions/{session_id}/pause")
 async def resume_session(request: Request, session_id: str, tenant: str | None = Query(default=None),
                          x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
-    rec = request.app.state.agent_registry.set_session_pause(tenant or "default", session_id, on=False)
+    tenant = tenant or "default"
+    require_admin(request, x_admin_token, tenant=tenant)
+    rec = request.app.state.agent_registry.set_session_pause(tenant, session_id, on=False)
     if rec is None:
         raise HTTPException(status_code=404, detail="session not found")
     return {"session": rec.model_dump(mode="json")}
@@ -388,7 +390,7 @@ async def system_state(request: Request, tenant: str | None = Query(default=None
 @registry_router.get("/admin/mode")
 async def get_mode(request: Request, tenant: str | None = Query(default=None),
                    x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
+    require_admin(request, x_admin_token, tenant=tenant)
     settings = request.app.state.settings
     return {"tenant": tenant or "*", "mode": request.app.state.agent_registry.mode(tenant or "default", settings.enforcement_mode),
             "default": settings.enforcement_mode}
@@ -397,11 +399,11 @@ async def get_mode(request: Request, tenant: str | None = Query(default=None),
 @registry_router.put("/admin/mode")
 async def set_mode(request: Request, body: dict[str, Any],
                    x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(request, x_admin_token)
     mode = (body or {}).get("mode")
     if mode not in ("observe", "enforce"):
         raise HTTPException(status_code=400, detail="'mode' must be observe or enforce")
     tenant = (body or {}).get("tenant")
+    require_admin(request, x_admin_token, tenant=tenant)
     request.app.state.agent_registry.set_mode(tenant, mode)
     request.app.state.audit.record({
         "decision_id": f"admin_mode_{mode}", "user_id": "admin", "tenant": tenant or "*",

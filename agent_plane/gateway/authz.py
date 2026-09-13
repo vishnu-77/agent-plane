@@ -110,11 +110,18 @@ def resolve_operator(request: Request, x_admin_token: str | None,
     raise HTTPException(status_code=401, detail="Sign in to view this workspace")
 
 
-def require_admin(request: Request, x_admin_token: str | None) -> None:
-    """Gate a deployment-level operation behind ADMIN_TOKEN or a management key.
+def require_admin(request: Request, x_admin_token: str | None, tenant: str | None = None) -> None:
+    """Gate an admin-token-tier operation behind ADMIN_TOKEN, the instance
+    owner's session, or a management key.
 
-    Used for the endpoints that are genuinely deployment-wide (policy reload,
-    credential revocation). Project-level operations use ``resolve_operator``.
+    A management key is scoped to the one project it was issued for - it only
+    satisfies this check when the caller names the project being acted on
+    (``tenant``) and it matches the key's own ``project_id``. Callers with a
+    tenant in scope (a lease's project, a query's ``?tenant=``) must pass it;
+    leave ``tenant`` unset only for operations that are genuinely
+    deployment-wide (policy reload, credential revocation, cross-tenant
+    listings) - those never accept a management key, no matter whose it is,
+    only ADMIN_TOKEN or the instance owner.
     """
     settings: Settings = request.app.state.settings
     accounts = getattr(request.app.state, "accounts", None)
@@ -122,7 +129,11 @@ def require_admin(request: Request, x_admin_token: str | None) -> None:
     if accounts is not None and looks_like_api_key(presented):
         key = accounts.resolve_key(presented)
         if key is not None and key.environment == "mgmt":
-            return
+            if tenant is not None and key.project_id == tenant:
+                return
+            raise HTTPException(status_code=403,
+                                detail="This management key is scoped to its own project; "
+                                       "it cannot be used for this request")
     # A console session counts only for the account that set the instance up.
     # These are deployment-wide operations, not project ones, so on a shared
     # instance a second account must not inherit them.
@@ -132,7 +143,7 @@ def require_admin(request: Request, x_admin_token: str | None) -> None:
     if user_id:
         raise HTTPException(status_code=403,
                             detail="This is a deployment-wide operation; it needs the instance owner, "
-                                   "a management key, or ADMIN_TOKEN")
+                                   "a management key scoped to this project, or ADMIN_TOKEN")
     if not settings.admin_token:
         raise HTTPException(status_code=404, detail="not found")
     if not hmac.compare_digest(presented, settings.admin_token):
