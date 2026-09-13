@@ -5,6 +5,7 @@ Backends are selectable so the same code runs against zero-setup local stores
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -108,6 +109,12 @@ class Settings(BaseSettings):
     sqlite_path: str = "audit.db"
     postgres_url: str = "postgresql+psycopg://agentplane:agentplane@localhost:5432/agentplane"
     redis_url: str = "redis://localhost:6379/0"
+    # Where per-tenant quota counters live. "auto" follows the database, which
+    # is what the compose profile wants, but a managed Postgres (Supabase, RDS,
+    # Neon) does not come with a Redis, and needing one to use the other made
+    # Postgres harder to adopt than it should be. Quota counters are the only
+    # thing this holds; authority, approvals and audit are always in SQL.
+    cache_backend: Literal["auto", "memory", "redis"] = "auto"
 
     # --- Policy ---
     policy_dir: str = "policies"
@@ -275,6 +282,33 @@ class Settings(BaseSettings):
             return self.postgres_url
         return f"sqlite:///{self.sqlite_path}"
 
+    # Platforms whose filesystem does not survive the request that wrote to it.
+    # Storing accounts, keys and audit records on one means losing them at the
+    # next cold start, which looks like "my account vanished" rather than an error.
+    _SERVERLESS_MARKERS = ("VERCEL", "AWS_LAMBDA_FUNCTION_NAME", "K_SERVICE",
+                           "FUNCTION_TARGET", "AZURE_FUNCTIONS_ENVIRONMENT")
+
+    @property
+    def uses_redis(self) -> bool:
+        if self.cache_backend != "auto":
+            return self.cache_backend == "redis"
+        return self.storage_backend == "postgres" and self.redis_url_configured
+
+    @property
+    def redis_url_configured(self) -> bool:
+        """Did someone actually point us at a Redis, or is this just the default?"""
+        return self.redis_url != Settings.model_fields["redis_url"].default
+
+    @property
+    def serverless_platform(self) -> str | None:
+        """The serverless platform this is running on, if it is running on one."""
+        return next((name for name in self._SERVERLESS_MARKERS if os.environ.get(name)), None)
+
+    @property
+    def storage_is_ephemeral(self) -> bool:
+        """True when state is being written somewhere that will not survive."""
+        return self.storage_backend == "local" and self.serverless_platform is not None
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
@@ -298,6 +332,12 @@ class Settings(BaseSettings):
                 errors.append(f"{field.upper()} is still the insecure default")
         if self.identity_mode == "delegation" and not self.delegation_public_key:
             errors.append("IDENTITY_MODE=delegation but DELEGATION_PUBLIC_KEY is unset")
+        if self.storage_is_ephemeral:
+            errors.append(
+                f"STORAGE_BACKEND=local on {self.serverless_platform} writes accounts, keys and "
+                "audit records to a filesystem that does not survive a cold start; "
+                "set STORAGE_BACKEND=postgres and POSTGRES_URL"
+            )
         return errors
 
 

@@ -10,10 +10,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from sqlalchemy import DateTime, Integer, String, create_engine, func, select
+from sqlalchemy import DateTime, Integer, String, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from agent_plane.config import Settings
+from agent_plane.storage import create_sql_engine
 
 
 class Base(DeclarativeBase):
@@ -46,8 +47,7 @@ class UsageStore(Protocol):
 
 class SqlUsageStore:
     def __init__(self, db_url: str):
-        connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-        self._engine = create_engine(db_url, connect_args=connect_args, future=True)
+        self._engine = create_sql_engine(db_url)
         Base.metadata.create_all(self._engine)
         self._session_factory = sessionmaker(bind=self._engine, class_=Session)
 

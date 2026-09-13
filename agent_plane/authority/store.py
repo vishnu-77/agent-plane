@@ -33,7 +33,6 @@ from sqlalchemy import (
     DateTime,
     Integer,
     String,
-    create_engine,
     delete,
     func,
     inspect,
@@ -45,6 +44,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 
 from agent_plane.authority.lease import AuthorityLease, parse_lease
 from agent_plane.config import Settings
+from agent_plane.storage import create_sql_engine
 
 _DEFAULT_LEASES_FILE = "config/leases.yaml"
 # Stable key for the Postgres advisory lock that serializes lease admission.
@@ -177,8 +177,7 @@ class SqlLeaseStore:
     durable = True
 
     def __init__(self, db_url: str):
-        connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-        self._engine = create_engine(db_url, connect_args=connect_args, future=True)
+        self._engine = create_sql_engine(db_url)
         Base.metadata.create_all(self._engine)
         self._migrate()
         self._session_factory = sessionmaker(bind=self._engine, class_=Session)

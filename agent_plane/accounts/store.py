@@ -11,7 +11,7 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import create_engine, func, inspect, select
+from sqlalchemy import func, inspect, select
 from sqlalchemy import text as sql
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -40,6 +40,7 @@ from agent_plane.accounts.security import (
     verify_password,
 )
 from agent_plane.config import Settings
+from agent_plane.storage import create_sql_engine
 
 DEMO_PROJECT_ID = "prj_demo"
 DEMO_WORKSPACE_ID = "wsp_demo"
@@ -70,8 +71,7 @@ class AccountError(Exception):
 
 class AccountStore:
     def __init__(self, db_url: str, key_secret: str):
-        connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-        self._engine = create_engine(db_url, connect_args=connect_args, future=True)
+        self._engine = create_sql_engine(db_url)
         Base.metadata.create_all(self._engine)
         self._migrate()
         self._sessions = sessionmaker(bind=self._engine, class_=Session)

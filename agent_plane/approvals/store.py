@@ -18,10 +18,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, DateTime, String, create_engine, select, update
+from sqlalchemy import JSON, DateTime, String, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from agent_plane.config import Settings
+from agent_plane.storage import create_sql_engine
 
 ApprovalStatus = Literal["pending", "approved", "rejected", "consumed", "expired"]
 _TERMINAL = {"rejected", "consumed", "expired"}
@@ -154,8 +155,7 @@ class SqlApprovalStore:
     durable = True
 
     def __init__(self, db_url: str):
-        connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-        self._engine = create_engine(db_url, connect_args=connect_args, future=True)
+        self._engine = create_sql_engine(db_url)
         Base.metadata.create_all(self._engine)
         self._session_factory = sessionmaker(bind=self._engine, class_=Session)
 

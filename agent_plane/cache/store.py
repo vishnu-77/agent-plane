@@ -61,6 +61,14 @@ class RedisCacheStore:
 
 
 def build_cache_store(settings: Settings) -> CacheStore:
-    if settings.storage_backend == "postgres":
+    """Redis when asked for, memory otherwise.
+
+    This used to follow STORAGE_BACKEND, so choosing Postgres demanded a Redis
+    as well. A managed Postgres does not come with one, and quota counters are
+    the only thing at stake here: authority, approvals and audit are always in
+    SQL. CACHE_BACKEND=redis asks for it explicitly; "auto" still uses Redis
+    when REDIS_URL points somewhere real.
+    """
+    if settings.uses_redis:
         return RedisCacheStore(settings.redis_url)
     return InMemoryCacheStore()

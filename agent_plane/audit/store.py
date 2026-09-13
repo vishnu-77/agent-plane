@@ -10,12 +10,13 @@ import threading
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from agent_plane.audit.models import AuditEvent, Base
 from agent_plane.audit.signing import sign_event
 from agent_plane.config import Settings
+from agent_plane.storage import create_sql_engine
 
 # Stable key for the Postgres advisory lock that serializes chain appends.
 _AUDIT_CHAIN_LOCK_KEY = 0x4147505F4C4F4720 & 0x7FFFFFFFFFFFFFFF  # "AGP_LOG", masked to bigint
@@ -54,8 +55,7 @@ class AuditStore(Protocol):
 
 class SqlAuditStore:
     def __init__(self, db_url: str, signing_key: str = "dev-audit-key-change-me"):
-        connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-        self._engine = create_engine(db_url, connect_args=connect_args, future=True)
+        self._engine = create_sql_engine(db_url)
         Base.metadata.create_all(self._engine)
         self._session_factory = sessionmaker(bind=self._engine, class_=Session)
         self._signing_key = signing_key

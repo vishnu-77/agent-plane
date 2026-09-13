@@ -14,6 +14,7 @@ After ``pip install agent-plane`` (or ``pip install .``):
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -60,8 +61,11 @@ def main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     serve = sub.add_parser("serve", help="run the control plane (uvicorn)")
-    serve.add_argument("--host", default="0.0.0.0")
-    serve.add_argument("--port", type=int, default=8000)
+    # PORT and HOST are how a platform tells a container where to listen -
+    # Railway, Heroku, Cloud Run and App Runner all inject PORT - so honour
+    # them as defaults. An explicit flag still wins.
+    serve.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
+    serve.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000))
     serve.add_argument("--reload", action="store_true")
     serve.add_argument("--workers", type=int, default=1)
 

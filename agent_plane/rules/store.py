@@ -8,12 +8,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String, create_engine, select
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from agent_plane.accounts.security import new_id
 from agent_plane.authority.lease import AuthorityLease
 from agent_plane.config import Settings
+from agent_plane.storage import create_sql_engine
 
 
 def _utcnow() -> datetime:
@@ -119,8 +120,7 @@ class RuleRow(Base):
 
 class RuleStore:
     def __init__(self, db_url: str):
-        connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-        self._engine = create_engine(db_url, connect_args=connect_args, future=True)
+        self._engine = create_sql_engine(db_url)
         Base.metadata.create_all(self._engine)
         self._sessions = sessionmaker(bind=self._engine, class_=Session)
         self._lock = threading.RLock()
