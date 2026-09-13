@@ -32,6 +32,7 @@ from agent_plane.authority.templates import build_template_catalog
 from agent_plane.cache.store import build_cache_store
 from agent_plane.config import Settings, get_settings
 from agent_plane.consequence import build_consequence_catalog
+from agent_plane.consequence.state import build_task_consequence_state
 from agent_plane.demo.harness import DemoHarness
 from agent_plane.demo.router import demo_router
 from agent_plane.gateway.a2a import a2a_router
@@ -131,6 +132,7 @@ async def lifespan(app: FastAPI):
         app.state.lease_templates = build_template_catalog(settings)
         app.state.approvals = build_approval_store(settings)
         app.state.catalog = build_consequence_catalog(settings)
+        app.state.consequence_state = build_task_consequence_state(settings)
         app.state.agent_registry = build_registry(settings)
         app.state.accounts = build_account_store(settings)
         app.state.rules = build_rule_store(settings)

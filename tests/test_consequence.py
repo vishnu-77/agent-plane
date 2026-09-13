@@ -282,3 +282,109 @@ def test_decision_trace_is_readable(client):
     assert trace["authority"]["lineage"][0]["origin"]["created_by"] == "alice"
     listing = client.get("/v1/decisions?tenant=acme", headers=ADMIN).json()["decisions"]
     assert listing[0]["decision_id"] == evidence and listing[0]["outcome"] == "deny"
+
+
+# --------------------------------------------------------------------------- #
+# Task-scoped state: the same action, decided differently by what the task
+# has already confirmed done
+# --------------------------------------------------------------------------- #
+@pytest.fixture()
+def state_client(tmp_path, monkeypatch):
+    """A client pointed at a catalog with one fact-gated transition: pushing
+    main only reaches production once this task has confirmed touching a
+    workflow definition - the user's own worked example (edit the deploy
+    workflow, then push main; either step alone doesn't reach production)."""
+    resources_file = tmp_path / "resources.yaml"
+    resources_file.write_text("""
+resources:
+  - pattern: "workspace/.github/workflows/*"
+    environment: workspace
+    criticality: medium
+    semantic_class: workflow_definition
+  - pattern: "github://*/branches/main"
+    environment: source
+    criticality: critical
+  - pattern: "production/*"
+    environment: production
+    criticality: critical
+    customer_facing: true
+    reversibility: irreversible
+actions:
+  - pattern: "filesystem.write"
+    effect: mutate
+  - pattern: "git.push"
+    effect: mutate
+transitions:
+  - from: "github://*/branches/main"
+    action: "git.push"
+    to: "production/*"
+    relation: enables
+    requires_task_fact: workflow_definition
+""", encoding="utf-8")
+    monkeypatch.setenv("JWT_SECRET", JWT_SECRET)
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "audit.db"))
+    monkeypatch.setenv("POLICY_DIR", "policies")
+    monkeypatch.setenv("ADMIN_TOKEN", "test-admin")
+    monkeypatch.setenv("RESOURCES_FILE", str(resources_file))
+    from agent_plane.config import get_settings
+
+    get_settings.cache_clear()
+    from agent_plane.main import create_app
+
+    with TestClient(create_app()) as c:
+        yield c
+    get_settings.cache_clear()
+
+
+def _state_auth() -> dict[str, str]:
+    tok = jwt.encode({"sub": "u1", "tenant": "acme", "agent_id": "ops-agent",
+                      "allowed_tools": ["filesystem", "git"]}, JWT_SECRET, algorithm="HS256")
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def test_state_conditioned_reachability_gates_on_confirmed_task_facts(state_client):
+    client = state_client
+    client.post("/v1/leases", headers=ADMIN, json={
+        "id": "lease-state", "subject": "ops-agent", "tenant": "acme", "task": "fix-ci",
+        "resources": ["*"], "actions": ["filesystem.write", "git.push"],
+        "permitted_consequence": {"forbidden_terminal_resources": ["production/*"]}})
+    client.post("/v1/leases", headers=ADMIN, json={
+        "id": "lease-state-alone", "subject": "ops-agent", "tenant": "acme", "task": "fix-ci-alone",
+        "resources": ["*"], "actions": ["filesystem.write", "git.push"],
+        "permitted_consequence": {"forbidden_terminal_resources": ["production/*"]}})
+
+    # Push main with nothing else done this task: the fact-gated transition
+    # never fires, so production is never reachable, so there's nothing for
+    # forbidden_terminal_resources to catch.
+    isolated = client.post("/v1/authorize", headers=_state_auth(), json={
+        "task": "fix-ci-alone", "action": "git.push", "resource": "github://acme/app/branches/main"})
+    assert isolated.status_code == 200
+    trace = client.get(f"/v1/decisions/{isolated.json()['evidence_id']}", headers=ADMIN).json()["trace"]
+    assert trace["consequence"]["paths"] == []
+
+    # Same task: edit the workflow, then push main. The write is unremarkable
+    # on its own - but it's proposed as a workflow_definition fact.
+    edit = client.post("/v1/authorize", headers=_state_auth(), json={
+        "task": "fix-ci", "action": "filesystem.write", "resource": "workspace/.github/workflows/deploy.yml"})
+    assert edit.status_code == 200
+    evidence = edit.json()["evidence_id"]
+
+    # Before confirmation: proposed only, so the push still doesn't bind
+    # production as reachable (Enforce-mode binding needs it confirmed).
+    push_before_confirm = client.post("/v1/authorize", headers=_state_auth(), json={
+        "task": "fix-ci", "action": "git.push", "resource": "github://acme/app/branches/main"})
+    assert push_before_confirm.status_code == 200
+
+    # Confirm the workflow edit actually happened (what PR-5's --post hook
+    # would do via POST /v1/events/action {"confirms": evidence} - exercised
+    # directly against the store here since that HTTP surface is separate work).
+    changed = client.app.state.consequence_state.confirm("acme", "fix-ci", evidence)
+    assert changed == 1
+
+    # Now the same push, same task, same lease: production is reachable, and
+    # the lease forbids it.
+    push_after_confirm = client.post("/v1/authorize", headers=_state_auth(), json={
+        "task": "fix-ci", "action": "git.push", "resource": "github://acme/app/branches/main"})
+    assert push_after_confirm.status_code == 403
+    assert push_after_confirm.json()["detail"]["reason"] == "CONSEQUENCE_OUTSIDE_TASK_BOUNDARY"

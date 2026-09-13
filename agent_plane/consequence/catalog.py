@@ -49,6 +49,15 @@ ConsequenceClass = Literal[
 ]
 # How far one action reaches on its own, before downstream dependents.
 Scope = Literal["none", "single_file", "workspace", "single_service", "repository", "account", "organisation"]
+# What a resource *is*, for task-state purposes - independent of where it
+# sits or how it ranks. Small and closed on purpose: enough to say "this task
+# has already touched a workflow definition" without inventing a taxonomy.
+# See agent_plane.consequence.state.TaskFact.kind and
+# agent_plane.consequence.graph.Transition.requires_task_fact.
+SemanticClass = Literal[
+    "workflow_definition", "infra_definition", "dependency_manifest", "secret_resource",
+    "repository_state", "external_endpoint", "deployment_configuration",
+]
 
 IMPACT_RANK: dict[str, int] = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 REVERSIBILITY_RANK: dict[str, int] = {"reversible": 0, "recoverable": 1, "irreversible": 2}
@@ -85,6 +94,10 @@ class ResourceProfile(BaseModel):
     protected: bool = False
     description: str = ""
     business: str = ""
+    # Operator-declared, glob-matched exactly like every other field here -
+    # no separate classifier, no LLM. Unset means "no task-state relevance",
+    # which is every resource in every catalog before this field existed.
+    semantic_class: SemanticClass | None = None
 
 
 class ActionProfile(BaseModel):
@@ -227,7 +240,7 @@ class ConsequenceCatalog:
         return seen
 
     # -- evaluation ----------------------------------------------------------- #
-    def evaluate(self, action: str, resource: str) -> Consequence:
+    def evaluate(self, action: str, resource: str, *, task_facts: frozenset[str] = frozenset()) -> Consequence:
         rp = self.resource_profile(resource)
         ap = self.action_profile(action)
         effect: str = ap.effect if ap else _infer_effect(action)
@@ -247,7 +260,7 @@ class ConsequenceCatalog:
         # transitions: is a precision overlay on top of dependents_of(), not a
         # replacement - a catalog with no transitions: declared (every one
         # today) always gets paths == [] here, changing nothing below.
-        paths = reachable_paths(self, action, resource)
+        paths = reachable_paths(self, action, resource, task_facts=task_facts)
         path_terminals = [p.terminal for p in paths if p.terminal not in downstream and p.terminal != resource]
         downstream_profiles = [self.resource_profile(d) or ResourceProfile(pattern=d)
                                for d in (*downstream, *path_terminals)]

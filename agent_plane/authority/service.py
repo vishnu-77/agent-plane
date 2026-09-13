@@ -36,6 +36,7 @@ from agent_plane.authority.lease import AuthorityLease, action_matches, resource
 from agent_plane.authority.provenance import provenance_record
 from agent_plane.consequence import Consequence
 from agent_plane.consequence.envelope import ConsequenceEnvelope
+from agent_plane.consequence.state import TaskFact
 from agent_plane.rules import compile_rules, compiled_lease_id
 from agent_plane.schemas.canonical import Actor, DecisionAction
 
@@ -321,7 +322,17 @@ class AuthorityService:
         subject = actor.agent_id or actor.user_id
         mode = self._mode(actor.tenant)
 
-        consequence: Consequence | None = catalog.evaluate(action, resource) if catalog is not None else None
+        # State-conditioned reachability: what this task has already
+        # confirmed done is what a *binding* transition may key off (see
+        # consequence.graph.Transition.requires_task_fact) - not merely
+        # proposed, so a tool that was blocked or never ran can't still gate
+        # a later decision as if it had. A catalog with no fact-gated
+        # transitions declared (every one before this) ignores this entirely.
+        consequence_state = getattr(self.state, "consequence_state", None)
+        confirmed_facts = (consequence_state.get(actor.tenant, task).confirmed_kinds()
+                           if consequence_state is not None else frozenset())
+        consequence: Consequence | None = (catalog.evaluate(action, resource, task_facts=confirmed_facts)
+                                           if catalog is not None else None)
         if lease_ids is None:
             with leases.read_only():
                 self._apply_rules(actor, task, integration=integration,
@@ -497,6 +508,20 @@ class AuthorityService:
             registry.observe(tenant=actor.tenant, agent=actor.agent_id or actor.user_id, application=actor.app_id,
                              declared=list(actor.allowed_tools), task=task, action=action, resource=resource,
                              outcome=decision.decision.value, decision_id=decision.decision_id, context=context, edge=edge)
+        # Propose a task fact if this resource classifies as one - always, in
+        # every mode, whatever the decision was: Observe/Govern need it to
+        # reason about drift, and it costs nothing to record. Only *confirmed*
+        # facts (agent_plane.connect.hook's --post mode, POST .../events/action
+        # {"confirms": decision_id}) gate a binding Enforce-mode denial - see
+        # decide()'s task_facts wiring above.
+        catalog = getattr(self.state, "catalog", None)
+        consequence_state = getattr(self.state, "consequence_state", None)
+        if catalog is not None and consequence_state is not None:
+            profile = catalog.resource_profile(resource)
+            if profile is not None and profile.semantic_class is not None:
+                consequence_state.propose(actor.tenant, task, TaskFact(
+                    kind=profile.semantic_class, resource=resource, created_by_decision=decision.decision_id,
+                ))
         notifier = getattr(self.state, "approval_notifier", None)
         if approval_ref and notifier is not None and decision.decision == DecisionAction.APPROVAL_REQUIRED:
             req = self.state.approvals.get(approval_ref)

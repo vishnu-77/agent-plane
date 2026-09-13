@@ -132,8 +132,18 @@ resources:
     reversibility: irreversible
     persistence: permanent
     protected: true
+    semantic_class: secret_resource
     description: local secrets
     business: credentials must not leave the machine
+
+  - pattern: "workspace/.github/workflows/*"
+    environment: workspace
+    criticality: medium
+    reversibility: recoverable
+    persistence: durable
+    semantic_class: workflow_definition
+    description: CI/CD pipeline definitions
+    business: what runs in CI is decided here, not in code review
 
   - pattern: "shell/*"
     environment: workspace
