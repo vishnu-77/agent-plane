@@ -1,36 +1,40 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Button, Input } from "@/components/ui";
+import { PublicBrand } from "./home";
 
 /** Sign in, or create the first account on a fresh install. */
 /** The callback hands a failure back in the URL rather than a blank screen. */
-function ssoError(): string | null {
-  const hash = window.location.hash;
-  const at = hash.indexOf("sso_error=");
-  return at === -1 ? null : decodeURIComponent(hash.slice(at + "sso_error=".length).split("&")[0]);
-}
-
-export function AuthPage() {
-  const { authState, refreshAccount, setSource, sessionEnded } = useStore();
+export function AuthPage({ mode }: { mode: "signup" | "login" }) {
+  const { authState, refreshAccount, setSource, sessionEnded, clearSessionNotice } = useStore();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
   const firstRun = !!authState?.first_run;
-  const ssoOnly = authState?.sso_available && authState?.password_login === false;
-  const [mode, setMode] = useState<"signup" | "login">(firstRun ? "signup" : "login");
+  const passwordDisabled = authState?.password_login === false;
+  const signupClosed = mode === "signup" && !authState?.signup_open;
+  const formAvailable = !!authState && !passwordDisabled && !signupClosed;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(
-    ssoError() ?? (sessionEnded ? "Your session ended. Sign in again." : null));
+    params.get("sso_error") ?? (sessionEnded ? "Your session ended. Sign in again." : null));
   const [busy, setBusy] = useState(false);
+  // Keep the notice on this form, but allow Back to home after an expired session.
+  useEffect(() => clearSessionNotice(), [clearSessionNotice]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formAvailable || busy) return;
     setBusy(true);
     setError(null);
     try {
       if (mode === "signup") await Api.signup({ email, password, name });
       else await Api.login({ email, password });
-      await refreshAccount();
+      if (!await refreshAccount()) throw new Error("Signed in, but your workspace could not be loaded. Please try again.");
+      setSource("live");
+      navigate("/", { replace: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -42,12 +46,11 @@ export function AuthPage() {
     <div className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex items-center gap-2.5">
-          <img src="/brand/mark.svg" alt="" width={28} height={28} />
-          <span className="dot text-sm font-semibold tracking-[0.2em]">AGENT-PLANE</span>
+          <PublicBrand />
         </div>
 
         <h1 className="text-xl font-medium tracking-tight">
-          {mode === "signup" ? "Welcome to agent-plane" : "Sign in"}
+          {mode === "signup" ? "Create your account" : "Sign in"}
         </h1>
         <p className="mt-2 text-sm text-ink-2">
           {mode === "signup"
@@ -58,10 +61,10 @@ export function AuthPage() {
         {authState?.sso_available ? (
           <div className="mt-6">
             <Button variant="default" className="w-full justify-center"
-              onClick={() => { window.location.href = "/v1/auth/oidc/start"; }}>
+              onClick={() => { setSource("live"); window.location.href = "/v1/auth/oidc/start"; }}>
               Continue with single sign-on
             </Button>
-            {!ssoOnly ? (
+            {formAvailable ? (
               <div className="mt-4 flex items-center gap-3 text-2xs text-ink-3">
                 <span className="h-px flex-1 bg-hairline" />OR<span className="h-px flex-1 bg-hairline" />
               </div>
@@ -69,51 +72,54 @@ export function AuthPage() {
           </div>
         ) : null}
 
-        {ssoOnly ? (
+        {passwordDisabled ? (
           <p className="mt-4 text-xs text-ink-3">
-            This deployment signs in through its identity provider. Agents still use project API keys.
+            {authState?.sso_available ? "This workspace uses single sign-on." : "Password sign-in is disabled. Contact your workspace administrator for access."}
           </p>
         ) : null}
 
-        <form className={ssoOnly ? "hidden" : "mt-6 space-y-3"} onSubmit={submit}>
+        {!authState ? <div role="alert" className="mt-6 border border-hairline p-4 text-sm">Cannot reach the account service. <button className="underline" onClick={() => window.location.reload()}>Retry connection</button></div> : null}
+        {signupClosed && authState ? <p role="status" className="mt-6 text-sm">Account creation is closed for this workspace. Sign in with an existing account or contact your administrator.</p> : null}
+        {error ? <p role="alert" className="mt-4 text-sm text-deny">{error}</p> : null}
+        {formAvailable ? <form className="mt-6 space-y-3" onSubmit={submit}>
           {mode === "signup" ? (
             <label className="block">
               <span className="eyebrow">Name</span>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className="mt-1" autoComplete="name" />
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className="mt-1" autoComplete="name" autoFocus />
             </label>
           ) : null}
           <label className="block">
             <span className="eyebrow">Email</span>
             <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-              className="mt-1" autoComplete="email" autoFocus />
+              className="mt-1" autoComplete="email" autoFocus={mode === "login"} />
           </label>
           <label className="block">
             <span className="eyebrow">Password</span>
             <Input type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
+              minLength={mode === "signup" ? 10 : undefined}
               className="mt-1" autoComplete={mode === "signup" ? "new-password" : "current-password"} />
             {mode === "signup" ? <span className="mt-1 block text-2xs text-ink-3">At least 10 characters.</span> : null}
           </label>
-          {error ? <p className="text-xs text-deny">{error}</p> : null}
           <Button type="submit" variant="default" className="w-full justify-center" disabled={busy}>
             {busy ? "…" : mode === "signup" ? "Create account" : "Sign in"}
           </Button>
-        </form>
+        </form> : null}
 
         <div className="mt-4 flex items-center justify-between text-xs text-ink-2">
-          {authState?.signup_open && !ssoOnly ? (
-            <button className="underline" onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(null); }}>
+          {(mode === "signup" || (authState?.signup_open && !passwordDisabled)) ? (
+            <Link className="underline" to={mode === "signup" ? "/login" : "/signup"}>
               {mode === "signup" ? "I already have an account" : "Create an account"}
-            </button>
+            </Link>
           ) : <span />}
           {authState?.demo_available ? (
-            <button className="underline" onClick={() => setSource("demo")}>See the demo instead</button>
+            <button className="underline" onClick={() => { setSource("demo"); navigate("/"); }}>See the demo instead</button>
           ) : null}
         </div>
 
-        {firstRun ? (
+        <Link to="/" className="mt-6 inline-block text-xs text-ink-2 underline">Back to home</Link>
+        {firstRun && mode === "signup" && formAvailable ? (
           <p className="mt-6 border-t border-hairline pt-4 text-xs text-ink-3">
-            This is a fresh install, so this first account owns the workspace. Sign-up closes afterwards
-            unless you set SIGNUP_MODE=open.
+            The first account owns this workspace. Additional accounts follow the workspace’s registration settings.
           </p>
         ) : null}
       </div>

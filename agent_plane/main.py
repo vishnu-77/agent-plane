@@ -248,6 +248,13 @@ def create_app() -> FastAPI:
     async def root() -> RedirectResponse:
         return RedirectResponse("/console")
 
+    @app.get("/signup", include_in_schema=False)
+    @app.get("/login", include_in_schema=False)
+    @app.get("/console/signup", include_in_schema=False)
+    @app.get("/console/login", include_in_schema=False)
+    async def public_auth(request: Request) -> RedirectResponse:
+        return RedirectResponse(f"/console/#/{request.url.path.rsplit('/', 1)[-1]}")
+
     @app.get("/brand/{name}", include_in_schema=False)
     async def brand(name: str) -> Response:
         if name not in ("mark.svg", "logo.svg", "favicon.svg", "logo-dark.svg"):

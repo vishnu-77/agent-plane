@@ -42,6 +42,13 @@ def signup(client, email="dev@example.com", password="correct-horse-battery"):
     return r.json()
 
 
+@pytest.mark.parametrize("path", ["/login", "/signup", "/console/login", "/console/signup"])
+def test_public_account_routes_use_the_client_auth_route(client, path):
+    response = client.get(path, follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == f"/console/#/{path.rsplit('/', 1)[-1]}"
+
+
 def make_project(client, name="personal-coding", mode="observe"):
     r = client.post("/v1/projects", json={"name": name, "mode": mode})
     assert r.status_code == 200, r.text

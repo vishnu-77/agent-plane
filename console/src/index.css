@@ -24,6 +24,10 @@
     background: #11110f;
     color: #f4f4ef;
   }
+  :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 4px;
+  }
   * {
     scrollbar-width: thin;
     scrollbar-color: #b9b9b0 transparent;

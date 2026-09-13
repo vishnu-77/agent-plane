@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createHashRouter, Navigate, RouterProvider } from "react-router-dom";
+import { createHashRouter, Navigate, RouterProvider, useLocation } from "react-router-dom";
 import "./index.css";
 import { StoreProvider, useStore } from "./lib/store";
 import { TooltipProvider } from "./components/ui";
@@ -11,11 +11,14 @@ import { RulesPage } from "./pages/rules";
 import { IntegrationsPage } from "./pages/integrations";
 import { SettingsPage } from "./pages/settings";
 import { AuthPage, OnboardingPage } from "./pages/auth";
+import { HomePage } from "./pages/home";
 
 const router = createHashRouter([
+  { path: "/login", element: <AuthRoute mode="login" /> },
+  { path: "/signup", element: <AuthRoute mode="signup" /> },
   {
     path: "/",
-    element: <Shell />,
+    element: <WorkspaceGate />,
     children: [
       { index: true, element: <ActivityPage /> },
       { path: "agents", element: <AgentsPage /> },
@@ -28,26 +31,39 @@ const router = createHashRouter([
 ]);
 
 /** Sign-in, then onboarding, then the product. DEMO skips straight through. */
-function Root() {
-  const { ready, signedIn, source, projects } = useStore();
+function Loading() {
+  return <div className="flex min-h-screen items-center justify-center" role="status">Loading agent-plane…</div>;
+}
+
+function AuthRoute({ mode }: { mode: "login" | "signup" }) {
+  const { ready, signedIn, source } = useStore();
+  if (!ready) return <Loading />;
+  if (signedIn && source === "live") return <Navigate to="/" replace />;
+  return <AuthPage key={mode} mode={mode} />;
+}
+
+function WorkspaceGate() {
+  const { ready, signedIn, source, projects, sessionEnded } = useStore();
+  const location = useLocation();
   if (!ready) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <span className="dot text-2xs text-ink-2">loading</span>
-      </div>
-    );
+    return <Loading />;
   }
-  if (source === "demo") return <RouterProvider router={router} />;
-  if (!signedIn) return <AuthPage />;
+  if (source === "demo") return <Shell />;
+  if (!signedIn) {
+    if (sessionEnded || location.search.includes("sso_error=")) {
+      return <Navigate to={`/login${location.search}`} replace />;
+    }
+    return location.pathname === "/" ? <HomePage /> : <Navigate to="/login" replace />;
+  }
   if (!projects.length) return <OnboardingPage />;
-  return <RouterProvider router={router} />;
+  return <Shell />;
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <StoreProvider>
       <TooltipProvider>
-        <Root />
+        <RouterProvider router={router} />
       </TooltipProvider>
     </StoreProvider>
   </StrictMode>,

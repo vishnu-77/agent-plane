@@ -33,6 +33,7 @@ interface Store {
   me: Me | null;
   signedIn: boolean;
   sessionEnded: boolean;
+  clearSessionNotice: () => void;
   source: Source;
   setSource: (s: Source) => void;
   project: Project | null;
@@ -65,11 +66,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [paused, setPaused] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
   const generation = useRef(0);
+  const clearSessionNotice = useCallback(() => setSessionEnded(false), []);
 
   const refreshAccount = useCallback(async () => {
     try {
       const next = await Api.me();
       setMe(next);
+      setSessionEnded(false);
       setProjectId((current) => {
         const known = next.projects.some((p) => p.id === current);
         return known ? current : (next.projects[0]?.id ?? null);
@@ -170,14 +173,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await Api.logout();
+    generation.current += 1;
     setMe(null);
+    setSourceState("live");
+    setSessionEnded(false);
     setFeed(EMPTY);
+    try { setAuthState(await Api.authState()); }
+    catch { setAuthState(null); }
   }, []);
 
   const value = useMemo<Store>(() => ({
-    ready, authState, me, signedIn: !!me, sessionEnded, source, setSource, project, projects, selectProject,
+    ready, authState, me, signedIn: !!me, sessionEnded, clearSessionNotice, source, setSource, project, projects, selectProject,
     refreshAccount, setMode, feed, refresh, paused, setPaused, signOut,
-  }), [ready, authState, me, source, setSource, project, projects, selectProject, refreshAccount,
+  }), [ready, authState, me, sessionEnded, clearSessionNotice, source, setSource, project, projects, selectProject, refreshAccount,
       setMode, feed, refresh, paused, signOut]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
