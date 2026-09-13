@@ -67,7 +67,7 @@ class ConsequencePath(BaseModel):
 
 
 def reachable_paths(
-    catalog: "ConsequenceCatalog", action: str, resource: str, *,
+    catalog: ConsequenceCatalog, action: str, resource: str, *,
     task_facts: frozenset[str] = frozenset(), max_depth: int = 4,
 ) -> list[ConsequencePath]:
     """Causal paths from ``resource`` given ``action`` was just taken.

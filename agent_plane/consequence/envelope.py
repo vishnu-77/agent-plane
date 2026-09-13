@@ -55,7 +55,7 @@ class ConsequenceEnvelope(BaseModel):
     allowed_terminal_resources: list[str] | None = None
     forbidden_terminal_resources: list[str] = []
 
-    def narrows(self, parent: "ConsequenceEnvelope") -> list[str]:
+    def narrows(self, parent: ConsequenceEnvelope) -> list[str]:
         """Why ``self`` (a child) is not narrower than ``parent`` (empty = fine).
 
         A child's bound may only tighten its parent's; widening on any single
@@ -98,7 +98,7 @@ class ConsequenceEnvelope(BaseModel):
                 errors.append("permitted_consequence.forbidden_terminal_resources drops a parent bound")
         return errors
 
-    def meet(self, other: "ConsequenceEnvelope") -> "ConsequenceEnvelope":
+    def meet(self, other: ConsequenceEnvelope) -> ConsequenceEnvelope:
         """The narrowest envelope both ``self`` and ``other`` satisfy.
 
         Used to fold a project's applicable rules into one compiled lease:

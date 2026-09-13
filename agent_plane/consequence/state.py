@@ -18,6 +18,8 @@ either what a connector said it was about to do or what it said it did.
 """
 from __future__ import annotations
 
+import random
+import time
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -33,6 +35,17 @@ FactStatus = Literal["proposed", "confirmed"]
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _backoff(attempt: int) -> None:
+    """A CAS retry that immediately re-reads and re-attempts is exactly what
+    makes several colliding writers keep colliding in lockstep - each retry
+    happens the moment the previous one lost, so they stay synchronized.
+    Sleeping a small, randomized, growing amount first spreads writers out
+    in time instead: capped so a genuinely stuck retry loop still fails in
+    close to the same wall-clock budget as before, not silently much later.
+    """
+    time.sleep(min(0.05, 0.002 * (attempt + 1)) * random.random())
 
 
 class TaskFact(BaseModel):
@@ -101,21 +114,22 @@ class SqlTaskConsequenceStateStore:
                 facts=[TaskFact.model_validate(f) for f in (row.document or {}).get("facts", [])],
             )
 
-    def propose(self, tenant: str, task: str, fact: TaskFact, *, max_retries: int = 5) -> TaskConsequenceState:
+    def propose(self, tenant: str, task: str, fact: TaskFact, *, max_retries: int = 20) -> TaskConsequenceState:
         """Add ``fact`` to the task's state, retrying the compare-and-swap
         against a concurrent writer rather than overwriting it."""
-        for _ in range(max_retries):
+        for attempt in range(max_retries):
             current = self.get(tenant, task)
             facts = [*current.facts, fact]
             if self._cas(tenant, task, current.revision, facts):
                 return TaskConsequenceState(tenant=tenant, task=task, revision=current.revision + 1, facts=facts)
+            _backoff(attempt)
         raise RuntimeError(f"could not update consequence state for {tenant}/{task} - too much concurrent writing")
 
-    def confirm(self, tenant: str, task: str, decision_id: str, *, max_retries: int = 5) -> int:
+    def confirm(self, tenant: str, task: str, decision_id: str, *, max_retries: int = 20) -> int:
         """Flip every ``proposed`` fact this decision created to
         ``confirmed``. Returns how many changed (0 if the decision proposed
         nothing, or already confirmed it)."""
-        for _ in range(max_retries):
+        for attempt in range(max_retries):
             current = self.get(tenant, task)
             changed = 0
             facts: list[TaskFact] = []
@@ -128,6 +142,7 @@ class SqlTaskConsequenceStateStore:
                 return 0
             if self._cas(tenant, task, current.revision, facts):
                 return changed
+            _backoff(attempt)
         raise RuntimeError(f"could not confirm consequence state for {tenant}/{task} - too much concurrent writing")
 
     def _cas(self, tenant: str, task: str, expected_revision: int, facts: list[TaskFact]) -> bool:

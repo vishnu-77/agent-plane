@@ -15,8 +15,8 @@ from agent_plane.accounts.security import new_id
 from agent_plane.authority.lease import AuthorityLease
 from agent_plane.config import Settings
 from agent_plane.consequence.envelope import ConsequenceEnvelope
-from agent_plane.storage import create_sql_engine
 from agent_plane.rules.synthesis import synthesize_envelope
+from agent_plane.storage import create_sql_engine
 
 
 def _utcnow() -> datetime:

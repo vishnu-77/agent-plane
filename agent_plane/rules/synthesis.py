@@ -6,7 +6,10 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent_plane.consequence.catalog import (
-    IMPACT_RANK, PERSISTENCE_RANK, REVERSIBILITY_RANK, Consequence,
+    IMPACT_RANK,
+    PERSISTENCE_RANK,
+    REVERSIBILITY_RANK,
+    Consequence,
 )
 from agent_plane.consequence.envelope import ConsequenceEnvelope
 
