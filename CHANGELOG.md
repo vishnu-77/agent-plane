@@ -35,6 +35,13 @@ All notable changes to this project are documented here. Format loosely follows
   the service the person is reading it in.
 
 ### Added
+- **Deploying needs three variables.** `SECRET_KEY` is one high-entropy value
+  the three internal secrets derive from, each still separate, so nobody has to
+  generate three and keep them in step. `DATABASE_URL` selects Postgres on its
+  own, under the name every platform already uses and Railway's Postgres
+  injects. With `ENVIRONMENT=production` that is the whole list, because the
+  port comes from `PORT`. Anything set explicitly still wins, so an existing
+  deployment sees no change.
 - **Optional single sign-on for the console** (`agent_plane/accounts/oidc.py`,
   `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`): plain OpenID Connect,
   so Auth0, Okta, Google, Entra and Keycloak are three settings rather than four
