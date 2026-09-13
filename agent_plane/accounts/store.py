@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -77,6 +78,31 @@ class AccountStore:
         self._sessions = sessionmaker(bind=self._engine, class_=Session)
         self._key_secret = key_secret
         self._lock = threading.RLock()
+        self._local = threading.local()
+
+    def _read_session(self) -> Session | None:
+        return getattr(self._local, "read_session", None)
+
+    @contextmanager
+    def read_only(self):
+        """Share one session for the reads in this block - every governed
+        request resolves its API key, then looks up that key's project,
+        as two separate calls that used to each open their own connection.
+        Used narrowly (resolve_key, project) rather than threaded through
+        every method here: those two are what every request pays for, the
+        other forty-odd methods are human-console paths where one more
+        connection is noise."""
+        if self._read_session() is not None:
+            yield self
+            return
+        session = self._sessions()
+        try:
+            self._local.read_session = session
+            yield self
+        finally:
+            self._local.read_session = None
+            session.commit()
+            session.close()
 
     def _migrate(self) -> None:
         """Bring a database created by an earlier release up to date.
@@ -272,6 +298,10 @@ class AccountStore:
             return self._project(row)
 
     def project(self, project_id: str) -> Project | None:
+        session = self._read_session()
+        if session is not None:
+            row = session.get(ProjectRow, project_id)
+            return self._project(row) if row else None
         with self._sessions() as s:
             row = s.get(ProjectRow, project_id)
             return self._project(row) if row else None
@@ -348,6 +378,16 @@ class AccountStore:
     def resolve_key(self, plaintext: str, *, touch: bool = True) -> ApiKey | None:
         """Authenticate a presented key. Revoked and expired keys resolve to None."""
         digest = hash_api_key(plaintext, self._key_secret)
+        session = self._read_session()
+        if session is not None:
+            row = session.scalar(select(ApiKeyRow).where(ApiKeyRow.key_hash == digest))
+            if row is None or row.revoked_at is not None:
+                return None
+            if row.expires_at is not None and _aware(row.expires_at) <= _utcnow():
+                return None
+            if touch:
+                row.last_used_at = _naive(_utcnow())
+            return self._key(row)
         with self._sessions() as s:
             row = s.scalar(select(ApiKeyRow).where(ApiKeyRow.key_hash == digest))
             if row is None or row.revoked_at is not None:

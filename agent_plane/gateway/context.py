@@ -76,10 +76,11 @@ def resolve_request(
 
     presented = _presented_key(authorization, x_api_key)
     if presented and accounts is not None:
-        key = accounts.resolve_key(presented)
-        if key is None:
-            raise HTTPException(status_code=401, detail="Invalid or revoked API key")
-        project = accounts.project(key.project_id)
+        with accounts.read_only():
+            key = accounts.resolve_key(presented)
+            if key is None:
+                raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+            project = accounts.project(key.project_id)
         if project is None:
             raise HTTPException(status_code=401, detail="This key's project no longer exists")
 
