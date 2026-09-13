@@ -1,5 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "fastapi",
-  "installCommand": null
+  "installCommand": "uv pip install '.[postgres]'"
 }
