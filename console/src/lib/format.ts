@@ -154,3 +154,14 @@ export function capabilityText(observation: string, enforcement: string): string
     advisory: "cannot block" }[enforcement] ?? enforcement;
   return `${obs} · ${enf}`;
 }
+
+/** A pre-filled "new issue" link - the one feedback channel, so a report
+ * never needs an email address, ours or the reporter's. `context` is a
+ * one-line hint about where feedback was opened from (a page, an
+ * integration); it is never anything the reporter did not already see. */
+export function feedbackUrl(context?: string): string {
+  const body = context ? `**What happened / what you'd change**\n\n\n---\nOpened from: ${context}` : "";
+  const params = new URLSearchParams(body ? { body } : {});
+  const query = params.toString();
+  return `https://github.com/vishnu-77/agent-plane/issues/new${query ? `?${query}` : ""}`;
+}

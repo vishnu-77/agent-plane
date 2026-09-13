@@ -10,7 +10,7 @@
 # See what your agents can do.<br />Control what they are allowed to cause.
 
 <sub>
-<a href="docs/README.md">Documentation</a> · <a href="docs/quickstart.md">Quickstart</a> · <a href="docs/demo.md">Hosted demo</a> · <a href="docs/concepts.md">Concepts</a> · <a href="SECURITY.md">Security</a>
+<a href="docs/README.md">Documentation</a> · <a href="docs/quickstart.md">Quickstart</a> · <a href="docs/demo.md">Hosted demo</a> · <a href="docs/concepts.md">Concepts</a> · <a href="SECURITY.md">Security</a> · <a href="https://github.com/vishnu-77/agent-plane/issues/new">Feedback</a>
 </sub>
 
 <br />
@@ -292,6 +292,16 @@ model behaviour unsafe?*
 
 agent-plane answers: **why does this agent have this authority, for this
 task, and is it authorised to cause the consequence of this action?**
+
+## Feedback
+
+Something confusing, broken, or missing — [open an issue](https://github.com/vishnu-77/agent-plane/issues/new).
+That is the one feedback channel; it needs no email address, yours or ours.
+The console has the same link under the account menu, and the connection
+wizard offers it directly if a connect command does not work.
+
+Found a security vulnerability instead? See [SECURITY.md](SECURITY.md) — that
+goes through a private channel, deliberately not a public issue.
 
 ## License
 

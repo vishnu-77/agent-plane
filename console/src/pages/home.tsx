@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui";
+import { feedbackUrl } from "@/lib/format";
 
 export function PublicBrand() {
   return <Link to="/" aria-label="agent-plane home" className="inline-flex items-center gap-2.5">
@@ -58,6 +59,6 @@ export function HomePage() {
         </div>
       </section>
     </main>
-    <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><a href="/docs" className="underline underline-offset-4">API documentation</a></div></footer>
+    <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><span className="flex gap-4"><a href="/docs" className="underline underline-offset-4">API documentation</a><a href={feedbackUrl("home page")} target="_blank" rel="noopener" className="underline underline-offset-4">Feedback</a></span></div></footer>
   </div>;
 }

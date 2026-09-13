@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Api, type ApiKey, type CatalogEntry, type Integration } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { ago, capabilityText, cn, shortDate } from "@/lib/format";
+import { ago, capabilityText, cn, feedbackUrl, shortDate } from "@/lib/format";
 import { Badge, Button, Dialog, DialogContent, Empty, Input } from "@/components/ui";
 
 export function IntegrationsPage() {
@@ -241,23 +241,40 @@ export function ConnectionWizard({ entry, projectId, onClose, onConnected }: {
   // service the person is reading this in.
   const origin = window.location.origin;
   const needsUrl = origin !== "http://127.0.0.1:8000" && origin !== "http://localhost:8000";
+  const usesCli = entry.connect.startsWith("agentplane");
   const command = entry.connect
     .replace("{key}", secret ?? "ap_live_...")
     .replace("{upstream}", "https://your-mcp-server/mcp")
     .replace("{base_url}", origin)
-    + (needsUrl && entry.connect.startsWith("agentplane") ? ` --url ${origin}` : "");
+    + (needsUrl && usesCli ? ` --url ${origin}` : "");
+  // Not on PyPI yet - installing from the repo is the only path today. Said
+  // once here rather than assumed: "agentplane: command not found" is what a
+  // first run looks like otherwise, in every terminal alike.
+  const installCommand = `pip install "git+https://github.com/vishnu-77/agent-plane.git"`;
+  const step = (n: number) => (usesCli ? n + 1 : n);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent title={`Connect ${entry.label}`} description={capabilityText(entry.observation, entry.enforcement)}>
         <div className="space-y-4">
+          {usesCli ? (
+            <div>
+              <div className="eyebrow">1 · Install the CLI</div>
+              <p className="mb-2 mt-1 text-xs text-ink-2">
+                One-time, in a terminal of your choice - PowerShell, Command Prompt, Terminal, or any shell.
+                Skip this if <code>agentplane --help</code> already works for you.
+              </p>
+              <CopyField value={installCommand} />
+            </div>
+          ) : null}
           <div>
-            <div className="eyebrow">1 · Your API key</div>
+            <div className="eyebrow">{step(1)} · Your API key</div>
             <p className="mb-2 mt-1 text-xs text-ink-2">Shown once. It identifies this project, nothing else.</p>
             {secret ? <CopyField value={secret} /> : <p className="text-xs text-ink-2">Creating…</p>}
           </div>
           <div>
-            <div className="eyebrow">2 · Run this</div>
+            <div className="eyebrow">{step(2)} · Run this</div>
+            <p className="mb-1 mt-1 text-xs text-ink-2">Same terminal as above - or any other, once the CLI is installed there too.</p>
             <div className="mt-2"><CopyField value={command} /></div>
             {entry.kind === "mcp" ? (
               <p className="mt-2 text-xs text-ink-2">Then point your MCP client at this server instead of the upstream one.</p>
@@ -275,6 +292,15 @@ export function ConnectionWizard({ entry, projectId, onClose, onConnected }: {
             </p>
           </div>
           <p className="text-xs text-ink-3">{entry.enforcement_note}</p>
+          {!arrived ? (
+            <p className="text-xs text-ink-3">
+              Command not working?{" "}
+              <a className="underline" target="_blank" rel="noopener"
+                href={feedbackUrl(`connecting ${entry.label}`)}>
+                Send feedback
+              </a>
+            </p>
+          ) : null}
           <div className="flex justify-end">
             <Button variant={arrived ? "default" : "outline"} onClick={onClose}>{arrived ? "Done" : "Close"}</Button>
           </div>
