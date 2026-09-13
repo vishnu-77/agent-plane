@@ -26,10 +26,10 @@ RUN apt-get update \
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE MANIFEST.in ./
 COPY agent_plane ./agent_plane
-RUN --mount=type=cache,target=/root/.cache/pip \
+RUN --mount=type=cache,id=pip,target=/root/.cache/pip \
     pip install build \
  && python -m build --wheel --outdir /dist
-RUN --mount=type=cache,target=/root/.cache/pip \
+RUN --mount=type=cache,id=pip,target=/root/.cache/pip \
     python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-compile "$(ls /dist/*.whl)[${EXTRAS}]" \
  && /opt/venv/bin/pip uninstall -y pip setuptools wheel \
@@ -57,7 +57,9 @@ COPY --chown=appuser:appuser policies ./policies
 COPY --chown=appuser:appuser config ./config
 
 USER appuser
-VOLUME ["/data"]
+# No VOLUME: it creates an anonymous volume nobody asked for, Railway
+# refuses to build with it, and every deployment that wants /data to
+# persist mounts it explicitly (compose, a PVC, a Railway volume).
 EXPOSE 8000
 # Both read PORT, because that is how a platform tells a container where to
 # listen. Hardcoding 8000 meant the container ignored Railway's assigned
