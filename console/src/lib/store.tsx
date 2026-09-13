@@ -32,6 +32,7 @@ interface Store {
   authState: AuthState | null;
   me: Me | null;
   signedIn: boolean;
+  sessionEnded: boolean;
   source: Source;
   setSource: (s: Source) => void;
   project: Project | null;
@@ -62,6 +63,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [projectId, setProjectId] = useState<string | null>(() => localStorage.getItem(LAST_PROJECT));
   const [feed, setFeed] = useState<Feed>(EMPTY);
   const [paused, setPaused] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
   const generation = useRef(0);
 
   const refreshAccount = useCallback(async () => {
@@ -125,6 +127,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (gen !== generation.current) return;
     const [system, decisions, agents, approvals] = results;
     const failure = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+
+    // A dead session must end the session, not be retried every few seconds.
+    // Polling with a project the server will no longer talk about turned one
+    // expired cookie into an unbounded stream of 401s.
+    const unauthorized = source === "live" && results.some(
+      (r) => r.status === "rejected" && (r.reason as ApiError)?.status === 401);
+    if (unauthorized) {
+      setMe(null);
+      setFeed(EMPTY);
+      setSessionEnded(true);
+      return;
+    }
     setFeed({
       system: system.status === "fulfilled" ? system.value : null,
       decisions: decisions.status === "fulfilled" ? decisions.value.decisions : [],
@@ -161,7 +175,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<Store>(() => ({
-    ready, authState, me, signedIn: !!me, source, setSource, project, projects, selectProject,
+    ready, authState, me, signedIn: !!me, sessionEnded, source, setSource, project, projects, selectProject,
     refreshAccount, setMode, feed, refresh, paused, setPaused, signOut,
   }), [ready, authState, me, source, setSource, project, projects, selectProject, refreshAccount,
       setMode, feed, refresh, paused, signOut]);

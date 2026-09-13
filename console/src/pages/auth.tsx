@@ -12,14 +12,15 @@ function ssoError(): string | null {
 }
 
 export function AuthPage() {
-  const { authState, refreshAccount, setSource } = useStore();
+  const { authState, refreshAccount, setSource, sessionEnded } = useStore();
   const firstRun = !!authState?.first_run;
   const ssoOnly = authState?.sso_available && authState?.password_login === false;
   const [mode, setMode] = useState<"signup" | "login">(firstRun ? "signup" : "login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(ssoError());
+  const [error, setError] = useState<string | null>(
+    ssoError() ?? (sessionEnded ? "Your session ended. Sign in again." : null));
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
