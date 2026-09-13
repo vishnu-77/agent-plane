@@ -1,4 +1,5 @@
-"""``agentplane hook`` - the bridge a coding agent calls before it acts.
+"""``agentplane hook`` - the bridge a coding agent calls before, and
+optionally after, it acts.
 
 Claude Code and Codex both support a pre-tool hook: the agent hands the hook
 a JSON description of the tool it is about to run, and the hook's exit code
@@ -13,13 +14,27 @@ happened - nothing a developer connects can break because agent-plane is
 watching. Only enforce mode, on an integration that can actually block,
 returns 2. If agent-plane is unreachable the hook exits 0 and says so on
 stderr: an observability tool must not wedge someone's editor.
+
+``--post`` is a second, optional invocation after the tool actually ran
+(Claude Code's PostToolUse hook, wired up by ``agentplane connect``
+alongside the pre-tool one). It never blocks anything - it only tells the
+server a fact this task proposed was actually confirmed (see
+agent_plane.consequence.state), which is what lets a state-conditioned
+Enforce-mode denial bind rather than stay advisory. Since PreToolUse and
+PostToolUse are separate process invocations, correlating "which decision
+does this completion belong to" needs a small local cache keyed by what the
+tool call looked like - see ``_signature``. If nothing is cached (the pre
+hook never ran, or the cache was cleared), --post is a silent no-op: a
+missing completion signal degrades to "stays advisory", never an error.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +42,11 @@ from agent_plane.connect.credentials import load_credentials
 
 TIMEOUT_SECONDS = 5.0
 BLOCK_EXIT = 2
+# How many pending pre-hook decisions to remember at once, and for how long -
+# a bound on both, so a session that never confirms anything (an unpaired
+# PreToolUse, or --post genuinely not firing) can't grow this file forever.
+PENDING_CACHE_LIMIT = 200
+PENDING_CACHE_MAX_AGE_SECONDS = 3600
 
 
 def _repo_context(cwd: str | None) -> dict[str, str]:
@@ -46,6 +66,48 @@ def _repo_context(cwd: str | None) -> dict[str, str]:
     if branch and branch != "HEAD":
         out["branch"] = branch
     return out
+
+
+def _pending_cache_path() -> Path:
+    override = os.environ.get("AGENTPLANE_HOME")
+    return (Path(override) if override else Path.home() / ".agentplane") / "pending-confirmations.json"
+
+
+def _signature(event: dict[str, Any]) -> str:
+    """What identifies "the same tool call" across the pre and post
+    invocations - session (or workspace, if the harness gave no session) plus
+    the tool and its arguments, which are identical in both payloads for one
+    invocation."""
+    key = json.dumps({
+        "session": event.get("session") or event.get("workspace_root"),
+        "tool": event.get("tool"),
+        "arguments": event.get("arguments"),
+    }, sort_keys=True, default=str)
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+
+
+def _load_pending() -> dict[str, dict[str, Any]]:
+    path = _pending_cache_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except ValueError:
+        return {}
+
+
+def _save_pending(pending: dict[str, dict[str, Any]]) -> None:
+    now = time.time()
+    # Prune by age, then by count, so an unpaired PreToolUse (no matching
+    # --post ever arrives) can't grow this file without bound.
+    pending = {k: v for k, v in pending.items() if now - v.get("at", 0) < PENDING_CACHE_MAX_AGE_SECONDS}
+    if len(pending) > PENDING_CACHE_LIMIT:
+        newest = sorted(pending.items(), key=lambda kv: kv[1].get("at", 0), reverse=True)[:PENDING_CACHE_LIMIT]
+        pending = dict(newest)
+    path = _pending_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(pending), encoding="utf-8")
 
 
 def _payload(raw: dict[str, Any], integration: str) -> dict[str, Any]:
@@ -84,6 +146,8 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--url", default=None)
     parser.add_argument("--key", default=None)
     parser.add_argument("--quiet", action="store_true", help="never write to stderr on success")
+    parser.add_argument("--post", action="store_true",
+                        help="a completion signal (PostToolUse), not a permission check - never blocks")
     args = parser.parse_args(argv)
 
     try:
@@ -101,6 +165,23 @@ def run(argv: list[str] | None = None) -> int:
         return 0
 
     event = _payload(raw, args.integration)
+
+    if args.post:
+        pending = _load_pending()
+        entry = pending.pop(_signature(event), None)
+        _save_pending(pending)
+        if entry is None:
+            return 0  # no matching pre-hook decision cached - silent no-op, never an error
+        try:
+            import httpx
+
+            httpx.post(f"{url.rstrip('/')}/v1/events/action",
+                      json={"confirms": entry["decision_id"], "task": entry["task"]},
+                      timeout=TIMEOUT_SECONDS, headers={"Authorization": f"Bearer {key}"})
+        except Exception:  # noqa: BLE001 - a completion signal must never wedge the developer's agent
+            pass
+        return 0
+
     try:
         import httpx
 
@@ -116,6 +197,13 @@ def run(argv: list[str] | None = None) -> int:
         return 0
 
     detail = decision.get("detail") if isinstance(decision.get("detail"), dict) else decision
+    if detail.get("evidence_id"):
+        # Remembered so a later --post invocation for this same tool call can
+        # confirm the fact(s) this decision proposed - see _signature.
+        pending = _load_pending()
+        pending[_signature(event)] = {"decision_id": detail["evidence_id"], "task": event["task"], "at": time.time()}
+        _save_pending(pending)
+
     outcome = str(detail.get("decision") or "")
     binding = bool(detail.get("binding"))
     explanation = " ".join(detail.get("explanation") or []) or detail.get("reason") or ""

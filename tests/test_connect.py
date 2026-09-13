@@ -164,8 +164,70 @@ def test_hook_without_credentials_says_so_and_allows(home, monkeypatch, capsys):
 
 
 # --------------------------------------------------------------------------- #
+# --post: a completion signal, correlated back to the pre-hook decision
+# --------------------------------------------------------------------------- #
+def test_post_confirms_the_decision_the_pre_hook_proposed(home, monkeypatch):
+    save_credentials(Credentials(url="http://plane", key="ap_live_k0000000000000", integration="claude-code"))
+    payload = {"tool_name": "Edit", "tool_input": {"file_path": "a.ts"}, "session_id": "ses_1",
+              "task": "fix-tests"}
+
+    # Pre-hook: allowed, and the server hands back a decision id.
+    code, sent = _run(monkeypatch, payload, {"body": {"decision": "allow", "binding": False,
+                                                       "evidence_id": "az_abc123"}})
+    assert code == 0
+
+    # Post-hook for the *same* tool call: confirms that exact decision, not
+    # a fresh authorization request.
+    code, sent = _run(monkeypatch, payload, {"body": {}}, argv=["--integration", "claude-code", "--post"])
+    assert code == 0
+    assert sent["json"] == {"confirms": "az_abc123", "task": "fix-tests"}
+
+    # It's a one-shot: confirming twice for the same tool call finds nothing
+    # the second time (already popped) rather than confirming again.
+    code, sent2 = _run(monkeypatch, payload, {"body": {}}, argv=["--integration", "claude-code", "--post"])
+    assert code == 0 and sent2 == {}
+
+
+def test_post_with_no_matching_pre_hook_is_a_silent_no_op(home, monkeypatch):
+    save_credentials(Credentials(url="http://plane", key="ap_live_k0000000000000", integration="claude-code"))
+    code, sent = _run(monkeypatch, {"tool_name": "Bash", "tool_input": {"command": "echo hi"}},
+                      {"body": {}}, argv=["--integration", "claude-code", "--post"])
+    assert code == 0
+    assert sent == {}  # never even tried to reach the server
+
+
+def test_post_never_confirms_a_decision_the_pre_hook_did_not_get_an_id_for(home, monkeypatch):
+    """observe/govern responses, and anything the connector never learned an
+    evidence_id from, must not leave a stale confirmation waiting to fire."""
+    save_credentials(Credentials(url="http://plane", key="ap_live_k0000000000000", integration="claude-code"))
+    payload = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
+    _run(monkeypatch, payload, {"body": {"decision": "simulate", "binding": False}})  # no evidence_id
+    code, sent = _run(monkeypatch, payload, {"body": {}}, argv=["--integration", "claude-code", "--post"])
+    assert code == 0 and sent == {}
+
+
+# --------------------------------------------------------------------------- #
 # installation
 # --------------------------------------------------------------------------- #
+def test_connect_installs_both_pre_and_post_tool_hooks(tmp_path):
+    from agent_plane.connect.cli import _merge_claude_settings
+
+    settings = tmp_path / "settings.json"
+    _merge_claude_settings(settings, "agentplane hook --integration claude-code")
+    _merge_claude_settings(settings, "agentplane hook --integration claude-code --post", hook_type="PostToolUse")
+    after = json.loads(settings.read_text(encoding="utf-8"))
+
+    pre = [h["command"] for e in after["hooks"]["PreToolUse"] for h in e["hooks"]]
+    post = [h["command"] for e in after["hooks"]["PostToolUse"] for h in e["hooks"]]
+    assert pre == ["agentplane hook --integration claude-code"]
+    assert post == ["agentplane hook --integration claude-code --post"]
+
+    # Reinstalling updates each independently rather than one clobbering the other.
+    _merge_claude_settings(settings, "agentplane hook --integration claude-code --quiet")
+    after = json.loads(settings.read_text(encoding="utf-8"))
+    assert [h["command"] for e in after["hooks"]["PostToolUse"] for h in e["hooks"]] == post
+
+
 def test_connect_merges_into_existing_claude_settings(tmp_path):
     from agent_plane.connect.cli import _merge_claude_settings
 

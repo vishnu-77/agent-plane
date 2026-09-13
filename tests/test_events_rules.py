@@ -110,6 +110,25 @@ def test_reported_actions_become_decisions_agents_and_integrations(connected):
     assert client.get(f"/v1/tasks/second-task?project={project['id']}").json()["origin"]["text"] == "Look at a.ts"
 
 
+def test_confirm_flips_a_proposed_fact_to_confirmed(connected):
+    """POST /v1/events/action {"confirms": <decision_id>} - what
+    agent_plane.connect.hook's --post mode sends - is a status flip on
+    facts a prior decision already proposed, not a second authorization."""
+    client, project, auth = connected
+    out = report(client, auth, task="edit-workflow", tool="Edit",
+                arguments={"file_path": ".github/workflows/deploy.yml"})
+    assert out["action"] == "filesystem.write"
+    evidence = out["evidence_id"]
+
+    confirmed = report(client, auth, task="edit-workflow", confirms=evidence)
+    assert confirmed["confirmed"] == evidence
+    assert confirmed["facts_confirmed"] == 1
+
+    # Nothing was proposed under some other decision id - a no-op, not an error.
+    stale = report(client, auth, task="edit-workflow", confirms="az_does_not_exist")
+    assert stale["facts_confirmed"] == 0
+
+
 def test_batch_reporting(connected):
     client, project, auth = connected
     r = client.post("/v1/events/action", headers=auth, json={"events": [

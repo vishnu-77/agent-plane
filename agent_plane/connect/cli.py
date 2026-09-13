@@ -69,13 +69,20 @@ def _handshake(url: str, key: str, integration: str, host: str | None) -> dict[s
     return response.json()
 
 
-def _hook_command(integration: str) -> str:
+def _hook_command(integration: str, *, post: bool = False) -> str:
     executable = "agentplane" if Path(sys.argv[0]).name.startswith("agentplane") else f"{sys.executable} -m agent_plane.cli"
-    return f"{executable} hook --integration {integration}"
+    command = f"{executable} hook --integration {integration}"
+    return f"{command} --post" if post else command
 
 
-def _merge_claude_settings(path: Path, command: str) -> None:
-    """Add a PreToolUse hook without disturbing anything already configured."""
+def _merge_claude_settings(path: Path, command: str, *, hook_type: str = "PreToolUse") -> None:
+    """Add a hook entry without disturbing anything already configured.
+
+    ``hook_type`` is "PreToolUse" (asks whether a tool may run) or
+    "PostToolUse" (reports that it did - see ``agentplane hook --post``).
+    Both point at the same command with a different flag; each is merged
+    independently so installing one never removes the other.
+    """
     settings: dict[str, Any] = {}
     if path.exists():
         try:
@@ -83,7 +90,7 @@ def _merge_claude_settings(path: Path, command: str) -> None:
         except ValueError as exc:
             raise SystemExit(f"{path} is not valid JSON; fix or move it first ({exc})") from exc
     hooks = settings.setdefault("hooks", {})
-    entries = hooks.setdefault("PreToolUse", [])
+    entries = hooks.setdefault(hook_type, [])
     for entry in entries:
         for hook in entry.get("hooks", []):
             if "agentplane hook" in str(hook.get("command", "")) or "agent_plane.cli hook" in str(hook.get("command", "")):
@@ -107,7 +114,16 @@ def _connect_hooked(args: argparse.Namespace, kind: str) -> int:
     if kind == "claude-code":
         target = Path(".claude/settings.json") if scope == "project" else Path.home() / ".claude" / "settings.json"
         _merge_claude_settings(target, command)
-        installed = f"pre-tool hook in {target}"
+        # Best-effort: a completion signal for confirmed-fact consequence
+        # gating (agent_plane.consequence.state) needs to know a tool
+        # actually ran, not just that it was about to. Claude Code's
+        # PostToolUse hook shape is less exercised in practice than
+        # PreToolUse's - if it turns out not to fire as expected, decisions
+        # simply stay proposed-only (Observe/Govern advisory reachability
+        # keeps working; only a state-conditioned Enforce-mode denial needs
+        # this to bind).
+        _merge_claude_settings(target, _hook_command(kind, post=True), hook_type="PostToolUse")
+        installed = f"pre-tool and post-tool hooks in {target}"
     else:
         target = Path(".codex/hooks.json") if scope == "project" else Path.home() / ".codex" / "hooks.json"
         target.parent.mkdir(parents=True, exist_ok=True)

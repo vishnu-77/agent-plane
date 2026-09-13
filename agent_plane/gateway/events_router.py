@@ -52,12 +52,23 @@ def _one(request: Request, ctx: RequestContext, event: dict[str, Any]) -> dict[s
     if project is None:
         raise HTTPException(status_code=401, detail="A Project API Key is required to report activity")
 
+    task = str(event.get("task") or ctx.session or "untitled-task")[:200]
+
+    confirms = event.get("confirms")
+    if confirms:
+        # A completion signal (agent_plane.connect.hook's --post mode): the
+        # tool this decision proposed actually ran. No new authority or
+        # consequence evaluation happens here - it's a status flip on facts
+        # already recorded, not a second decision.
+        consequence_state = getattr(request.app.state, "consequence_state", None)
+        changed = consequence_state.confirm(project.id, task, str(confirms)) if consequence_state else 0
+        return {"confirmed": str(confirms), "task": task, "facts_confirmed": changed}
+
     action, resource = normalize_action(
         action=event.get("action"), tool=event.get("tool"), resource=event.get("resource"),
         arguments=event.get("arguments") if isinstance(event.get("arguments"), dict) else None,
         repository=event.get("repository"), branch=event.get("branch"),
     )
-    task = str(event.get("task") or ctx.session or "untitled-task")[:200]
     agent = str(event.get("agent") or ctx.agent)[:200]
     integration = str(event.get("integration") or ctx.integration or "custom")
     if integration not in INTEGRATION_CATALOG:
