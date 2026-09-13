@@ -239,22 +239,34 @@ class ConsequenceCatalog:
 
         downstream = self.dependents_of(resource) if mutating else []
         blast = 1 + len(downstream) if mutating else 0
-        environments = sorted({environment, *[
-            (self.resource_profile(d) or ResourceProfile(pattern=d)).environment for d in downstream
-        ]}) if mutating else []
+        downstream_profiles = [self.resource_profile(d) or ResourceProfile(pattern=d) for d in downstream]
+        environments = sorted({environment, *[p.environment for p in downstream_profiles]}) if mutating else []
+        # A resource this action reaches downstream may be worse than the one
+        # it's aimed at - a config change to production/checkout that only
+        # takes effect through production/payments is still a change that
+        # reaches payments. These reflect the worst resource actually
+        # reachable, not just the root; `criticality` below stays the root's
+        # own rating (used elsewhere as exactly that).
+        worst_customer_facing = customer_facing or any(p.customer_facing for p in downstream_profiles)
+        worst_reversibility = max([reversibility, *(p.reversibility for p in downstream_profiles)],
+                                  key=lambda r: REVERSIBILITY_RANK[r])
+        worst_criticality = max([criticality, *(p.criticality for p in downstream_profiles)],
+                                key=lambda c: IMPACT_RANK[c])
+        worst_protected = protected or any(p.protected for p in downstream_profiles)
 
         consequence_class = (ap.consequence_class if ap and ap.consequence_class
                              else _EFFECT_CLASS.get(effect, "workspace_mutation"))
         scope = ap.scope if ap and ap.scope else _EFFECT_SCOPE.get(effect, "single_file")
-        # Impact = the worse of what the action does and where it does it, only
-        # for mutating effects; a read of production is still a read.
+        # Impact = the worse of what the action does and where it (or anything
+        # it reaches) does it, only for mutating effects; a read of production
+        # is still a read.
         if mutating:
-            impact_rank = max(IMPACT_RANK[severity], IMPACT_RANK[criticality])
-            if reversibility == "irreversible":
+            impact_rank = max(IMPACT_RANK[severity], IMPACT_RANK[worst_criticality])
+            if worst_reversibility == "irreversible":
                 impact_rank = max(impact_rank, IMPACT_RANK["high"])
-            if protected:
+            if worst_protected:
                 impact_rank = max(impact_rank, IMPACT_RANK["high"])
-            if customer_facing and impact_rank < IMPACT_RANK["medium"]:
+            if worst_customer_facing and impact_rank < IMPACT_RANK["medium"]:
                 impact_rank = IMPACT_RANK["medium"]
         elif consequence_class in ("credential_access", "data_egress"):
             # A read that removes a secret from its boundary is not a "low impact
@@ -270,21 +282,21 @@ class ConsequenceCatalog:
             summary.append(consequence_class.replace("_", " "))
             if environment != "unknown":
                 summary.append(f"{environment} mutation")
-            if customer_facing:
-                summary.append("customer-facing workload")
+            if worst_customer_facing:
+                summary.append("customer-facing workload" if customer_facing else "reaches a customer-facing workload")
             if downstream:
                 summary.append(f"{len(downstream)} downstream resource(s) affected")
-            summary.append(f"{reversibility} · {persistence}")
-            if protected:
-                summary.append("protected resource")
+            summary.append(f"{worst_reversibility} · {persistence}")
+            if worst_protected:
+                summary.append("protected resource" if protected else "reaches a protected resource")
         else:
             summary.append("no state change")
 
         return Consequence(
             action=action, resource=resource, consequence_class=consequence_class, scope=scope,
             effect=effect, direct_effect=direct,
-            environment=environment, criticality=criticality, customer_facing=customer_facing,
-            reversibility=reversibility, persistence=persistence, protected=protected,
+            environment=environment, criticality=criticality, customer_facing=worst_customer_facing,
+            reversibility=worst_reversibility, persistence=persistence, protected=worst_protected,
             downstream=downstream, blast_radius=blast, environments=environments,
             impact=impact, business=(rp.business if rp else ""),
             resource_profile=rp.pattern if rp else None,

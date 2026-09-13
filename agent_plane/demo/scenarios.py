@@ -116,7 +116,10 @@ SCENARIOS: dict[str, Scenario] = {
             "id": "demo-lease-latency-review-9", "task": "latency-review-9", "subject": "incident-agent",
             "resources": ["staging/*", "production/*"],
             "actions": ["logs.read", "metrics.read", "deployment.read"],
-            "permitted_consequence": {"max_impact": "none"},
+            # "low": a metrics/logs read on a critical resource computes low
+            # impact (not "none" - production/checkout is criticality:
+            # critical), and that's now actually checked against reads too.
+            "permitted_consequence": {"max_impact": "low"},
             "maximum_impact": "reversible", "child_authority": "subset_only",
         },
         steps=[

@@ -43,6 +43,29 @@ def test_main_branch_vs_stale_branch(catalog):
     assert any(d.startswith("production") for d in main.downstream)
 
 
+def test_impact_reflects_the_worst_reachable_resource_not_just_the_root():
+    """The root resource an action targets may look mild on its own while
+    something it reaches downstream is not - a low-criticality, internal-only
+    config resource whose only dependent is customer-facing and irreversible
+    must report *that*, not its own mild rating."""
+    from agent_plane.consequence.catalog import ActionProfile, ConsequenceCatalog, ResourceProfile
+
+    catalog = ConsequenceCatalog(
+        resources=[
+            ResourceProfile(pattern="internal/config", environment="production", criticality="low",
+                            customer_facing=False, reversibility="reversible", dependents=["internal/billing"]),
+            ResourceProfile(pattern="internal/billing", environment="production", criticality="critical",
+                            customer_facing=True, reversibility="irreversible"),
+        ],
+        actions=[ActionProfile(pattern="config.write", effect="mutate")],
+    )
+    c = catalog.evaluate("config.write", "internal/config")
+    assert c.customer_facing is True
+    assert c.reversibility == "irreversible"
+    assert c.impact in ("high", "critical")
+    assert "internal/billing" in c.downstream
+
+
 def test_unknown_resources_get_inferred_profiles(catalog):
     c = catalog.evaluate("thing.delete", "prod-db/users")
     assert c.environment == "production" and c.effect == "delete" and c.impact == "high"
@@ -63,6 +86,31 @@ def test_permitted_consequence_violations(catalog):
     lease2 = AuthorityLease(id="l2", task="t", subject="a", resources=["*"], actions=["email.send"],
                             maximum_impact="reversible")
     assert consequence_violations(lease2, catalog.evaluate("email.send", "email/customer"))
+
+
+def test_sensitive_reads_are_checked_against_the_envelope_too():
+    """A read is not exempt from a lease's permitted_consequence just because
+    it doesn't mutate anything - credentials.read on a production secret is
+    exactly the kind of "technically a read" action the envelope exists to
+    bound."""
+    from agent_plane.consequence.catalog import ActionProfile, ConsequenceCatalog, ResourceProfile
+
+    catalog = ConsequenceCatalog(
+        resources=[ResourceProfile(pattern="production/*", environment="production", criticality="critical")],
+        actions=[ActionProfile(pattern="credentials.read", effect="read", consequence_class="credential_access")],
+    )
+    consequence = catalog.evaluate("credentials.read", "production/db-password")
+    assert not consequence.mutating  # it's a read
+    assert consequence.impact not in ("none", "low")  # but a sensitive one
+
+    lease = AuthorityLease(id="l", task="t", subject="a", resources=["*"], actions=["credentials.read"],
+                           permitted_consequence={"environments": ["staging"]})
+    violations = consequence_violations(lease, consequence)
+    assert violations  # today: silently [] because the action doesn't mutate anything
+
+    # A read that's genuinely low-impact still passes every bound trivially -
+    # nothing here should start denying ordinary reads (test_reads_do_not_change_state
+    # already covers that reads compute impact "none"/"low" in the first place).
 
 
 def test_permitted_consequence_only_attenuates():

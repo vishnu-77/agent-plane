@@ -106,15 +106,22 @@ def lineage_permits(chain: list[dict[str, Any]], action: str) -> bool:
 # Consequence boundary
 # --------------------------------------------------------------------------- #
 def consequence_violations(lease: AuthorityLease, consequence: Consequence) -> list[str]:
-    """Why ``consequence`` exceeds what ``lease`` permits (empty = within bounds)."""
-    if not consequence.mutating:
-        return []
+    """Why ``consequence`` exceeds what ``lease`` permits (empty = within bounds).
+
+    Runs for reads too, not only mutations: a credential or data-egress read
+    already carries a real ``impact`` from ``catalog.evaluate()`` - holding a
+    secret outside its boundary is not "low impact" just because nothing was
+    written. A merely low-impact read still passes every bound trivially, so
+    there is nothing to gain by skipping it - and skipping it is exactly what
+    let a lease's environments/customer_facing/max_reversibility/
+    max_blast_radius bounds go unchecked on every read, forever, until now.
+    """
     errors: list[str] = []
-    # Ceiling from the lease's own maximum_impact: a reversible-only lease may not
-    # cause an irreversible effect, whatever the caller declared. Separate from
-    # permitted_consequence (a different, older field on the lease itself), so
-    # it isn't part of ConsequenceEnvelope.
-    if lease.maximum_impact == "reversible" and consequence.reversibility == "irreversible":
+    # Ceiling from the lease's own maximum_impact: a reversible-only lease may
+    # not *mutate* something irreversibly, whatever the caller declared.
+    # Reversibility describes an effect a read doesn't have, so this stays
+    # scoped to mutating actions; the envelope check below does not.
+    if consequence.mutating and lease.maximum_impact == "reversible" and consequence.reversibility == "irreversible":
         errors.append("irreversible effect under a reversible-only lease")
     errors.extend(ConsequenceEnvelope.model_validate(lease.permitted_consequence).violated_by(consequence))
     return errors
