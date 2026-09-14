@@ -188,6 +188,27 @@ def test_post_confirms_the_decision_the_pre_hook_proposed(home, monkeypatch):
     assert code == 0 and sent2 == {}
 
 
+def test_post_uses_tool_use_id_so_two_identical_calls_dont_cross_confirm(home, monkeypatch):
+    """Claude Code sends the same tool_name/tool_input/session_id for two
+    separate invocations of the same command (e.g. `git status` run twice in
+    a row) - only tool_use_id tells them apart. Without it, the second
+    PreToolUse's cache entry clobbers the first's, and the first --post would
+    confirm the wrong (or already-popped) decision."""
+    save_credentials(Credentials(url="http://plane", key="ap_live_k0000000000000", integration="claude-code"))
+    payload_1 = {"tool_name": "Bash", "tool_input": {"command": "git status"}, "session_id": "ses_1",
+                "tool_use_id": "tu_1", "task": "fix-tests"}
+    payload_2 = {**payload_1, "tool_use_id": "tu_2"}
+
+    _run(monkeypatch, payload_1, {"body": {"decision": "allow", "binding": False, "evidence_id": "az_1"}})
+    _run(monkeypatch, payload_2, {"body": {"decision": "allow", "binding": False, "evidence_id": "az_2"}})
+
+    # Each --post confirms the decision for *its own* tool_use_id, in either order.
+    code, sent = _run(monkeypatch, payload_2, {"body": {}}, argv=["--integration", "claude-code", "--post"])
+    assert code == 0 and sent["json"] == {"confirms": "az_2", "task": "fix-tests"}
+    code, sent = _run(monkeypatch, payload_1, {"body": {}}, argv=["--integration", "claude-code", "--post"])
+    assert code == 0 and sent["json"] == {"confirms": "az_1", "task": "fix-tests"}
+
+
 def test_post_with_no_matching_pre_hook_is_a_silent_no_op(home, monkeypatch):
     save_credentials(Credentials(url="http://plane", key="ap_live_k0000000000000", integration="claude-code"))
     code, sent = _run(monkeypatch, {"tool_name": "Bash", "tool_input": {"command": "echo hi"}},
