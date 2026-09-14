@@ -1,18 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "services": {
-    "backend": {
-      "root": ".",
-      "framework": "fastapi",
-      "installCommand": "uv pip install '.[postgres]'"
-    },
-    "website": {
-      "root": "website"
-    }
-  },
-  "rewrites": [
-    { "source": "/_next/(.*)", "destination": { "service": "website" } },
-    { "source": "/", "destination": { "service": "website" } },
-    { "source": "/(.*)", "destination": { "service": "backend" } }
-  ]
+  "framework": "fastapi",
+  "installCommand": "uv pip install '.[postgres]'"
 }
