@@ -5,12 +5,20 @@ name: Deployment liveness check
 # succeeded - it says nothing about whether the app actually boots (main.py
 # fails closed on missing/insecure production secrets) or can reach its
 # stores. Hit the app's own readiness endpoint before trusting "Ready".
+#
+# This repo also auto-deploys to Railway, which posts its own deployment
+# events - but with the Railway *dashboard* URL as target_url, not the app's
+# URL, so there is nothing to curl there. Vercel's environment is always a
+# bare name ("Production", "Preview"); Railway's is always "<project> /
+# <env>". That slash is the reliable way to tell them apart.
 on:
   deployment_status
 
 jobs:
   readyz:
-    if: github.event.deployment_status.state == 'success'
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      !contains(github.event.deployment.environment, '/')
     runs-on: ubuntu-latest
     steps:
       - name: Wait for /readyz to report ready
