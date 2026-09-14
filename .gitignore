@@ -36,6 +36,7 @@
 !/.dockerignore
 !/.env.example
 !/.gitignore
+!/.gitattributes
 !/.github/
 
 # Public docs (docs/README.md, quickstart, integration guides, API reference,

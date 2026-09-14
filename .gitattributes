@@ -1,0 +1,9 @@
+# The built console (agent_plane/console/dist) and its source HTML shell get
+# checked out with CRLF on Windows (core.autocrlf) and Vite's HTML transform
+# carries whatever line endings the source already has straight into the
+# output - so a Windows checkout can bake CRLF into a build that's otherwise
+# byte-identical to CI's Linux one, and the "committed bundle is current"
+# check in CI (which always builds on Linux, always LF) sees a false diff.
+# Force LF for both regardless of the checkout platform.
+console/index.html text eol=lf
+agent_plane/console/dist/index.html text eol=lf
