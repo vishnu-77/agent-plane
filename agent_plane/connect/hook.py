@@ -75,9 +75,16 @@ def _pending_cache_path() -> Path:
 
 def _signature(event: dict[str, Any]) -> str:
     """What identifies "the same tool call" across the pre and post
-    invocations - session (or workspace, if the harness gave no session) plus
-    the tool and its arguments, which are identical in both payloads for one
-    invocation."""
+    invocations. Claude Code hands both PreToolUse and PostToolUse the same
+    ``tool_use_id`` for one invocation - exact, so prefer it. Fall back to a
+    hash of session/tool/arguments for integrations that don't send one
+    (Codex has no --post hook yet, so this path is otherwise unused); that
+    fallback collides when the same tool is called twice with identical
+    arguments in one session (e.g. the same file `Read` twice in a row) -
+    tool_use_id is what avoids that, not a hypothetical."""
+    tool_use_id = event.get("tool_use_id")
+    if tool_use_id:
+        return f"id:{tool_use_id}"
     key = json.dumps({
         "session": event.get("session") or event.get("workspace_root"),
         "tool": event.get("tool"),
@@ -127,6 +134,10 @@ def _payload(raw: dict[str, Any], integration: str) -> dict[str, Any]:
     }
     if session:
         event["session"] = str(session)
+    if raw.get("tool_use_id"):
+        # Claude Code's own Pre/PostToolUse correlation id for one tool call
+        # - see _signature, which prefers this over the hash fallback.
+        event["tool_use_id"] = str(raw["tool_use_id"])
     # A task is the unit authority is granted for. Use whatever the agent knows;
     # fall back to the workspace, which is at least stable across a session.
     event["task"] = str(raw.get("task") or raw.get("transcript_title") or Path(cwd).name or "session")
