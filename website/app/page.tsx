@@ -3,7 +3,7 @@ import { GITHUB_URL } from "@/lib/site";
 
 function Proof() {
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-panel shadow-sm">
+    <div className="overflow-hidden rounded-md border border-line bg-panel shadow-[0_16px_40px_-24px_rgba(17,17,15,0.35)]">
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-5 py-3.5 text-sm text-muted">
         <b className="text-ink">Capability ≠ Authority.</b> Same verb, three consequences — the credential
         can&apos;t tell them apart.
@@ -37,7 +37,11 @@ function Section({
   );
 }
 
-const cardCls = "rounded-xl border border-line bg-panel p-5 shadow-sm";
+// Hairline-grid-seam card pattern: a shared 1px gap (bg-line) between panel
+// cells stands in for individual card borders/shadows - no drop shadows,
+// no per-card radius, matching the product's flat, borders-only language.
+const cardGridCls = "grid gap-px overflow-hidden rounded-md border border-line bg-line";
+const cardCls = "bg-panel p-6";
 const tag = "mb-3 inline-block rounded bg-muted-bg px-2 py-0.5 font-mono text-[11.5px] text-accent";
 
 export default function Home() {
@@ -51,8 +55,8 @@ export default function Home() {
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-accent">
               Runtime authorization for AI agents
             </p>
-            <h1 className="mb-5 text-4xl font-bold leading-[1.05] tracking-tight text-ink sm:text-5xl">
-              Governed agents in <span className="text-accent">one command.</span>
+            <h1 className="mb-5 text-4xl font-semibold leading-[1.05] tracking-tight text-ink sm:text-5xl">
+              Governed agents in <span className="bg-muted-bg px-1">one command.</span>
             </h1>
             <p className="mb-7 max-w-[60ch] text-lg text-muted">
               Your agent&apos;s credentials say what it <em>can</em> do. agent-plane controls what it&apos;s{" "}
@@ -62,13 +66,13 @@ export default function Home() {
             <div className="flex flex-wrap items-center gap-3">
               <a
                 href="#connect"
-                className="rounded-lg bg-accent px-4.5 py-2.5 text-sm font-semibold text-white dark:text-[#04110f]"
+                className="rounded-md bg-accent px-4.5 py-2.5 text-sm font-semibold text-bg"
               >
                 Connect an agent →
               </a>
               <a
                 href="#integrations"
-                className="rounded-lg border border-line bg-panel px-4.5 py-2.5 text-sm font-semibold text-ink"
+                className="rounded-md border border-line bg-panel px-4.5 py-2.5 text-sm font-semibold text-ink"
               >
                 See integrations
               </a>
@@ -80,8 +84,8 @@ export default function Home() {
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.14em] text-accent">
               A per-task authorization plane
             </p>
-            <h1 className="mb-5 text-4xl font-bold leading-[1.05] tracking-tight text-ink sm:text-5xl">
-              Authority you can <span className="text-accent">reason about.</span>
+            <h1 className="mb-5 text-4xl font-semibold leading-[1.05] tracking-tight text-ink sm:text-5xl">
+              Authority you can <span className="bg-muted-bg px-1">reason about.</span>
             </h1>
             <p className="mb-7 max-w-[60ch] text-lg text-muted">
               Capability is the ceiling; authority is a narrower, expiring, per-task floor evaluated at action
@@ -91,13 +95,13 @@ export default function Home() {
             <div className="flex flex-wrap items-center gap-3">
               <a
                 href="#model"
-                className="rounded-lg bg-accent px-4.5 py-2.5 text-sm font-semibold text-white dark:text-[#04110f]"
+                className="rounded-md bg-accent px-4.5 py-2.5 text-sm font-semibold text-bg"
               >
                 Read the model →
               </a>
               <a
                 href="#honest"
-                className="rounded-lg border border-line bg-panel px-4.5 py-2.5 text-sm font-semibold text-ink"
+                className="rounded-md border border-line bg-panel px-4.5 py-2.5 text-sm font-semibold text-ink"
               >
                 What binds vs. advisory
               </a>
@@ -120,11 +124,11 @@ export default function Home() {
               No JWT to mint, no authority YAML to write, no policy bundle to load. New projects start in{" "}
               <b>Observe</b> — it watches and explains, and blocks nothing until you decide.
             </p>
-            <pre className="overflow-x-auto rounded-xl border border-line bg-panel p-5 font-mono text-[13.5px] leading-relaxed shadow-sm">
+            <pre className="overflow-x-auto rounded-md border border-line bg-panel p-5 font-mono text-[13.5px] leading-relaxed">
               <span className="text-muted"># install and run</span>
               {"\n"}pip install agent-plane{"\n"}agentplane serve{"\n\n"}
               <span className="text-muted"># connect your coding agent — the console shows you this line</span>
-              {"\n"}agentplane connect claude --key ap_live_… <span className="text-accent">--scope project</span>
+              {"\n"}agentplane connect claude --key ap_live_… <span className="font-semibold text-ink">--scope project</span>
             </pre>
           </Section>
 
@@ -135,12 +139,12 @@ export default function Home() {
             <p className="mb-6 max-w-[64ch] text-muted">
               Write them in the console, over the API, or in version control next to the code they govern.
             </p>
-            <pre className="overflow-x-auto rounded-xl border border-line bg-panel p-5 font-mono text-[13.5px] leading-relaxed shadow-sm">
+            <pre className="overflow-x-auto rounded-md border border-line bg-panel p-5 font-mono text-[13.5px] leading-relaxed">
               ALLOW{"       "}filesystem.read{"   "}tests.execute{"\n"}ASK FIRST{"   "}filesystem.write{"  "}
               git.push{"\n"}NEVER{"       "}repository.delete{"   "}
               <span className="text-muted"># absolute — no lease grants it back</span>
             </pre>
-            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+            <div className={`mt-5 ${cardGridCls} sm:grid-cols-3`}>
               <div className={cardCls}>
                 <span className={tag}>observe</span>
                 <h3 className="mb-1.5 text-base font-semibold text-ink">Watch first</h3>
@@ -168,7 +172,7 @@ export default function Home() {
               whether it can block.
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full overflow-hidden rounded-xl border border-line text-sm">
+              <table className="w-full border border-line text-sm">
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-muted">
                     <th className="border-b border-line px-3.5 py-2.5">Integration</th>
@@ -204,14 +208,14 @@ export default function Home() {
               A credential defines the ceiling of what an identity could ever do. agent-plane imposes a
               narrower floor beneath it, evaluated at the moment of the action.
             </p>
-            <pre className="overflow-x-auto rounded-xl border border-line bg-panel p-5 font-mono text-[13.5px] leading-relaxed shadow-sm">
+            <pre className="overflow-x-auto rounded-md border border-line bg-panel p-5 font-mono text-[13.5px] leading-relaxed">
               Executable Authority ={"\n"}
               {"  "}Identity ∩ Task Authority ∩ Delegated Authority ∩ Resource Scope{"\n"}
               {"           "}∩ Policy ∩ Runtime Constraints ∩{" "}
-              <span className="text-accent">Permitted Consequence</span>
+              <span className="font-semibold text-ink">Permitted Consequence</span>
               {"\n\n"}Outcomes: ALLOW · DENY · APPROVAL · QUARANTINE · SIMULATE
             </pre>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <div className={`mt-5 ${cardGridCls} sm:grid-cols-2`}>
               <div className={cardCls}>
                 <span className={tag}>AuthorityLease</span>
                 <h3 className="mb-1.5 text-base font-semibold text-ink">Task-scoped grant</h3>
@@ -257,7 +261,7 @@ export default function Home() {
               different verdict for a different reason each time.
             </p>
             <div className="overflow-x-auto">
-              <table className="w-full overflow-hidden rounded-xl border border-line text-sm">
+              <table className="w-full border border-line text-sm">
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-muted">
                     <th className="border-b border-line px-3.5 py-2.5">Request</th>
@@ -297,7 +301,7 @@ export default function Home() {
             <p className="mb-6 max-w-[64ch] text-muted">
               The product never implies it stopped something it could not stop.
             </p>
-            <div className="rounded-xl border border-accent/30 bg-muted-bg p-5">
+            <div className="rounded-md border border-line-strong bg-muted-bg p-5">
               <h3 className="mb-2 text-sm font-semibold text-accent">Read before relying on it</h3>
               <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted">
                 <li>
@@ -329,7 +333,7 @@ export default function Home() {
             with many of those.
           </p>
           <div className="overflow-x-auto">
-            <table className="w-full overflow-hidden rounded-xl border border-line text-sm">
+            <table className="w-full border border-line text-sm">
               <tbody className="text-text">
                 {[
                   ["IAM / RBAC", "who may access this resource?"],

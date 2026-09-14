@@ -4,44 +4,50 @@
 @custom-variant research (&:where([data-view="research"], [data-view="research"] *));
 
 :root {
-  /* Teal-forward, matte. Amber is reserved for alerts; red for deny. */
-  --bg: #f7f8f8;
-  --bg-soft: #ffffff;
-  --panel: #ffffff;
-  --muted-bg: #eef2f1;
-  --border: #e3e8e7;
-  --border-strong: #cfd8d6;
-  --ink: #12201f;
-  --text: #24312f;
-  --muted: #4a5c5b;
-  --accent: #0f766e;
-  --accent-strong: #0b5a53;
-  --signal: #b45309;
-  --ok: #0f766e;
-  --deny: #b91c1c;
-  --term-bg: #0d1513;
-  --term-text: #e8f1ef;
-  --term-dim: #7f938f;
+  /* Agent-plane's actual brand: ink (#11110F) and paper (#F4F4EF), taken
+     directly from agent_plane/console/brand/*.svg and console/tailwind.config.ts.
+     No invented accent hue. Colour is reserved for state (signal/ok/deny),
+     matching the product's own "colour only where state needs it" policy. */
+  --bg: #f4f4ef;
+  --bg-soft: #fafaf6;
+  --panel: #fafaf6;
+  --muted-bg: #ececE6;
+  --border: #d7d7cf;
+  --border-strong: #b9b9b0;
+  --ink: #11110f;
+  --text: #11110f;
+  --muted: #66665f;
+  --accent: #11110f;
+  --accent-strong: #11110f;
+  --signal: #9a6b12;
+  --ok: #3e6b50;
+  --deny: #b4322a;
+  --term-bg: #0c0c0a;
+  --term-text: #f4f4ef;
+  --term-dim: #8a8a82;
 }
 
 .dark {
-  --bg: #0b1211;
-  --bg-soft: #0f1a18;
-  --panel: #111c1a;
-  --muted-bg: #16221f;
-  --border: #1e2e2c;
-  --border-strong: #2a3d3a;
-  --ink: #e8f1ef;
-  --text: #d5e2df;
-  --muted: #93a9a6;
-  --accent: #2dd4bf;
-  --accent-strong: #5eead4;
-  --signal: #fbbf24;
-  --ok: #34d399;
-  --deny: #f87171;
-  --term-bg: #070d0c;
-  --term-text: #e8f1ef;
-  --term-dim: #6f827e;
+  /* The product has no dark mode to draw from yet - these are an
+     interpolated extension of the same ink/paper pair, not a brand-mandated
+     value. Revisit once the console ships its own dark palette. */
+  --bg: #121210;
+  --bg-soft: #171714;
+  --panel: #1b1b17;
+  --muted-bg: #212119;
+  --border: #2c2c24;
+  --border-strong: #3b3b30;
+  --ink: #f4f4ef;
+  --text: #ededE6;
+  --muted: #a6a69b;
+  --accent: #f4f4ef;
+  --accent-strong: #f4f4ef;
+  --signal: #c98a2a;
+  --ok: #5e8f73;
+  --deny: #d66158;
+  --term-bg: #080806;
+  --term-text: #f4f4ef;
+  --term-dim: #6e6e64;
 }
 
 @theme inline {
@@ -62,8 +68,13 @@
   --color-term: var(--term-bg);
   --color-term-text: var(--term-text);
   --color-term-dim: var(--term-dim);
-  --font-sans: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-geist-sans), Inter, "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Near-zero radius scale, matching console/tailwind.config.ts's own -
+     agent-plane's corner language is flat, not soft. */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
 }
 
 html {
