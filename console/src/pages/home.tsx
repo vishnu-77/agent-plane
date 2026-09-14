@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Coffee } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/lib/store";
 import { Button } from "@/components/ui";
@@ -20,6 +21,11 @@ export function HomePage() {
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-5 sm:px-8">
         <PublicBrand />
         <nav aria-label="Account" className="flex items-center gap-4">
+          <a href="https://buymeacoffee.com/vishnuprashanth" target="_blank" rel="noopener"
+            className="inline-flex items-center gap-1.5 rounded border border-hairline-strong bg-paper-raised px-3 py-1.5 text-sm hover:bg-paper-sunk">
+            <Coffee size={14} />
+            Support
+          </a>
           <Link to="/login" className="text-sm underline underline-offset-4">Sign in</Link>
           <Link to="/signup" className="inline-flex min-h-10 items-center justify-center bg-ink px-4 py-2 text-sm text-paper hover:opacity-90">Sign up</Link>
         </nav>
@@ -61,7 +67,7 @@ export function HomePage() {
         </div>
       </section>
     </main>
-    <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><span className="flex gap-4"><a href="/docs" className="underline underline-offset-4">API documentation</a><button type="button" onClick={() => setFeedbackOpen(true)} className="underline underline-offset-4">Feedback</button><a href="https://buymeacoffee.com/vishnuprashanth" target="_blank" rel="noopener" className="underline underline-offset-4">Buy me a coffee</a></span></div></footer>
+    <footer className="border-t border-hairline px-5 py-5"><div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-3 text-xs text-ink-2"><span>Authority answers “Can the agent do this?”</span><span className="flex gap-4"><a href="/docs" className="underline underline-offset-4">API documentation</a><button type="button" onClick={() => setFeedbackOpen(true)} className="underline underline-offset-4">Feedback</button></span></div></footer>
     <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} context="home page" />
   </div>;
 }
