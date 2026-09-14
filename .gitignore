@@ -24,6 +24,8 @@
 !/deploy/
 !/console/
 /console/node_modules/
+!/website/
+/website/node_modules/
 !/EDGES.md
 !/CONFIGURATION.md
 !/ARCHITECTURE.md
