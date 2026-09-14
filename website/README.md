@@ -24,4 +24,6 @@ npm run dev      # http://localhost:3000
 npm run build    # static export to ./out
 ```
 
-Deploy `out/` to any static host (Vercel, Cloudflare Pages, GitHub Pages).
+Ships as the `website` service in the root `vercel.json`, alongside the
+FastAPI backend, as one Vercel project/deployment (see "Vercel Services" in
+the root `README.md` or `ARCHITECTURE.md`). It is not deployed separately.
