@@ -160,6 +160,26 @@ def test_console_and_root_redirect(client):
     # Client-side routes render the shell; unknown files do not.
     assert client.get("/console/decisions").status_code == 200
     assert client.get("/console/assets/missing.js").status_code == 404
+
+
+def test_robots_and_sitemap_use_the_requests_own_host(client):
+    # No domain baked in: a self-hosted instance gets its own host back,
+    # whatever it was reached through - the TestClient's is testserver.
+    robots = client.get("/robots.txt")
+    assert robots.status_code == 200
+    assert "Sitemap: http://testserver/sitemap.xml" in robots.text
+
+    sitemap = client.get("/sitemap.xml")
+    assert sitemap.status_code == 200
+    assert sitemap.headers["content-type"].startswith("application/xml")
+    assert "<loc>http://testserver/</loc>" in sitemap.text
+
+
+def test_og_image_is_served_as_png(client):
+    r = client.get("/brand/og-image.png")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
     assert client.get("/brand/mark.svg").headers["content-type"].startswith("image/svg+xml")
 
 

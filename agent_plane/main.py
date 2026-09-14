@@ -255,9 +255,31 @@ def create_app() -> FastAPI:
     async def public_auth(request: Request) -> RedirectResponse:
         return RedirectResponse(f"/console/#/{request.url.path.rsplit('/', 1)[-1]}")
 
+    @app.get("/robots.txt", include_in_schema=False)
+    async def robots(request: Request) -> Response:
+        # request.base_url already carries whatever host this instance is
+        # reached through, so a self-hosted deployment gets its own sitemap
+        # URL for free - nothing here is baked to one domain.
+        base = str(request.base_url).rstrip("/")
+        return Response(f"User-agent: *\nAllow: /\nSitemap: {base}/sitemap.xml\n", media_type="text/plain")
+
+    @app.get("/sitemap.xml", include_in_schema=False)
+    async def sitemap(request: Request) -> Response:
+        base = str(request.base_url).rstrip("/")
+        urls = [(f"{base}/", "weekly", "1.0"), (f"{base}/docs", "monthly", "0.3")]
+        body = ['<?xml version="1.0" encoding="UTF-8"?>',
+                '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+        for loc, freq, priority in urls:
+            body.append(f"  <url><loc>{loc}</loc><changefreq>{freq}</changefreq><priority>{priority}</priority></url>")
+        body.append("</urlset>")
+        return Response("\n".join(body) + "\n", media_type="application/xml")
+
     @app.get("/brand/{name}", include_in_schema=False)
     async def brand(name: str) -> Response:
-        if name not in ("mark.svg", "logo.svg", "favicon.svg", "logo-dark.svg"):
+        svg = {"mark.svg", "logo.svg", "favicon.svg", "logo-dark.svg"}
+        if name == "og-image.png":
+            return Response((files("agent_plane.console") / "brand" / name).read_bytes(), media_type="image/png")
+        if name not in svg:
             raise HTTPException(status_code=404, detail="not found")
         return Response((files("agent_plane.console") / "brand" / name).read_bytes(), media_type="image/svg+xml")
 
