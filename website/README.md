@@ -19,9 +19,9 @@ See `lib/view.ts`.
 ## Develop
 
 ```bash
-npm install
-npm run dev      # http://localhost:3000
-npm run build    # static export to ./out
+pnpm install
+pnpm dev      # http://localhost:3000
+pnpm build    # static export to ./out
 ```
 
 Ships as the `website` service in the root `vercel.json`, alongside the

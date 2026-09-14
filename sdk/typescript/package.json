@@ -3,6 +3,7 @@
   "version": "0.7.0",
   "description": "TypeScript client for agent-plane runtime task authorization",
   "license": "MIT",
+  "packageManager": "pnpm@11.14.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

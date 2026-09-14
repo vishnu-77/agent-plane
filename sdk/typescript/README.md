@@ -162,8 +162,8 @@ await admin.revokeLease(lease.id);
 ## Develop
 
 ```bash
-npm install
-npm run typecheck
-npm run build
-npm test
+pnpm install
+pnpm typecheck
+pnpm build
+pnpm test
 ```
