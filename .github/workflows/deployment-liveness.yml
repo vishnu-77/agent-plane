@@ -1,0 +1,29 @@
+name: Deployment liveness check
+
+# Vercel's GitHub integration reports a deployment_status for every preview
+# and production deploy. Vercel calling it "Ready" only means the build
+# succeeded - it says nothing about whether the app actually boots (main.py
+# fails closed on missing/insecure production secrets) or can reach its
+# stores. Hit the app's own readiness endpoint before trusting "Ready".
+on:
+  deployment_status
+
+jobs:
+  readyz:
+    if: github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for /readyz to report ready
+        run: |
+          url="${{ github.event.deployment_status.target_url }}"
+          echo "Checking $url/readyz"
+          code=000
+          for i in $(seq 1 10); do
+            code=$(curl -s -o body.json -w "%{http_code}" "$url/readyz" || echo "000")
+            [ "$code" = "200" ] && { echo "ready: $(cat body.json)"; exit 0; }
+            echo "attempt $i: HTTP $code, retrying in 6s"
+            sleep 6
+          done
+          echo "::error::$url/readyz never returned 200 (last: HTTP $code)"
+          cat body.json 2>/dev/null || true
+          exit 1
