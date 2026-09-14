@@ -1,13 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { DESCRIPTION, SITE_URL, TITLE } from "@/lib/site";
 import { viewScript } from "@/lib/view";
 import "./globals.css";
 
-const grotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-grotesk", display: "swap" });
-const jetbrains = JetBrains_Mono({
+// Matches the console's own font stack (console/tailwind.config.ts) - one
+// typeface across the whole product, not a marketing-page-only pairing.
+const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans", display: "swap" });
+const geistMono = Geist_Mono({
   subsets: ["latin"],
-  variable: "--font-jetbrains",
+  variable: "--font-geist-mono",
   display: "swap",
   preload: false,
 });
@@ -43,8 +45,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f8f8" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b1211" },
+    { media: "(prefers-color-scheme: light)", color: "#f4f4ef" },
+    { media: "(prefers-color-scheme: dark)", color: "#121210" },
   ],
 };
 
@@ -53,7 +55,7 @@ const themeScript = `(function(){try{var t=localStorage.getItem("agentplane-them
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${grotesk.variable} ${jetbrains.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <script dangerouslySetInnerHTML={{ __html: viewScript }} />
