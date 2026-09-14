@@ -58,6 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: sdk/typescript/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -66,7 +69,7 @@ jobs:
         # Run what the package itself defines, so this cannot drift from it
         # again: Node 22 resolves a bare "test/" as a CJS module and dies with
         # MODULE_NOT_FOUND before loading a single test.
-        run: npm test
+        run: pnpm test
 
   helm:
     runs-on: ubuntu-latest
