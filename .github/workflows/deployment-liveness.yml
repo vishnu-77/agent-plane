@@ -11,6 +11,16 @@ name: Deployment liveness check
 # URL, so there is nothing to curl there. Vercel's environment is always a
 # bare name ("Production", "Preview"); Railway's is always "<project> /
 # <env>". That slash is the reliable way to tell them apart.
+#
+# Vercel's per-deployment URL (the target_url for a Preview, and even for
+# Production before the alias updates) sits behind Deployment Protection -
+# every project domain is protected except the assigned custom domain
+# (agent-plane.cc). So a Production check goes straight to the custom
+# domain, which needs no bypass at all. A Preview has no such stable domain;
+# checking its own target_url would need VERCEL_AUTOMATION_BYPASS_SECRET as
+# a repo secret (Settings -> Deployment Protection -> Protection Bypass for
+# Automation) - until that secret exists, Preview checks are skipped rather
+# than failing on a protection page that has nothing to do with app health.
 on:
   deployment_status
 
@@ -22,12 +32,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for /readyz to report ready
+        env:
+          BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
-          url="${{ github.event.deployment_status.target_url }}"
+          if [ "${{ github.event.deployment.environment }}" = "Production" ]; then
+            url="https://agent-plane.cc"
+            header=()
+          else
+            if [ -z "$BYPASS" ]; then
+              echo "No VERCEL_AUTOMATION_BYPASS_SECRET configured - skipping this Preview deployment's protected URL."
+              exit 0
+            fi
+            url="${{ github.event.deployment_status.target_url }}"
+            header=(-H "x-vercel-protection-bypass: $BYPASS")
+          fi
           echo "Checking $url/readyz"
           code=000
           for i in $(seq 1 10); do
-            code=$(curl -s -o body.json -w "%{http_code}" "$url/readyz" || echo "000")
+            code=$(curl -s "${header[@]}" -o body.json -w "%{http_code}" "$url/readyz" || echo "000")
             [ "$code" = "200" ] && { echo "ready: $(cat body.json)"; exit 0; }
             echo "attempt $i: HTTP $code, retrying in 6s"
             sleep 6
