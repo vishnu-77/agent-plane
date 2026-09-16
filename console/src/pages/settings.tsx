@@ -103,7 +103,7 @@ function ModeSettings({ project }: { project: Project }) {
       ))}
       <p className="text-xs text-ink-3">
         Enforce only blocks where the integration can block. An SDK or editor that reports after the fact is
-        flagged, not stopped; the Integrations screen says which is which.
+        flagged, not stopped; the Connect screen says which is which.
       </p>
     </div>
   );

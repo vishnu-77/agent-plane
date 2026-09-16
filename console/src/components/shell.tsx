@@ -13,8 +13,8 @@ import { Badge, Button, Dialog, DialogContent, Input } from "./ui";
 const NAV = [
   { to: "/", label: "Activity", end: true },
   { to: "/agents", label: "Agents" },
-  { to: "/rules", label: "Rules" },
-  { to: "/integrations", label: "Integrations" },
+  { to: "/access", label: "Access" },
+  { to: "/connect", label: "Connect" },
 ];
 
 export function ProjectSwitcher() {
@@ -70,7 +70,7 @@ export function ProjectSwitcher() {
               setCreating(false);
               await refreshAccount();
               selectProject(created.project.id);
-              navigate("/integrations");
+              navigate("/connect");
             }}
           >
             <label className="block">
@@ -178,7 +178,7 @@ export function Shell() {
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <ModeSwitch />
+          <ModeSwitch compact />
           {authState?.demo_available ? (
             <div role="group" aria-label="Data source" className="inline-flex items-center rounded border border-hairline-strong bg-paper-raised p-[2px]">
               {(["live", "demo"] as const).map((s) => (

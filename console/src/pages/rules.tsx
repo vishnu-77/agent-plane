@@ -74,12 +74,12 @@ export function RulesPage() {
     <div className="mx-auto max-w-4xl px-4 py-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-lg font-medium tracking-tight">Rules</h1>
+          <h1 className="text-lg font-medium tracking-tight">Access</h1>
           <p className="mt-0.5 text-sm text-ink-2">
-            What your agents may do, what needs a human, and what is never allowed.
+            Choose what your agents can do, what needs your approval, and what should be blocked.
           </p>
         </div>
-        <Button variant="default" disabled={readOnly} onClick={() => setEditing("new")}>Create rule</Button>
+        <Button variant="default" disabled={readOnly} onClick={() => setEditing("new")}>Set access</Button>
       </div>
       {error ? <p className="mb-3 text-xs text-deny">{error}</p> : null}
 
@@ -126,18 +126,18 @@ export function RulesPage() {
         </div>
       ) : (
         <div className="panel px-4 py-10 text-center">
-          <div className="text-sm font-medium">No custom rules.</div>
+          <div className="text-sm font-medium">No access rules yet.</div>
           <p className="mx-auto mt-2 max-w-md text-sm text-ink-2">
-            agent-plane is currently observing activity without enforcing additional restrictions.
+            agent-plane is observing activity without adding extra restrictions. Start here when you want to constrain an agent.
           </p>
-          <Button className="mt-4" variant="default" disabled={readOnly} onClick={() => setEditing("new")}>Create rule</Button>
+          <Button className="mt-4" variant="default" disabled={readOnly} onClick={() => setEditing("new")}>Set access</Button>
         </div>
       )}
 
       {suggestions.length ? (
         <section className="mt-6">
           <h2 className="text-sm font-medium">Suggested from recorded activity</h2>
-          <p className="mt-0.5 text-xs text-ink-2">Known low-risk reads may be allowed. Changes and unknowns need review. Resources and consequence bounds come from recorded decision evidence, not execution frequency.</p>
+          <p className="mt-0.5 text-xs text-ink-2">Suggestions are derived from recorded decisions. Review them before applying; activity alone never widens access.</p>
           <div className="mt-3 space-y-3">
             {suggestions.map((draft, i) => (
               <div key={i} className="panel px-4 py-3">
