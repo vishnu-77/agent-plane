@@ -36,9 +36,9 @@ export function IntegrationsPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-6">
       <div className="mb-5">
-        <h1 className="text-lg font-medium tracking-tight">Integrations</h1>
+        <h1 className="text-lg font-medium tracking-tight">Connect</h1>
         <p className="mt-0.5 text-sm text-ink-2">
-          Connect an agent so agent-plane can see what it does. Each one says plainly what it can observe and whether it can block.
+          Connect the agent or runtime you already use. Once its first action arrives, you can inspect what it did and whether it stayed within access.
         </p>
       </div>
       {error ? <p className="mb-3 text-xs text-deny">{error}</p> : null}
@@ -75,8 +75,8 @@ export function IntegrationsPage() {
         <section className="mt-8">
           <div className="mb-3 flex items-end justify-between">
             <div>
-              <h2 className="text-sm font-medium">API keys</h2>
-              <p className="mt-0.5 text-xs text-ink-2">One per machine or environment, so you can revoke just that one.</p>
+              <h2 className="text-sm font-medium">Custom agents & API keys</h2>
+              <p className="mt-0.5 text-xs text-ink-2">Building your own agent? Use a project API key directly. Keep one per machine or environment so it can be revoked independently.</p>
             </div>
             <CreateKey projectId={project.id} onCreated={load} />
           </div>

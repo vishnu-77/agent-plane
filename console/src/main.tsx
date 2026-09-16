@@ -22,6 +22,9 @@ const router = createHashRouter([
     children: [
       { index: true, element: <ActivityPage /> },
       { path: "agents", element: <AgentsPage /> },
+      { path: "access", element: <RulesPage /> },
+      { path: "connect", element: <IntegrationsPage /> },
+      // Legacy URLs stay valid: this is a UX vocabulary change, not a routing break.
       { path: "rules", element: <RulesPage /> },
       { path: "integrations", element: <IntegrationsPage /> },
       { path: "settings", element: <SettingsPage /> },

@@ -100,7 +100,7 @@ export function ActivityPage() {
         <StatTile label="Agents" value={String(agentCount)}
           sub={activeCount ? `${activeCount} running now` : "none running"} />
         <StatTile label="Pending review" value={String(pending)} tone={pending ? "approval" : undefined} />
-        <StatTile label="Rules" value={String(project.rules)} />
+        <StatTile label="Access rules" value={String(project.rules)} />
       </div>
 
       <div className="mb-4">
@@ -126,12 +126,12 @@ export function ActivityPage() {
         <div className="mb-4 rounded border border-hairline bg-paper-raised px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-medium">No rules yet</div>
+              <div className="text-sm font-medium">No access boundaries yet</div>
               <p className="mt-0.5 text-sm text-ink-2">
-                Nothing here has been judged. Until you write a rule, Enforce would allow none of it.
+                You can observe freely now. Set access when you want to define what this agent may do, what needs approval, and what should be blocked.
               </p>
             </div>
-            <Button size="sm" onClick={() => navigate("/rules")}>Write a rule</Button>
+            <Button size="sm" onClick={() => navigate("/access")}>Set access</Button>
           </div>
         </div>
       ) : null}
@@ -168,10 +168,10 @@ export function ActivityPage() {
             ) : (
               <>
                 <p className="mx-auto mt-2 max-w-md text-sm text-ink-2">
-                  Connect a coding agent, MCP server, or application to start observing actions.
+                  Connect a coding agent, MCP server, or your own application. Its actions will appear here as they happen.
                 </p>
-                <Button className="mt-4" variant="default" onClick={() => navigate("/integrations")}>
-                  Connect an integration
+                <Button className="mt-4" variant="default" onClick={() => navigate("/connect")}>
+                  Connect an agent
                 </Button>
                 {me && !me.onboarded ? (
                   <p className="mt-3 text-xs text-ink-3">
