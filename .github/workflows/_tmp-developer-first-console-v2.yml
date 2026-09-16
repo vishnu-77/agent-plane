@@ -1,0 +1,114 @@
+name: Temporary developer-first console build v2
+
+on:
+  push:
+    branches:
+      - ux/developer-first-console
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: console/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Apply developer-first console changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_expected(path: str, old: str, new: str, expected: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} match(es), found {count}: {old!r}")
+              p.write_text(text.replace(old, new))
+
+          replace_expected(
+              "console/src/main.tsx",
+              '      { path: "agents", element: <AgentsPage /> },\n      { path: "rules", element: <RulesPage /> },\n      { path: "integrations", element: <IntegrationsPage /> },\n      { path: "settings", element: <SettingsPage /> },',
+              '      { path: "agents", element: <AgentsPage /> },\n      { path: "access", element: <RulesPage /> },\n      { path: "connect", element: <IntegrationsPage /> },\n      // Legacy URLs stay valid: this is a UX vocabulary change, not a routing break.\n      { path: "rules", element: <RulesPage /> },\n      { path: "integrations", element: <IntegrationsPage /> },\n      { path: "settings", element: <SettingsPage /> },',
+          )
+
+          replace_expected(
+              "console/src/components/shell.tsx",
+              'const NAV = [\n  { to: "/", label: "Activity", end: true },\n  { to: "/agents", label: "Agents" },\n  { to: "/rules", label: "Rules" },\n  { to: "/integrations", label: "Integrations" },\n];',
+              'const NAV = [\n  { to: "/", label: "Activity", end: true },\n  { to: "/agents", label: "Agents" },\n  { to: "/access", label: "Access" },\n  { to: "/connect", label: "Connect" },\n];',
+          )
+          replace_expected("console/src/components/shell.tsx", '              navigate("/integrations");', '              navigate("/connect");')
+          replace_expected("console/src/components/shell.tsx", '          <ModeSwitch />', '          <ModeSwitch compact />')
+
+          replace_expected("console/src/pages/activity.tsx", '<StatTile label="Rules" value={String(project.rules)} />', '<StatTile label="Access rules" value={String(project.rules)} />')
+          replace_expected("console/src/pages/activity.tsx", '<div className="text-sm font-medium">No rules yet</div>', '<div className="text-sm font-medium">No access boundaries yet</div>')
+          replace_expected(
+              "console/src/pages/activity.tsx",
+              'Nothing here has been judged. Until you write a rule, Enforce would allow none of it.',
+              'You can observe freely now. Set access when you want to define what this agent may do, what needs approval, and what should be blocked.',
+          )
+          replace_expected("console/src/pages/activity.tsx", '<Button size="sm" onClick={() => navigate("/rules")}>Write a rule</Button>', '<Button size="sm" onClick={() => navigate("/access")}>Set access</Button>')
+          replace_expected("console/src/pages/activity.tsx", 'Connect a coding agent, MCP server, or application to start observing actions.', 'Connect a coding agent, MCP server, or your own application. Its actions will appear here as they happen.')
+          replace_expected("console/src/pages/activity.tsx", 'onClick={() => navigate("/integrations")}>\n                  Connect an integration', 'onClick={() => navigate("/connect")}>\n                  Connect an agent')
+
+          replace_expected("console/src/pages/rules.tsx", '<h1 className="text-lg font-medium tracking-tight">Rules</h1>', '<h1 className="text-lg font-medium tracking-tight">Access</h1>')
+          replace_expected(
+              "console/src/pages/rules.tsx",
+              'What your agents may do, what needs a human, and what is never allowed.',
+              'Choose what your agents can do, what needs your approval, and what should be blocked.',
+          )
+          replace_expected("console/src/pages/rules.tsx", '>Create rule</Button>', '>Set access</Button>', expected=2)
+          replace_expected("console/src/pages/rules.tsx", '<div className="text-sm font-medium">No custom rules.</div>', '<div className="text-sm font-medium">No access rules yet.</div>')
+          replace_expected(
+              "console/src/pages/rules.tsx",
+              'agent-plane is currently observing activity without enforcing additional restrictions.',
+              'agent-plane is observing activity without adding extra restrictions. Start here when you want to constrain an agent.',
+          )
+          replace_expected(
+              "console/src/pages/rules.tsx",
+              'Known low-risk reads may be allowed. Changes and unknowns need review. Resources and consequence bounds come from recorded decision evidence, not execution frequency.',
+              'Suggestions are derived from recorded decisions. Review them before applying; activity alone never widens access.',
+          )
+
+          replace_expected("console/src/pages/integrations.tsx", '<h1 className="text-lg font-medium tracking-tight">Integrations</h1>', '<h1 className="text-lg font-medium tracking-tight">Connect</h1>')
+          replace_expected(
+              "console/src/pages/integrations.tsx",
+              'Connect an agent so agent-plane can see what it does. Each one says plainly what it can observe and whether it can block.',
+              'Connect the agent or runtime you already use. Once its first action arrives, you can inspect what it did and whether it stayed within access.',
+          )
+          replace_expected("console/src/pages/integrations.tsx", '<h2 className="text-sm font-medium">API keys</h2>', '<h2 className="text-sm font-medium">Custom agents & API keys</h2>')
+          replace_expected(
+              "console/src/pages/integrations.tsx",
+              'One per machine or environment, so you can revoke just that one.',
+              'Building your own agent? Use a project API key directly. Keep one per machine or environment so it can be revoked independently.',
+          )
+
+          replace_expected(
+              "console/src/pages/settings.tsx",
+              'flagged, not stopped; the Integrations screen says which is which.',
+              'flagged, not stopped; the Connect screen says which is which.',
+          )
+          PY
+      - name: Install and build console
+        working-directory: console
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+      - name: Commit source and generated bundle
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add console/src agent_plane/console/dist
+          git diff --cached --check
+          git commit -m "feat(console): simplify agent development workflow"
+          git push origin HEAD:ux/developer-first-console
