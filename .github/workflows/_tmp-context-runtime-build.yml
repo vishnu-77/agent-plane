@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feat/context-registry-runtime
-      - name: Narrow duplicated HTML marker
+      - name: Refine guarded performance patches
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -37,7 +37,22 @@ jobs:
           '''
           if old not in s:
               raise SystemExit("static-shell marker patch not found")
-          p.write_text(s.replace(old, new, 1))
+          s = s.replace(old, new, 1)
+          old_root = '''replace_once(
+              "agent_plane/main.py",
+              ''' + "'''" + '''    @app.get("/", include_in_schema=False)\\n    async def root() -> RedirectResponse:\\n        return RedirectResponse("/console")\\n''' + "'''" + ''',
+              ''' + "'''" + '''    @app.get("/", include_in_schema=False)\\n    async def root() -> Response:\\n        # The shell is user-independent: cache it at the CDN so a Vercel cold\\n        # start does not sit in front of every landing-page navigation. The\\n        # browser still revalidates; hashed JS/CSS carry the long immutable cache.\\n        index = files("agent_plane.console") / "dist" / "index.html"\\n        if index.is_file():\\n            return HTMLResponse(\\n                index.read_text(encoding="utf-8"),\\n                headers={"Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=86400"},\\n            )\\n        return RedirectResponse("/console")\\n''' + "'''" + ''',
+          )
+          '''
+          new_root = '''replace_once(
+              "agent_plane/main.py",
+              ''' + "'''" + '''    @app.get("/", include_in_schema=False)\\n    async def root() -> RedirectResponse:\\n        return RedirectResponse("/console")\\n''' + "'''" + ''',
+              ''' + "'''" + '''    @app.get("/", include_in_schema=False)\\n    async def root() -> RedirectResponse:\\n        return RedirectResponse("/console", headers={"Cache-Control": "public, max-age=0, s-maxage=300"})\\n''' + "'''" + ''',
+          )
+          '''
+          if old_root not in s:
+              raise SystemExit("root marker patch not found")
+          p.write_text(s.replace(old_root, new_root, 1))
           PY
       - name: Apply guarded integration patch
         run: python scripts/_tmp_context_runtime_patch.py
