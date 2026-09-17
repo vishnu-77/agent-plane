@@ -1,0 +1,73 @@
+name: Temporary context-action console build
+
+on:
+  push:
+    branches: [feat/context-action-plane]
+    paths: [.github/workflows/_tmp-context-action-build.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/context-action-plane
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: console/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Tighten decision-to-graph navigation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("console/src/components/decision.tsx")
+          s = p.read_text()
+          old = 'import { useEffect, useMemo, useState } from "react";\n'
+          new = old + 'import { useNavigate } from "react-router-dom";\n'
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+          old = '  const { detail, error, loading } = useDecision(open ? id : null);\n  const { feed, refresh, source } = useStore();\n'
+          new = '  const { detail, error, loading } = useDecision(open ? id : null);\n  const navigate = useNavigate();\n  const { feed, refresh, source } = useStore();\n'
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+          old = '''              <Button size="sm" onClick={() => setShowPath((v) => !v)}>
+                {showPath ? "Hide authority path" : "View authority path"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowEvidence((v) => !v)}>
+                {showEvidence ? "Hide evidence" : "Evidence"}
+              </Button>'''
+          new = '''              <Button size="sm" onClick={() => setShowPath((v) => !v)}>
+                {showPath ? "Hide graph" : "View graph"}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => {
+                onOpenChange(false);
+                navigate(`/graph?decision=${trace.decision_id}`);
+              }}>
+                Open full graph
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowEvidence((v) => !v)}>
+                {showEvidence ? "Hide evidence" : "Evidence"}
+              </Button>'''
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Build console
+        working-directory: console
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+      - name: Commit source adjustment and generated bundle
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add console/src/components/decision.tsx agent_plane/console/dist
+          git commit -m "feat(console): connect decisions to full graph" || exit 0
+          git push origin HEAD:feat/context-action-plane
