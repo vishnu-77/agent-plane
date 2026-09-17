@@ -9,6 +9,8 @@ import { ActivityPage } from "./pages/activity";
 import { AgentsPage } from "./pages/agents";
 import { RulesPage } from "./pages/rules";
 import { IntegrationsPage } from "./pages/integrations";
+import { GraphPage } from "./pages/graph";
+import { ContextPage } from "./pages/context";
 import { SettingsPage } from "./pages/settings";
 import { AuthPage, OnboardingPage } from "./pages/auth";
 import { HomePage } from "./pages/home";
@@ -24,6 +26,8 @@ const router = createHashRouter([
       { path: "agents", element: <AgentsPage /> },
       { path: "access", element: <RulesPage /> },
       { path: "connect", element: <IntegrationsPage /> },
+      { path: "graph", element: <GraphPage /> },
+      { path: "context", element: <ContextPage /> },
       // Legacy URLs stay valid: this is a UX vocabulary change, not a routing break.
       { path: "rules", element: <RulesPage /> },
       { path: "integrations", element: <IntegrationsPage /> },
