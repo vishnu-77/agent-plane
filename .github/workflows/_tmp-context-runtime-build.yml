@@ -17,71 +17,46 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feat/context-registry-runtime
-      - name: Refine guarded performance patches
+      - name: Keep context persistence off the ordinary cold-start path
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path("scripts/_tmp_context_runtime_patch.py")
+          p = Path("agent_plane/context/store.py")
           s = p.read_text()
-          old = '''replace_once(
-              "agent_plane/main.py",
-              '            return HTMLResponse(dist_index.read_text(encoding="utf-8"))\\n',
-              '            return HTMLResponse(dist_index.read_text(encoding="utf-8"), headers={"Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=86400"})\\n',
-          )
-          '''
-          new = '''replace_once(
-              "agent_plane/main.py",
-              '        if dist_index.is_file():\\n            return HTMLResponse(dist_index.read_text(encoding="utf-8"))\\n',
-              '        if dist_index.is_file():\\n            return HTMLResponse(dist_index.read_text(encoding="utf-8"), headers={"Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=86400"})\\n',
-          )
-          '''
-          if old not in s:
-              raise SystemExit("static-shell marker patch not found")
-          s = s.replace(old, new, 1)
-          old_root = '''replace_once(
-              "agent_plane/main.py",
-              ''' + "'''" + '''    @app.get("/", include_in_schema=False)\\n    async def root() -> RedirectResponse:\\n        return RedirectResponse("/console")\\n''' + "'''" + ''',
-              ''' + "'''" + '''    @app.get("/", include_in_schema=False)\\n    async def root() -> Response:\\n        # The shell is user-independent: cache it at the CDN so a Vercel cold\\n        # start does not sit in front of every landing-page navigation. The\\n        # browser still revalidates; hashed JS/CSS carry the long immutable cache.\\n        index = files("agent_plane.console") / "dist" / "index.html"\\n        if index.is_file():\\n            return HTMLResponse(\\n                index.read_text(encoding="utf-8"),\\n                headers={"Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=86400"},\\n            )\\n        return RedirectResponse("/console")\\n''' + "'''" + ''',
-          )
-          '''
-          new_root = '''replace_once(
-              "agent_plane/main.py",
-              ''' + "'''" + '''    @app.get("/", include_in_schema=False)\\n    async def root() -> RedirectResponse:\\n        return RedirectResponse("/console")\\n''' + "'''" + ''',
-              ''' + "'''" + '''    @app.get("/", include_in_schema=False)\\n    async def root() -> RedirectResponse:\\n        return RedirectResponse("/console", headers={"Cache-Control": "public, max-age=0, s-maxage=300"})\\n''' + "'''" + ''',
-          )
-          '''
-          if old_root not in s:
-              raise SystemExit("root marker patch not found")
-          p.write_text(s.replace(old_root, new_root, 1))
-          PY
-      - name: Apply guarded integration patch
-        run: python scripts/_tmp_context_runtime_patch.py
-      - name: Promote console assets to StaticFiles and expose timing
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("agent_plane/main.py")
-          s = p.read_text()
-          old = "from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response\n"
-          new = old + "from fastapi.staticfiles import StaticFiles\n"
+          old = '''    def __init__(self, db_url: str) -> None:\n        self._engine = create_sql_engine(db_url)\n        Base.metadata.create_all(self._engine)\n        self._session_factory = sessionmaker(bind=self._engine, class_=Session)\n        self._lock = threading.RLock()\n'''
+          new = '''    def __init__(self, db_url: str) -> None:\n        self._engine = create_sql_engine(db_url)\n        self._session_factory = sessionmaker(bind=self._engine, class_=Session)\n        self._lock = threading.RLock()\n        self._schema_ready = False\n\n    def _ensure_schema(self) -> None:\n        if self._schema_ready:\n            return\n        with self._lock:\n            if not self._schema_ready:\n                Base.metadata.create_all(self._engine)\n                self._schema_ready = True\n\n    def _session(self) -> Session:\n        self._ensure_schema()\n        return self._session_factory()\n'''
           assert s.count(old) == 1
           s = s.replace(old, new, 1)
-          old = '''    dist = files("agent_plane.console") / "dist"\n    dist_index = dist / "index.html"\n\n    @app.get("/console", include_in_schema=False)\n'''
-          new = '''    dist = files("agent_plane.console") / "dist"\n    dist_index = dist / "index.html"\n    assets_dir = dist / "assets"\n    if assets_dir.is_dir():\n        # Vercel can promote a real StaticFiles mount to CDN storage at build\n        # time, so hashed JS/CSS no longer pay a Python cold start. Local and\n        # self-hosted deployments still use the same Starlette mount.\n        app.mount("/console/assets", StaticFiles(directory=str(assets_dir)), name="console-assets")\n\n    @app.get("/console", include_in_schema=False)\n'''
-          assert s.count(old) == 1
-          s = s.replace(old, new, 1)
-          old = '''        response.headers["X-Request-ID"] = request_id\n        logger.info(\n'''
-          new = '''        response.headers["X-Request-ID"] = request_id\n        response.headers["Server-Timing"] = f"app;dur={elapsed * 1000:.1f}"\n        if request.url.path.startswith("/console/assets/"):\n            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"\n        logger.info(\n'''
-          assert s.count(old) == 1
-          s = s.replace(old, new, 1)
+          assert s.count("with self._lock, self._session_factory() as session:") == 1
+          s = s.replace("with self._lock, self._session_factory() as session:",
+                        "with self._lock, self._session() as session:", 1)
+          count = s.count("with self._session_factory() as session:")
+          assert count == 5, count
+          s = s.replace("with self._session_factory() as session:", "with self._session() as session:")
           p.write_text(s)
+          PY
+      - name: Add memory governance to the normal action vocabulary
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for filename in ("config/resources.yaml", "agent_plane/defaults/config/resources.yaml"):
+              p = Path(filename)
+              s = p.read_text()
+              marker = '''actions:\n  - pattern: "*.read"\n'''
+              resource = '''  - pattern: "memory://*"\n    environment: memory\n    criticality: medium\n    customer_facing: false\n    reversibility: recoverable\n    persistence: durable\n    description: persistent agent memory\n    business: cross-session context that can influence future actions\n\nactions:\n  - pattern: "*.read"\n'''
+              assert s.count(marker) == 1, filename
+              s = s.replace(marker, resource, 1)
+              marker = '''  - pattern: "*.list"\n    effect: list\n'''
+              actions = '''  - pattern: "*.list"\n    effect: list\n  - pattern: "memory.read"\n    effect: read\n    label: Read agent memory\n    consequence:\n      class: persistent_context_read\n      scope: memory_record\n      reversible: true\n    direct_effect: "persistent context enters the agent's current context"\n  - pattern: "memory.write"\n    effect: mutate\n    severity: medium\n    label: Write agent memory\n    reversibility: recoverable\n    persistence: durable\n    consequence:\n      class: persistent_context_change\n      scope: memory_record\n      reversible: true\n    direct_effect: "new persistent context may influence future sessions"\n'''
+              assert s.count(marker) == 1, filename
+              p.write_text(s.replace(marker, actions, 1))
 
-          pyproject = Path("pyproject.toml")
-          t = pyproject.read_text()
-          marker = '[tool.vercel]\nentrypoint = "agent_plane.main:app"\n'
-          replacement = marker + '\n[tool.vercel.fastapi.static]\ncdn = true\n'
-          assert t.count(marker) == 1
-          pyproject.write_text(t.replace(marker, replacement, 1))
+          p = Path("agent_plane/gateway/accounts_router.py")
+          s = p.read_text()
+          old = '''_ACTION_NAMESPACE_ORDER = ["filesystem", "tests", "git", "repository", "shell",\n                           "package", "branch", "network"]\n'''
+          new = '''_ACTION_NAMESPACE_ORDER = ["filesystem", "tests", "git", "repository", "shell",\n                           "package", "branch", "network", "memory"]\n'''
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new, 1))
           PY
       - uses: actions/setup-python@v5
         with:
@@ -93,12 +68,11 @@ jobs:
           pip install -e ./sdk/python
       - name: Run Python tests
         run: python -m pytest -q
-      - name: Refresh OpenAPI
-        run: python examples/export_openapi.py
-      - name: Format and lint Python
+      - name: Verify committed OpenAPI remains current
+        run: python examples/export_openapi.py --check
+      - name: Lint Python
         run: |
           pip install ruff==0.16.6
-          ruff check agent_plane tests --fix
           ruff check agent_plane tests
       - uses: pnpm/action-setup@v4
         with:
@@ -108,15 +82,16 @@ jobs:
           node-version: "22"
           cache: pnpm
           cache-dependency-path: console/pnpm-lock.yaml
-      - name: Build console
+      - name: Build console and verify committed bundle
         working-directory: console
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
-      - name: Commit implementation and generated artifacts
+          git diff --stat --exit-code -- ../agent_plane/console/dist
+      - name: Commit hardening
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add agent_plane console docs/openapi.json pyproject.toml tests/test_context_plane.py
-          git commit -m "feat: connect context registry to runtime" || exit 0
+          git add agent_plane/context/store.py agent_plane/gateway/accounts_router.py agent_plane/defaults/config/resources.yaml config/resources.yaml
+          git commit -m "perf: keep context persistence off cold start" || exit 0
           git push origin HEAD:feat/context-registry-runtime
