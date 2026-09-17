@@ -103,9 +103,7 @@ def _audit(request: Request, *, action: str, detail: str, tenant: str = "-") -> 
 # --------------------------------------------------------------------------- #
 # auth
 # --------------------------------------------------------------------------- #
-@accounts_router.get("/v1/auth/state")
-async def auth_state(request: Request) -> dict[str, Any]:
-    """What the sign-in screen needs before anyone has an account."""
+def _auth_state_payload(request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
     accounts = _store(request)
     users = accounts.user_count()
@@ -118,6 +116,37 @@ async def auth_state(request: Request) -> dict[str, Any]:
         "sso_available": settings.oidc_enabled,
         "password_login": settings.password_login_enabled,
     }
+
+
+def _me_payload(request: Request, user: User) -> dict[str, Any]:
+    accounts = _store(request)
+    workspaces = accounts.workspaces_for(user.id)
+    projects = [_project_view(request, p) for p in accounts.projects_for(user.id)]
+    return {
+        "user": user.model_dump(mode="json"),
+        "workspaces": [w.model_dump(mode="json") for w in workspaces],
+        "projects": projects,
+        "onboarded": any(p["connected"] for p in projects),
+    }
+
+
+@accounts_router.get("/v1/auth/state")
+async def auth_state(request: Request) -> dict[str, Any]:
+    """What the sign-in screen needs before anyone has an account."""
+    return _auth_state_payload(request)
+
+
+@accounts_router.get("/v1/auth/bootstrap")
+async def auth_bootstrap(request: Request) -> dict[str, Any]:
+    """One cold-start-friendly request for auth state plus the current session."""
+    state = _auth_state_payload(request)
+    try:
+        user = _current_user(request)
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        return {"state": state, "me": None}
+    return {"state": state, "me": _me_payload(request, user)}
 
 
 @accounts_router.post("/v1/auth/signup")
@@ -273,17 +302,7 @@ async def logout(response: Response) -> dict[str, Any]:
 
 @accounts_router.get("/v1/auth/me")
 async def me(request: Request) -> dict[str, Any]:
-    user = _current_user(request)
-    accounts = _store(request)
-    workspaces = accounts.workspaces_for(user.id)
-    projects = [_project_view(request, p) for p in accounts.projects_for(user.id)]
-    return {
-        "user": user.model_dump(mode="json"),
-        "workspaces": [w.model_dump(mode="json") for w in workspaces],
-        "projects": projects,
-        # The console uses this to decide whether to show onboarding.
-        "onboarded": any(p["connected"] for p in projects),
-    }
+    return _me_payload(request, _current_user(request))
 
 
 @accounts_router.post("/v1/auth/exchange")
@@ -311,6 +330,13 @@ async def exchange(request: Request, body: dict[str, Any] | None = None,
         project_id=ctx.project.id, kind=kind,
         name=str(body.get("name") or INTEGRATION_CATALOG[kind]["label"]),
         host=ctx.host, config={"version": body.get("version")} if body.get("version") else None)
+    context_kind = "mcp" if kind == "mcp" else ("harness" if kind in {"claude-code", "codex", "cursor", "langgraph"} else "tool")
+    request.app.state.context_store.register_many(ctx.project.id, [{
+        "kind": context_kind, "name": integration.name,
+        "source": f"integration://{kind}/{integration.id}", "trust": "project-bound",
+        "influence": "high" if context_kind in {"mcp", "harness"} else "medium",
+        "metadata": {"integration_id": integration.id, "integration_kind": kind, "host": ctx.host},
+    }], agent=ctx.agent)
     session_id = ctx.session or f"ses_{datetime.now(UTC).timestamp():.0f}"
     catalog = INTEGRATION_CATALOG[kind]
     return {
@@ -520,6 +546,13 @@ async def create_integration(request: Request, body: dict[str, Any]) -> dict[str
     integration = _store(request).upsert_integration(
         project_id=project_id, kind=kind, name=str(body.get("name") or INTEGRATION_CATALOG[kind]["label"]),
         host=body.get("host"), config=body.get("config") or {})
+    context_kind = "mcp" if kind == "mcp" else ("harness" if kind in {"claude-code", "codex", "cursor", "langgraph"} else "tool")
+    request.app.state.context_store.register_many(project_id, [{
+        "kind": context_kind, "name": integration.name,
+        "source": f"integration://{kind}/{integration.id}", "trust": "project-bound",
+        "influence": "high" if context_kind in {"mcp", "harness"} else "medium",
+        "metadata": {"integration_id": integration.id, "integration_kind": kind, "host": integration.host},
+    }])
     return {"integration": integration.model_dump(mode="json")}
 
 

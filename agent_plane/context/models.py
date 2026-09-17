@@ -108,7 +108,7 @@ class ContextLineage(BaseModel):
 
 
 def stable_asset_id(kind: str, source: str) -> str:
-    raw = f"{kind}:{source}".encode("utf-8")
+    raw = f"{kind}:{source}".encode()
     return f"ctx_{hashlib.sha256(raw).hexdigest()[:20]}"
 
 

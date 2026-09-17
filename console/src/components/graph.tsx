@@ -8,7 +8,7 @@
 // (what it causes, how far it reaches, the decision) below. Two views of the
 // same runtime, fused at the resource.
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Agent, Consequence, LineageLink, Trace } from "@/lib/api";
+import type { Agent, Consequence, ContextAsset, LineageLink, Trace } from "@/lib/api";
 import { cn, outcomeLabel, outcomeTone as baseTone } from "@/lib/format";
 
 // The graph's palette predates the product vocabulary; map one to the other.
@@ -20,7 +20,7 @@ const outcomeTone = (outcome: string | null | undefined, wouldBe?: string | null
 const shortId = (value: string | null | undefined, n = 12) =>
   !value ? "-" : value.length > n ? `${value.slice(0, n - 1)}...` : value;
 
-export type Layer = "origin" | "task" | "agent" | "authority" | "action" | "resource" | "effect" | "downstream" | "consequence" | "decision";
+export type Layer = "context" | "origin" | "task" | "agent" | "authority" | "action" | "resource" | "effect" | "downstream" | "consequence" | "decision";
 
 export interface GNode {
   id: string;
@@ -45,9 +45,10 @@ export interface Graph {
   edges: GEdge[];
 }
 
-export const LAYERS: Layer[] = ["origin", "task", "agent", "authority", "action", "resource", "effect", "downstream", "consequence", "decision"];
-const BAND_OF: Record<Layer, 0 | 1> = { origin: 0, task: 0, agent: 0, authority: 0, action: 0, resource: 0, effect: 1, downstream: 1, consequence: 1, decision: 1 };
+export const LAYERS: Layer[] = ["context", "origin", "task", "agent", "authority", "action", "resource", "effect", "downstream", "consequence", "decision"];
+const BAND_OF: Record<Layer, 0 | 1> = { context: 0, origin: 0, task: 0, agent: 0, authority: 0, action: 0, resource: 0, effect: 1, downstream: 1, consequence: 1, decision: 1 };
 const LAYER_TITLE: Record<Layer, string> = {
+  context: "CONTEXT",
   origin: "ORIGIN",
   task: "TASK",
   agent: "AGENT",
@@ -61,7 +62,7 @@ const LAYER_TITLE: Record<Layer, string> = {
 };
 
 // ---------------------------------------------------------------- model
-export function graphFromTrace(trace: Trace, siblings: Agent[] = [], opts: { lineageOnly?: boolean } = {}): Graph {
+export function graphFromTrace(trace: Trace, siblings: Agent[] = [], opts: { lineageOnly?: boolean; contextAssets?: ContextAsset[] } = {}): Graph {
   const nodes: GNode[] = [];
   const edges: GEdge[] = [];
   const add = (n: GNode) => {
@@ -77,6 +78,12 @@ export function graphFromTrace(trace: Trace, siblings: Agent[] = [], opts: { lin
   const origin = add({ id: "origin", layer: "origin", label: String(originText), sub: String(originKind), onPath: true });
   const task = add({ id: `task:${trace.task.id}`, layer: "task", label: trace.task.id, sub: trace.identity.tenant, onPath: true });
   edges.push({ from: origin, to: task, kind: "lineage", onPath: true });
+  for (const asset of (opts.contextAssets ?? []).slice(0, 8)) {
+    const id = add({ id: `ctx:${asset.id}`, layer: "context", label: asset.name,
+      sub: `${asset.kind} · ${asset.trust} · exposure ${asset.exposure_score}`, onPath: true,
+      tone: asset.exposure_score >= 70 ? "hold" : "neutral", data: asset });
+    edges.push({ from: id, to: task, kind: "lineage", onPath: true, label: "influenced" });
+  }
 
   // Lineage: ancestors of the acting agent, in order, then the agent itself.
   const chain: LineageLink[] = trace.authority.lineage;

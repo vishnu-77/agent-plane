@@ -212,10 +212,10 @@ class SqlContextStore:
 
     def assets(self, tenant: str | None, *, kind: str | None = None, limit: int = 500) -> list[ContextAsset]:
         with self._session_factory() as session:
-            stmt = select(AssetRow).order_by(AssetRow.updated_at.desc()).limit(limit)
+            stmt = select(AssetRow).order_by(AssetRow.updated_at.desc())
             if tenant is not None:
                 stmt = stmt.where(AssetRow.tenant == tenant)
-            rows = session.scalars(stmt).all()
+            rows = session.scalars(stmt.limit(limit)).all()
             items = [ContextAsset.model_validate(r.document) for r in rows]
             if kind:
                 items = [a for a in items if a.kind == kind]

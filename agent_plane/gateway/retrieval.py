@@ -82,6 +82,14 @@ async def retrieve(
     except IdentityError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
+    source_spec = knowledge.get(source)
+    source_assets = request.app.state.context_store.register_many(actor.tenant, [{
+        "kind": "knowledge", "name": source, "source": f"rag://{source}",
+        "trust": "internal", "influence": "high",
+        "metadata": {"source_type": source_spec.type if source_spec else "unknown",
+                     "document_count": len(source_spec.documents) if source_spec else 0},
+    }], agent=actor.agent_id)
+
     # 2. Source-level decision (the deterministic engine can gate a whole source).
     action = CanonicalAIRequest(
         request_type="retrieval",
@@ -101,6 +109,8 @@ async def retrieve(
         ))
 
     if decision.decision == DecisionAction.DENY:
+        request.app.state.context_store.link_decision(
+            actor.tenant, decision.decision_id, [a.id for a in source_assets], agent=actor.agent_id)
         record()
         raise HTTPException(
             status_code=403,
@@ -108,6 +118,8 @@ async def retrieve(
                     "decision_id": decision.decision_id},
         )
     if decision.decision == DecisionAction.APPROVAL_REQUIRED:
+        request.app.state.context_store.link_decision(
+            actor.tenant, decision.decision_id, [a.id for a in source_assets], agent=actor.agent_id)
         record()
         raise HTTPException(
             status_code=202,
@@ -123,6 +135,18 @@ async def retrieve(
     redactions: list[str] = []
     if decision.redact:
         results, redactions = scanner.redact_json(results, decision.redact)
+
+    doc_assets = request.app.state.context_store.register_many(actor.tenant, [{
+        "kind": "knowledge",
+        "name": str(item.get("id") or "document"),
+        "source": f"rag://{source}/{item.get('id')}",
+        "trust": "internal",
+        "influence": "medium",
+        "metadata": {"classification": item.get("classification"), "retrieval_score": item.get("score")},
+    } for item in results], agent=actor.agent_id)
+    context_asset_ids = [a.id for a in source_assets + doc_assets]
+    request.app.state.context_store.link_decision(
+        actor.tenant, decision.decision_id, context_asset_ids, agent=actor.agent_id)
 
     record(redactions)
     request.app.state.usage.record(
@@ -146,5 +170,6 @@ async def retrieve(
             "returned": len(results),
             "redactions_applied": redactions,
             "filtered_by_authorization": filtered_n,
+            "context_assets": context_asset_ids,
         },
     }

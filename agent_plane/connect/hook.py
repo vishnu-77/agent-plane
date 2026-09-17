@@ -47,6 +47,8 @@ BLOCK_EXIT = 2
 # PreToolUse, or --post genuinely not firing) can't grow this file forever.
 PENDING_CACHE_LIMIT = 200
 PENDING_CACHE_MAX_AGE_SECONDS = 3600
+CONTEXT_SCAN_INTERVAL_SECONDS = 30
+CONTEXT_FILE_LIMIT = 64
 
 
 def _repo_context(cwd: str | None) -> dict[str, str]:
@@ -71,6 +73,92 @@ def _repo_context(cwd: str | None) -> dict[str, str]:
 def _pending_cache_path() -> Path:
     override = os.environ.get("AGENTPLANE_HOME")
     return (Path(override) if override else Path.home() / ".agentplane") / "pending-confirmations.json"
+
+def _context_cache_path() -> Path:
+    override = os.environ.get("AGENTPLANE_HOME")
+    return (Path(override) if override else Path.home() / ".agentplane") / "context-discovery.json"
+
+
+def _repo_root(cwd: str) -> Path:
+    try:
+        root = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, timeout=2,
+                              capture_output=True, text=True, check=False).stdout.strip()
+        if root:
+            return Path(root)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return Path(cwd)
+
+
+def _context_file_asset(root: Path, path: Path, kind: str) -> dict[str, Any] | None:
+    try:
+        data = path.read_bytes()
+        stat = path.stat()
+        rel = path.relative_to(root).as_posix()
+    except (OSError, ValueError):
+        return None
+    return {
+        "kind": kind,
+        "name": path.parent.name if kind == "skill" and path.name == "SKILL.md" else path.name,
+        "source": f"repo://{rel}",
+        "digest": f"sha256:{hashlib.sha256(data).hexdigest()}",
+        "trust": "repository",
+        "influence": "high",
+        "metadata": {"path": rel, "size": stat.st_size, "mtime_ns": stat.st_mtime_ns},
+    }
+
+
+def _discover_context(cwd: str, integration: str) -> list[dict[str, Any]]:
+    """Bounded repository discovery for context that can shape a coding agent.
+
+    Only path/hash/metadata leave the machine. Instruction and skill contents
+    are deliberately not sent to the control plane.
+    """
+    root = _repo_root(cwd)
+    key = str(root)
+    now = time.time()
+    cache_path = _context_cache_path()
+    cache: dict[str, Any] = {}
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+    except (OSError, ValueError):
+        cache = {}
+    repos = cache.get("repos") if isinstance(cache.get("repos"), dict) else {}
+    cached = repos.get(key) if isinstance(repos.get(key), dict) else None
+    if cached and now - float(cached.get("at", 0)) < CONTEXT_SCAN_INTERVAL_SECONDS:
+        assets = cached.get("assets")
+        if isinstance(assets, list):
+            return [a for a in assets if isinstance(a, dict)]
+
+    assets: list[dict[str, Any]] = [{
+        "kind": "harness", "name": integration, "source": f"harness://{integration}",
+        "trust": "project-bound", "influence": "high",
+        "metadata": {"workspace": root.name},
+    }]
+    for rel in ("AGENTS.md", "CLAUDE.md", ".claude/CLAUDE.md"):
+        path = root / rel
+        if path.is_file():
+            asset = _context_file_asset(root, path, "instruction")
+            if asset:
+                assets.append(asset)
+
+    skill_paths: list[Path] = []
+    for base in (root / ".claude" / "skills", root / ".agents" / "skills", root / ".codex" / "skills"):
+        if base.is_dir():
+            skill_paths.extend(sorted(base.glob("*/SKILL.md")))
+    for path in skill_paths[:CONTEXT_FILE_LIMIT]:
+        asset = _context_file_asset(root, path, "skill")
+        if asset:
+            assets.append(asset)
+
+    repos[key] = {"at": now, "assets": assets}
+    cache["repos"] = repos
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache), encoding="utf-8")
+    except OSError:
+        pass
+    return assets
 
 
 def _signature(event: dict[str, Any]) -> str:
@@ -146,6 +234,7 @@ def _payload(raw: dict[str, Any], integration: str) -> dict[str, Any]:
         # explicitly collects prompt content.
         event["origin"] = {"kind": "prompt", "ref": raw.get("prompt_id") or session,
                            "text": raw.get("prompt") or raw.get("user_prompt")}
+    event["context_assets"] = _discover_context(cwd, integration)
     return event
 
 

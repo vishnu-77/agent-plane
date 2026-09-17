@@ -66,6 +66,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [paused, setPaused] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
   const generation = useRef(0);
+  const refreshing = useRef(false);
   const clearSessionNotice = useCallback(() => setSessionEnded(false), []);
 
   const refreshAccount = useCallback(async () => {
@@ -87,16 +88,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const state = await Api.authState();
-        setAuthState(state);
-        if (state.demo_token) setDemoToken(state.demo_token);
+        const boot = await Api.authBootstrap();
+        setAuthState(boot.state);
+        if (boot.state.demo_token) setDemoToken(boot.state.demo_token);
+        setMe(boot.me);
+        setSessionEnded(false);
+        if (boot.me) {
+          setProjectId((current) => boot.me!.projects.some((p) => p.id === current)
+            ? current
+            : (boot.me!.projects[0]?.id ?? null));
+        }
       } catch {
         setAuthState(null);
+        setMe(null);
+      } finally {
+        setReady(true);
       }
-      await refreshAccount();
-      setReady(true);
     })();
-  }, [refreshAccount]);
+  }, []);
 
   const projects = me?.projects ?? [];
   const project = source === "demo"
@@ -119,38 +128,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setFeed((f) => ({ ...f, loading: false }));
       return;
     }
+    if (refreshing.current) return;
+    refreshing.current = true;
     const gen = ++generation.current;
     setFeed((f) => ({ ...f, loading: true }));
-    const results = await Promise.allSettled([
-      Api.system(project.id, source),
-      Api.decisions(project.id, 120, source),
-      Api.agents(project.id, source),
-      Api.approvals(project.id, source),
-    ]);
-    if (gen !== generation.current) return;
-    const [system, decisions, agents, approvals] = results;
-    const failure = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
-
-    // A dead session must end the session, not be retried every few seconds.
-    // Polling with a project the server will no longer talk about turned one
-    // expired cookie into an unbounded stream of 401s.
-    const unauthorized = source === "live" && results.some(
-      (r) => r.status === "rejected" && (r.reason as ApiError)?.status === 401);
-    if (unauthorized) {
-      setMe(null);
-      setFeed(EMPTY);
-      setSessionEnded(true);
-      return;
+    try {
+      const next = await Api.bootstrap(project.id, source);
+      if (gen !== generation.current) return;
+      setFeed({ system: next.system, decisions: next.decisions, agents: next.agents, approvals: next.approvals,
+        error: null, loading: false, updatedAt: Date.now() });
+    } catch (e) {
+      if (gen !== generation.current) return;
+      const error = e as ApiError;
+      if (source === "live" && error.status === 401) {
+        setMe(null);
+        setFeed(EMPTY);
+        setSessionEnded(true);
+        return;
+      }
+      setFeed((f) => ({ ...f, error: error.message ?? "Cannot reach agent-plane", loading: false }));
+    } finally {
+      refreshing.current = false;
     }
-    setFeed({
-      system: system.status === "fulfilled" ? system.value : null,
-      decisions: decisions.status === "fulfilled" ? decisions.value.decisions : [],
-      agents: agents.status === "fulfilled" ? agents.value.agents : [],
-      approvals: approvals.status === "fulfilled" ? approvals.value.approvals : [],
-      error: system.status === "rejected" ? (failure?.reason as ApiError)?.message ?? "Cannot reach agent-plane" : null,
-      loading: false,
-      updatedAt: Date.now(),
-    });
   }, [project, source]);
 
   useEffect(() => {

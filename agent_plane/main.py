@@ -20,6 +20,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import OperationalError
 
 from agent_plane.accounts import build_account_store
@@ -33,6 +34,8 @@ from agent_plane.cache.store import build_cache_store
 from agent_plane.config import Settings, get_settings
 from agent_plane.consequence import build_consequence_catalog
 from agent_plane.consequence.state import build_task_consequence_state
+from agent_plane.context import build_context_store
+from agent_plane.context.router import context_router
 from agent_plane.demo.harness import DemoHarness
 from agent_plane.demo.router import demo_router
 from agent_plane.gateway.a2a import a2a_router
@@ -41,6 +44,7 @@ from agent_plane.gateway.admin import admin_router
 from agent_plane.gateway.approvals import approvals_router
 from agent_plane.gateway.authority import authority_router
 from agent_plane.gateway.broker import broker_router
+from agent_plane.gateway.console_api import console_api_router
 from agent_plane.gateway.events_router import events_router
 from agent_plane.gateway.retrieval import retrieval_router
 from agent_plane.gateway.router import router
@@ -134,6 +138,7 @@ async def lifespan(app: FastAPI):
         app.state.catalog = build_consequence_catalog(settings)
         app.state.consequence_state = build_task_consequence_state(settings)
         app.state.agent_registry = build_registry(settings)
+        app.state.context_store = build_context_store(settings)
         app.state.accounts = build_account_store(settings)
         app.state.rules = build_rule_store(settings)
     except OperationalError as exc:
@@ -235,6 +240,9 @@ def create_app() -> FastAPI:
         app.state.metrics.observe_request(
             request.method, request.url.path, response.status_code, elapsed)
         response.headers["X-Request-ID"] = request_id
+        response.headers["Server-Timing"] = f"app;dur={elapsed * 1000:.1f}"
+        if request.url.path.startswith("/console/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         logger.info(
             "%s %s -> %s %dms req_id=%s",
             request.method, request.url.path, response.status_code, int(elapsed * 1000), request_id,
@@ -246,7 +254,7 @@ def create_app() -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:
-        return RedirectResponse("/console")
+        return RedirectResponse("/console", headers={"Cache-Control": "public, max-age=0, s-maxage=300"})
 
     @app.get("/signup", include_in_schema=False)
     @app.get("/login", include_in_schema=False)
@@ -285,13 +293,19 @@ def create_app() -> FastAPI:
 
     dist = files("agent_plane.console") / "dist"
     dist_index = dist / "index.html"
+    assets_dir = dist / "assets"
+    if assets_dir.is_dir():
+        # Vercel can promote a real StaticFiles mount to CDN storage at build
+        # time, so hashed JS/CSS no longer pay a Python cold start. Local and
+        # self-hosted deployments still use the same Starlette mount.
+        app.mount("/console/assets", StaticFiles(directory=str(assets_dir)), name="console-assets")
 
     @app.get("/console", include_in_schema=False)
     async def console() -> HTMLResponse:
         # The built Vite console (agent_plane/console/dist). It is committed and
         # shipped in the wheel; `pnpm --dir console run build` regenerates it.
         if dist_index.is_file():
-            return HTMLResponse(dist_index.read_text(encoding="utf-8"))
+            return HTMLResponse(dist_index.read_text(encoding="utf-8"), headers={"Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=86400"})
         return HTMLResponse(
             "<!doctype html><title>agent-plane</title><p>The console is not built. "
             "Run <code>pnpm --dir console install &amp;&amp; pnpm --dir console run build</code> "
@@ -315,7 +329,7 @@ def create_app() -> FastAPI:
                 return Response(candidate.read_bytes(), media_type=media, headers=headers)
         # SPA fallback: client-side routes render the app shell.
         if dist_index.is_file() and "." not in path.rsplit("/", 1)[-1]:
-            return HTMLResponse(dist_index.read_text(encoding="utf-8"))
+            return HTMLResponse(dist_index.read_text(encoding="utf-8"), headers={"Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=86400"})
         raise HTTPException(status_code=404, detail="not found")
     @app.get("/readyz")
     async def readyz() -> JSONResponse:
@@ -340,6 +354,8 @@ def create_app() -> FastAPI:
     app.include_router(authority_router)
     app.include_router(approvals_router)
     app.include_router(registry_router)
+    app.include_router(context_router)
+    app.include_router(console_api_router)
     app.include_router(accounts_router)
     app.include_router(events_router)
     app.include_router(demo_router)

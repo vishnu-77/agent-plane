@@ -344,7 +344,18 @@ async def get_decision(request: Request, decision_id: str,
                 if any(isinstance(o, dict) and o.get("schema") == "agent-plane.gateway.v1"
                        and o.get("admission_id") == decision_id and o.get("phase") == "execution"
                        for o in e.get("obligations_applied") or [])]
-    return {"decision_id": decision_id, "event": event, "trace": trace, "related": related, "receipts": receipts}
+    context_lineage = request.app.state.context_store.lineage(event["tenant"], decision_id)
+    context_assets = []
+    if context_lineage is not None:
+        context_assets = [request.app.state.context_store.asset(event["tenant"], asset_id)
+                          for asset_id in context_lineage.asset_ids]
+    return {
+        "decision_id": decision_id, "event": event, "trace": trace, "related": related, "receipts": receipts,
+        "context_lineage": {
+            "lineage": context_lineage.model_dump(mode="json") if context_lineage else None,
+            "assets": [asset.public() for asset in context_assets if asset is not None],
+        },
+    }
 
 
 @registry_router.get("/v1/system")

@@ -83,7 +83,8 @@ export function GraphPage() {
     () => (trace ? feed.agents.filter((a) => a.tasks.includes(trace.task.id)) : []),
     [trace, feed.agents],
   );
-  const execution = useMemo(() => (trace ? graphFromTrace(trace, siblings) : null), [trace, siblings]);
+  const contextAssets = detail?.context_lineage?.assets ?? [];
+  const execution = useMemo(() => (trace ? graphFromTrace(trace, siblings, { contextAssets }) : null), [trace, siblings, contextAssets]);
   const system = useMemo(() => systemGraph(feed.decisions), [feed.decisions]);
   const graph = view === "execution" ? execution : system;
 
@@ -176,9 +177,9 @@ export function GraphPage() {
             <div className="mt-3 space-y-4 text-sm">
               <div><div className="eyebrow">Agent</div><div className="mt-1">{trace.identity.agent}</div></div>
               <div><div className="eyebrow">Task</div><div className="mt-1 font-mono text-xs">{trace.task.id}</div></div>
-              <div><div className="eyebrow">Context captured</div><div className="mt-1">{Object.keys(trace.context ?? {}).length} field{Object.keys(trace.context ?? {}).length === 1 ? "" : "s"}</div></div>
+              <div><div className="eyebrow">Context lineage</div><div className="mt-1">{contextAssets.length} asset{contextAssets.length === 1 ? "" : "s"}</div></div>
               <div><div className="eyebrow">Decision</div><div className="mt-1">{verdictLabel(trace.decision)}</div></div>
-              <p className="text-xs leading-5 text-ink-2">Select any graph node to inspect it. Context assets will become upstream nodes as Context adapters register provenance.</p>
+              <p className="text-xs leading-5 text-ink-2">Select any graph node to inspect it. Context nodes show what could influence the task; authority remains a separate boundary downstream.</p>
             </div>
           ) : (
             <p className="mt-3 text-xs leading-5 text-ink-2">System mode aggregates the recent observed agent → action → resource → decision topology. Select an execution for the full authority and consequence chain.</p>

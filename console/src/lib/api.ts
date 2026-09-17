@@ -71,6 +71,7 @@ export interface AuthState {
   demo_token: string | null; sso_available?: boolean; password_login?: boolean;
 }
 export interface Me { user: User; workspaces: Workspace[]; projects: Project[]; onboarded: boolean }
+export interface AuthBootstrap { state: AuthState; me: Me | null }
 
 export interface ApiKey {
   id: string; project_id: string; name: string; masked: string; environment: "live" | "test" | "mgmt";
@@ -155,6 +156,18 @@ export interface DecisionDetail {
   trace: Trace | null;
   related: Array<{ kind: string; approval: ApprovalRequest | null }>;
   receipts: Array<{ decision_id: string; created_at: string | null; model_requested: string; reason: string }>;
+  context_lineage?: ContextLineagePayload;
+}
+
+export interface ContextAsset {
+  id: string; tenant: string; kind: string; name: string; source: string; digest: string; previous_digest: string | null;
+  version: number; change_count: number; trust: string; influence: "low" | "medium" | "high";
+  capabilities: string[]; agents: string[]; tasks: string[]; provenance: Record<string, unknown>; metadata: Record<string, unknown>;
+  risk: Record<string, number>; exposure_score: number; first_seen: string; last_seen: string; changed_at: string;
+}
+export interface ContextLineagePayload {
+  lineage: { tenant: string; decision_id: string; asset_ids: string[]; task: string | null; agent: string | null; created_at: string } | null;
+  assets: ContextAsset[];
 }
 
 export interface Agent {
@@ -224,6 +237,7 @@ export const Api = {
     api<{ user: User }>("/v1/auth/login", { method: "POST", body }),
   logout: () => api<{ signed_out: boolean }>("/v1/auth/logout", { method: "POST" }),
   me: () => api<Me>("/v1/auth/me"),
+  authBootstrap: () => api<AuthBootstrap>("/v1/auth/bootstrap"),
   sendFeedback: (body: { message: string; context?: string }) =>
     api<{ url: string }>("/v1/feedback", { method: "POST", body }),
 
@@ -260,6 +274,14 @@ export const Api = {
       "/v1/rules/import", { method: "POST", body: { project, yaml, mode } }),
   suggestedRules: (project: string, source: Source = "live") =>
     api<{ suggestions: Array<Record<string, unknown>> }>(`/v1/rules/suggested?${q({ project })}`, { source }),
+
+  bootstrap: (project: string, source: Source = "live") =>
+    api<{ system: SystemState; decisions: DecisionSummary[]; agents: Agent[]; approvals: ApprovalRequest[] }>(
+      `/v1/console/bootstrap?${q({ project, decision_limit: 80 })}`, { source }),
+  contextAssets: (project: string, source: Source = "live") =>
+    api<{ assets: ContextAsset[]; count: number }>(`/v1/context/assets?${q({ project })}`, { source }),
+  contextChanges: (project: string, source: Source = "live") =>
+    api<{ changes: ContextAsset[]; count: number }>(`/v1/context/changes?${q({ project })}`, { source }),
 
   system: (project: string, source: Source = "live") => api<SystemState>(`/v1/system?${q({ tenant: project })}`, { source }),
   decisions: (project: string, limit = 100, source: Source = "live") =>

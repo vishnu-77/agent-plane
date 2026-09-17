@@ -92,6 +92,21 @@ def _one(request: Request, ctx: RequestContext, event: dict[str, Any]) -> dict[s
     if project.collects("tool_arguments") and isinstance(event.get("arguments"), dict):
         context.setdefault("arguments_recorded", "true")
 
+    raw_assets = event.get("context_assets")
+    assets = [a for a in raw_assets if isinstance(a, dict)] if isinstance(raw_assets, list) else []
+    tool_name = str(event.get("tool") or action)[:200]
+    assets.append({
+        "kind": "mcp" if integration == "mcp" else "tool",
+        "name": tool_name,
+        "source": f"{integration}://{tool_name}",
+        "trust": "project-bound" if ctx.integration else "unknown",
+        "influence": "high",
+        "capabilities": [action],
+        "metadata": {"integration": integration},
+    })
+    registered_context = request.app.state.context_store.register_many(
+        project.id, assets, agent=agent, task=task)
+
     actor = ctx.actor.model_copy(update={"agent_id": agent})
     result = request.app.state.authority.decide(
         actor, task=task, action=action, resource=resource,
@@ -99,6 +114,9 @@ def _one(request: Request, ctx: RequestContext, event: dict[str, Any]) -> dict[s
         approval=event.get("approval"), context=context,
         edge=integration, integration=integration,
     )
+
+    request.app.state.context_store.link_decision(
+        project.id, result.decision_id, [a.id for a in registered_context], task=task, agent=agent)
 
     request.app.state.accounts.touch_integration(
         project_id=project.id, kind=integration, host=ctx.host, agent=agent)
@@ -111,6 +129,7 @@ def _one(request: Request, ctx: RequestContext, event: dict[str, Any]) -> dict[s
         "enforcement": enforcement,
         # Be explicit: a decision only blocks if this connector can block.
         "binding": bool(result.enforced and enforcement in ("full", "partial")),
+        "context_assets": [a.id for a in registered_context],
     })
     return payload
 

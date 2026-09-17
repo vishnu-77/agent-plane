@@ -148,7 +148,8 @@ export function DecisionDrawer({ id, open, onOpenChange }: { id: string | null; 
   const siblings = useMemo(
     () => (trace ? feed.agents.filter((a) => a.tasks.includes(trace.task.id)) : []),
     [trace, feed.agents]);
-  const graph = useMemo(() => (trace ? graphFromTrace(trace, siblings) : null), [trace, siblings]);
+  const contextAssets = detail?.context_lineage?.assets ?? [];
+  const graph = useMemo(() => (trace ? graphFromTrace(trace, siblings, { contextAssets }) : null), [trace, siblings, contextAssets]);
   const tone = trace ? verdictTone(trace.decision) : "neutral";
 
   const decide = async (verb: "approve" | "reject") => {

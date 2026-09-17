@@ -158,7 +158,7 @@ async def authorize_memory(
         task=task,
         action=f"memory.{operation}",
         resource=resource,
-        impact=str(body.get("impact") or ("reversible" if operation == "write" else "read")),
+        impact=str(body.get("impact") or "reversible"),
         context={"memory_provider": provider, "memory_scope": scope_name},
         edge="custom",
         integration="custom",
