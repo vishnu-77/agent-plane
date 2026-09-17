@@ -8,14 +8,27 @@ import { MODE_COPY, ago, cn } from "@/lib/format";
 import { FeedbackDialog } from "./feedback";
 import { Badge, Button, Dialog, DialogContent, Input } from "./ui";
 
-// Four things a developer does, in the order they do them. Everything else
-// is either a drill-down or lives in Settings.
-const NAV = [
-  { to: "/", label: "Activity", end: true },
-  { to: "/agents", label: "Agents" },
-  { to: "/access", label: "Access" },
-  { to: "/connect", label: "Connect" },
+type NavItem = { to: string; label: string; mark: string; end?: boolean };
+
+const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: "Runtime",
+    items: [
+      { to: "/", label: "Activity", mark: "◉", end: true },
+      { to: "/agents", label: "Agents", mark: "A" },
+      { to: "/access", label: "Access", mark: "⛨" },
+      { to: "/connect", label: "Connect", mark: "+" },
+    ],
+  },
+  {
+    label: "Intelligence",
+    items: [
+      { to: "/graph", label: "Graph", mark: "◇" },
+      { to: "/context", label: "Context", mark: "C" },
+    ],
+  },
 ];
+const MOBILE_NAV = NAV_GROUPS.flatMap((group) => group.items);
 
 export function ProjectSwitcher() {
   const { project, projects, selectProject, source } = useStore();
@@ -132,12 +145,75 @@ export function ModeSwitch({ compact }: { compact?: boolean }) {
   );
 }
 
+function DesktopSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  return (
+    <aside className={cn(
+      "hidden shrink-0 flex-col border-r border-hairline bg-paper-raised transition-all md:flex",
+      collapsed ? "w-14" : "w-48",
+    )}>
+      <nav className="flex-1 px-2 py-3" aria-label="Workspace">
+        {NAV_GROUPS.map((group, groupIndex) => (
+          <div key={group.label} className={groupIndex ? "mt-5" : ""}>
+            {collapsed ? null : <div className="eyebrow mb-1 px-2">{group.label}</div>}
+            <div className="space-y-0.5">
+              {group.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  title={collapsed ? item.label : undefined}
+                  className={({ isActive }) => cn(
+                    "flex h-9 items-center rounded-sm text-sm text-ink-2 hover:bg-paper-sunk hover:text-ink",
+                    collapsed ? "justify-center px-0" : "gap-3 px-2",
+                    isActive && "bg-paper-sunk font-medium text-ink",
+                  )}
+                >
+                  <span className="dot inline-flex h-5 w-5 shrink-0 items-center justify-center text-[12px]">{item.mark}</span>
+                  {collapsed ? null : <span>{item.label}</span>}
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+      <div className="border-t border-hairline p-2">
+        <NavLink
+          to="/settings"
+          title={collapsed ? "Settings" : undefined}
+          className={({ isActive }) => cn(
+            "mb-1 flex h-9 items-center rounded-sm text-sm text-ink-2 hover:bg-paper-sunk hover:text-ink",
+            collapsed ? "justify-center" : "gap-3 px-2",
+            isActive && "bg-paper-sunk font-medium text-ink",
+          )}
+        >
+          <span className="dot inline-flex h-5 w-5 items-center justify-center text-[12px]">⚙</span>
+          {collapsed ? null : <span>Settings</span>}
+        </NavLink>
+        <button type="button" onClick={onToggle} title={collapsed ? "Expand navigation" : "Collapse navigation"}
+          className={cn("flex h-8 w-full items-center rounded-sm text-xs text-ink-3 hover:bg-paper-sunk hover:text-ink", collapsed ? "justify-center" : "gap-3 px-2")}>
+          <span className="dot inline-flex h-5 w-5 items-center justify-center">{collapsed ? "›" : "‹"}</span>
+          {collapsed ? null : <span>Collapse</span>}
+        </button>
+      </div>
+    </aside>
+  );
+}
+
 export function Shell() {
   const { project, feed, source, setSource, authState, me, signOut, paused, setPaused, refresh } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
   const connectedAgents = feed.agents.filter((a) => a.status !== "idle").length;
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("agent-plane.sidebar.collapsed") === "1");
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((value) => {
+      const next = !value;
+      window.localStorage.setItem("agent-plane.sidebar.collapsed", next ? "1" : "0");
+      return next;
+    });
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -156,31 +232,15 @@ export function Shell() {
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-hairline bg-paper-raised px-4">
         <a href="#/" className="flex items-center gap-2" aria-label="agent-plane">
           <img src="/brand/mark.svg" alt="" width={22} height={22} />
-          <span className="dot text-[13px] font-semibold tracking-[0.2em]">AGENT-PLANE</span>
+          <span className="dot hidden text-[13px] font-semibold tracking-[0.2em] sm:inline">AGENT-PLANE</span>
         </a>
         <span className="text-hairline-strong">/</span>
         <ProjectSwitcher />
 
-        <nav className="ml-6 hidden items-center gap-1 md:flex" aria-label="Main">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                cn("rounded px-2.5 py-1 text-sm text-ink-2 hover:bg-paper-sunk hover:text-ink",
-                   isActive && "bg-paper-sunk font-medium text-ink")
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-
         <div className="ml-auto flex items-center gap-3">
           <ModeSwitch compact />
           {authState?.demo_available ? (
-            <div role="group" aria-label="Data source" className="inline-flex items-center rounded border border-hairline-strong bg-paper-raised p-[2px]">
+            <div role="group" aria-label="Data source" className="hidden items-center rounded border border-hairline-strong bg-paper-raised p-[2px] sm:inline-flex">
               {(["live", "demo"] as const).map((s) => (
                 <button key={s} type="button" aria-pressed={source === s} onClick={() => setSource(s)}
                   className={cn("dot rounded-sm px-2 py-1 text-2xs", source === s ? "bg-ink text-paper" : "text-ink-2 hover:text-ink")}>
@@ -215,36 +275,42 @@ export function Shell() {
 
       <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} context={location.pathname} />
 
-      <nav className="flex items-center gap-1 border-b border-hairline bg-paper-raised px-4 py-1.5 md:hidden" aria-label="Main">
-        {NAV.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end}
-            className={({ isActive }) => cn("rounded px-2 py-1 text-sm text-ink-2", isActive && "bg-paper-sunk text-ink")}>
-            {item.label}
-          </NavLink>
-        ))}
-      </nav>
+      <div className="flex min-h-0 flex-1">
+        <DesktopSidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
 
-      {source === "demo" ? (
-        <div className="flex items-center gap-2 border-b border-hairline bg-paper-sunk px-4 py-1 font-mono text-2xs uppercase tracking-[0.16em] text-ink-2">
-          <span className="lamp lamp-on animate-pulse2" />
-          demo environment · no external side effects · real authority engine, simulated targets
+        <div className="flex min-w-0 flex-1 flex-col">
+          <nav className="flex items-center gap-1 overflow-x-auto border-b border-hairline bg-paper-raised px-3 py-1.5 md:hidden" aria-label="Main">
+            {MOBILE_NAV.map((item) => (
+              <NavLink key={item.to} to={item.to} end={item.end}
+                className={({ isActive }) => cn("shrink-0 rounded px-2 py-1 text-sm text-ink-2", isActive && "bg-paper-sunk text-ink")}>
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+
+          {source === "demo" ? (
+            <div className="flex items-center gap-2 border-b border-hairline bg-paper-sunk px-4 py-1 font-mono text-2xs uppercase tracking-[0.16em] text-ink-2">
+              <span className="lamp lamp-on animate-pulse2" />
+              demo environment · no external side effects · real authority engine, simulated targets
+            </div>
+          ) : null}
+
+          {feed.error ? (
+            <div className="border-b border-hairline bg-deny-bg px-4 py-1.5 text-xs text-deny">{feed.error}</div>
+          ) : null}
+
+          <main className="min-h-0 flex-1">
+            <Outlet />
+          </main>
+
+          <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-hairline bg-paper px-4 py-1.5 font-mono text-2xs text-ink-2">
+            <span>{project ? `${connectedAgents} agent${connectedAgents === 1 ? "" : "s"} connected` : "no project"}</span>
+            {feed.system ? <><span className="text-hairline-strong">│</span><span>{feed.system.pending_approvals} awaiting review</span></> : null}
+            {paused ? <><span className="text-hairline-strong">│</span><Badge tone="hold">paused</Badge></> : null}
+            <span className="ml-auto">{feed.updatedAt ? `updated ${ago(new Date(feed.updatedAt).toISOString())}` : ""}</span>
+          </footer>
         </div>
-      ) : null}
-
-      {feed.error ? (
-        <div className="border-b border-hairline bg-deny-bg px-4 py-1.5 text-xs text-deny">{feed.error}</div>
-      ) : null}
-
-      <main className="min-h-0 flex-1">
-        <Outlet />
-      </main>
-
-      <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-hairline bg-paper px-4 py-1.5 font-mono text-2xs text-ink-2">
-        <span>{project ? `${connectedAgents} agent${connectedAgents === 1 ? "" : "s"} connected` : "no project"}</span>
-        {feed.system ? <><span className="text-hairline-strong">│</span><span>{feed.system.pending_approvals} awaiting review</span></> : null}
-        {paused ? <><span className="text-hairline-strong">│</span><Badge tone="hold">paused</Badge></> : null}
-        <span className="ml-auto">{feed.updatedAt ? `updated ${ago(new Date(feed.updatedAt).toISOString())}` : ""}</span>
-      </footer>
+      </div>
     </div>
   );
 }
