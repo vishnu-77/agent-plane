@@ -56,6 +56,33 @@ jobs:
           PY
       - name: Apply guarded integration patch
         run: python scripts/_tmp_context_runtime_patch.py
+      - name: Promote console assets to StaticFiles and expose timing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("agent_plane/main.py")
+          s = p.read_text()
+          old = "from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response\n"
+          new = old + "from fastapi.staticfiles import StaticFiles\n"
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+          old = '''    dist = files("agent_plane.console") / "dist"\n    dist_index = dist / "index.html"\n\n    @app.get("/console", include_in_schema=False)\n'''
+          new = '''    dist = files("agent_plane.console") / "dist"\n    dist_index = dist / "index.html"\n    assets_dir = dist / "assets"\n    if assets_dir.is_dir():\n        # Vercel can promote a real StaticFiles mount to CDN storage at build\n        # time, so hashed JS/CSS no longer pay a Python cold start. Local and\n        # self-hosted deployments still use the same Starlette mount.\n        app.mount("/console/assets", StaticFiles(directory=str(assets_dir)), name="console-assets")\n\n    @app.get("/console", include_in_schema=False)\n'''
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+          old = '''        response.headers["X-Request-ID"] = request_id\n        logger.info(\n'''
+          new = '''        response.headers["X-Request-ID"] = request_id\n        response.headers["Server-Timing"] = f"app;dur={elapsed * 1000:.1f}"\n        if request.url.path.startswith("/console/assets/"):\n            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"\n        logger.info(\n'''
+          assert s.count(old) == 1
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          pyproject = Path("pyproject.toml")
+          t = pyproject.read_text()
+          marker = '[tool.vercel]\nentrypoint = "agent_plane.main:app"\n'
+          replacement = marker + '\n[tool.vercel.fastapi.static]\ncdn = true\n'
+          assert t.count(marker) == 1
+          pyproject.write_text(t.replace(marker, replacement, 1))
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -68,9 +95,10 @@ jobs:
         run: python -m pytest -q
       - name: Refresh OpenAPI
         run: python examples/export_openapi.py
-      - name: Lint Python
+      - name: Format and lint Python
         run: |
           pip install ruff==0.16.6
+          ruff check agent_plane tests --fix
           ruff check agent_plane tests
       - uses: pnpm/action-setup@v4
         with:
@@ -89,6 +117,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add agent_plane console docs/openapi.json
+          git add agent_plane console docs/openapi.json pyproject.toml tests/test_context_plane.py
           git commit -m "feat: connect context registry to runtime" || exit 0
           git push origin HEAD:feat/context-registry-runtime
