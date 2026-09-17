@@ -1,0 +1,109 @@
+name: Temporary PR22 finalise
+
+on:
+  push:
+    branches:
+      - "feat/context-registry-runtime-final"
+    paths:
+      - ".github/workflows/_tmp-pr22-finalize.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalise:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/context-registry-runtime-final
+          fetch-depth: 0
+
+      - name: Apply PR22 hardening
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          store = Path("agent_plane/context/store.py")
+          s = store.read_text()
+          old = '''    def __init__(self, db_url: str) -> None:\n        self._engine = create_sql_engine(db_url)\n        Base.metadata.create_all(self._engine)\n        self._session_factory = sessionmaker(bind=self._engine, class_=Session)\n        self._lock = threading.RLock()\n'''
+          new = '''    def __init__(self, db_url: str) -> None:\n        self._engine = create_sql_engine(db_url)\n        self._session_factory = sessionmaker(bind=self._engine, class_=Session)\n        self._lock = threading.RLock()\n        self._schema_ready = False\n\n    def _ensure_schema(self) -> None:\n        if self._schema_ready:\n            return\n        with self._lock:\n            if not self._schema_ready:\n                Base.metadata.create_all(self._engine)\n                self._schema_ready = True\n\n    def _session(self) -> Session:\n        self._ensure_schema()\n        return self._session_factory()\n'''
+          if s.count(old) != 1:
+              raise SystemExit(f"SqlContextStore init marker count={s.count(old)}")
+          s = s.replace(old, new, 1)
+          if s.count("with self._lock, self._session_factory() as session:") != 1:
+              raise SystemExit("register_many session marker mismatch")
+          s = s.replace("with self._lock, self._session_factory() as session:",
+                        "with self._lock, self._session() as session:", 1)
+          count = s.count("with self._session_factory() as session:")
+          if count != 6:
+              raise SystemExit(f"expected 6 SQL session uses, found {count}")
+          s = s.replace("with self._session_factory() as session:", "with self._session() as session:")
+          store.write_text(s)
+
+          accounts = Path("agent_plane/gateway/accounts_router.py")
+          a = accounts.read_text()
+          old_order = '_ACTION_NAMESPACE_ORDER = ["filesystem", "tests", "git", "repository", "shell",\n                           "package", "branch", "network"]'
+          new_order = '_ACTION_NAMESPACE_ORDER = ["filesystem", "tests", "git", "repository", "shell",\n                           "package", "branch", "network", "memory"]'
+          if a.count(old_order) != 1:
+              raise SystemExit("action namespace order marker mismatch")
+          accounts.write_text(a.replace(old_order, new_order, 1))
+
+          for name in ("config/resources.yaml", "agent_plane/defaults/config/resources.yaml"):
+              p = Path(name)
+              text = p.read_text()
+              if 'pattern: "memory://*"' not in text:
+                  marker = '  - pattern: "credentials/*"\n    environment: secrets\n    criticality: critical\n    reversibility: irreversible\n    persistence: permanent\n    protected: true\n    description: credential stores\n    business: reading one is equivalent to holding it\n'
+                  block = marker + '\n  - pattern: "memory://*"\n    environment: context\n    criticality: medium\n    reversibility: recoverable\n    persistence: durable\n    description: persistent agent memory\n    business: remembered context can influence future actions\n'
+                  if text.count(marker) != 1:
+                      raise SystemExit(f"memory resource marker mismatch in {name}")
+                  text = text.replace(marker, block, 1)
+              if 'pattern: "memory.read"' not in text:
+                  marker = '  - pattern: "filesystem.read"\n    effect: read\n    label: Read files\n'
+                  block = '''  - pattern: "memory.read"\n    effect: read\n    severity: medium\n    label: Read persistent memory\n    consequence:\n      class: persistent_context_read\n      scope: agent_memory\n      reversible: true\n    direct_effect: "persistent context is admitted into the agent session"\n  - pattern: "memory.write"\n    effect: mutate\n    severity: medium\n    label: Write persistent memory\n    persistence: durable\n    consequence:\n      class: persistent_context_mutation\n      scope: agent_memory\n      reversible: true\n    direct_effect: "context is persisted and may influence future sessions"\n\n''' + marker
+                  if text.count(marker) != 1:
+                      raise SystemExit(f"memory action marker mismatch in {name}")
+                  text = text.replace(marker, block, 1)
+              p.write_text(text)
+          PY
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,mcp]"
+          pip install -e ./sdk/python
+          pip install ruff==0.16.6
+      - name: Test and lint
+        run: |
+          python -m pytest -q
+          python examples/export_openapi.py
+          ruff check agent_plane tests
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: console/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Build console
+        working-directory: console
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Remove temporary implementation machinery and commit
+        run: |
+          rm -f .github/workflows/_tmp-context-runtime-build.yml
+          rm -f scripts/_tmp_context_runtime_patch.py
+          rm -f .github/workflows/_tmp-pr22-finalize.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(context): harden registry runtime and memory vocabulary"
+          git push origin HEAD:feat/context-registry-runtime-final
+          git push origin --delete tmp/do-not-use || true
