@@ -29,34 +29,23 @@ jobs:
           from pathlib import Path
           p = Path("console/src/components/decision.tsx")
           s = p.read_text()
-          old = 'import { useEffect, useMemo, useState } from "react";\n'
-          new = old + 'import { useNavigate } from "react-router-dom";\n'
-          assert s.count(old) == 1
-          s = s.replace(old, new, 1)
-          old = '  const { detail, error, loading } = useDecision(open ? id : null);\n  const { feed, refresh, source } = useStore();\n'
-          new = '  const { detail, error, loading } = useDecision(open ? id : null);\n  const navigate = useNavigate();\n  const { feed, refresh, source } = useStore();\n'
-          assert s.count(old) == 1
-          s = s.replace(old, new, 1)
-          old = '''              <Button size="sm" onClick={() => setShowPath((v) => !v)}>
-                {showPath ? "Hide authority path" : "View authority path"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowEvidence((v) => !v)}>
-                {showEvidence ? "Hide evidence" : "Evidence"}
-              </Button>'''
-          new = '''              <Button size="sm" onClick={() => setShowPath((v) => !v)}>
-                {showPath ? "Hide graph" : "View graph"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => {
+          import_line = 'import { useEffect, useMemo, useState } from "react";\n'
+          assert import_line in s
+          s = s.replace(import_line, import_line + 'import { useNavigate } from "react-router-dom";\n', 1)
+          hook_line = '  const { detail, error, loading } = useDecision(open ? id : null);\n'
+          assert hook_line in s
+          s = s.replace(hook_line, hook_line + '  const navigate = useNavigate();\n', 1)
+          s = s.replace('Hide authority path', 'Hide graph').replace('View authority path', 'View graph')
+          evidence = '              <Button size="sm" variant="ghost" onClick={() => setShowEvidence((v) => !v)}>\n'
+          assert evidence in s
+          full_graph = '''              <Button size="sm" variant="ghost" onClick={() => {
                 onOpenChange(false);
                 navigate(`/graph?decision=${trace.decision_id}`);
               }}>
                 Open full graph
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowEvidence((v) => !v)}>
-                {showEvidence ? "Hide evidence" : "Evidence"}
-              </Button>'''
-          assert s.count(old) == 1
-          s = s.replace(old, new, 1)
+'''
+          s = s.replace(evidence, full_graph + evidence, 1)
           p.write_text(s)
           PY
       - name: Build console
