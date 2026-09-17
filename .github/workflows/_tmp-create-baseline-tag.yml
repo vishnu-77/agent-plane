@@ -1,0 +1,32 @@
+name: Temporary stable baseline tag
+
+on:
+  push:
+    branches:
+      - "feat/context-registry-runtime"
+    paths:
+      - ".github/workflows/_tmp-create-baseline-tag.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Create annotated baseline tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rev-parse debf33676807254d0d340134db286c868e80eb79^{commit}
+          if git rev-parse -q --verify "refs/tags/baseline-v0.7.0-2026-09-17" >/dev/null; then
+            echo "Tag already exists"
+            exit 1
+          fi
+          git tag -a "baseline-v0.7.0-2026-09-17" debf33676807254d0d340134db286c868e80eb79 \
+            -m "Stable agent-plane v0.7.0 rollback baseline before Context Registry / Context-to-Action runtime expansion"
+          git push origin "refs/tags/baseline-v0.7.0-2026-09-17"
