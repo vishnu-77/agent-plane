@@ -2,8 +2,10 @@ name: Temporary context-action console build
 
 on:
   push:
-    branches: [feat/context-action-plane]
-    paths: [.github/workflows/_tmp-context-action-build.yml]
+    branches:
+      - "feat/context-action-plane"
+    paths:
+      - ".github/workflows/_tmp-context-action-build.yml"
 
 permissions:
   contents: write
@@ -23,40 +25,15 @@ jobs:
           node-version: "22"
           cache: pnpm
           cache-dependency-path: console/pnpm-lock.yaml
-      - name: Tighten decision-to-graph navigation
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("console/src/components/decision.tsx")
-          s = p.read_text()
-          import_line = 'import { useEffect, useMemo, useState } from "react";\n'
-          assert import_line in s
-          s = s.replace(import_line, import_line + 'import { useNavigate } from "react-router-dom";\n', 1)
-          hook_line = '  const { detail, error, loading } = useDecision(open ? id : null);\n'
-          assert hook_line in s
-          s = s.replace(hook_line, hook_line + '  const navigate = useNavigate();\n', 1)
-          s = s.replace('Hide authority path', 'Hide graph').replace('View authority path', 'View graph')
-          evidence = '              <Button size="sm" variant="ghost" onClick={() => setShowEvidence((v) => !v)}>\n'
-          assert evidence in s
-          full_graph = '''              <Button size="sm" variant="ghost" onClick={() => {
-                onOpenChange(false);
-                navigate(`/graph?decision=${trace.decision_id}`);
-              }}>
-                Open full graph
-              </Button>
-'''
-          s = s.replace(evidence, full_graph + evidence, 1)
-          p.write_text(s)
-          PY
       - name: Build console
         working-directory: console
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
-      - name: Commit source adjustment and generated bundle
+      - name: Commit generated bundle
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add console/src/components/decision.tsx agent_plane/console/dist
-          git commit -m "feat(console): connect decisions to full graph" || exit 0
+          git add agent_plane/console/dist
+          git commit -m "build(console): refresh context-action bundle" || exit 0
           git push origin HEAD:feat/context-action-plane
