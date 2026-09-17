@@ -1,0 +1,57 @@
+name: Temporary context runtime validation
+
+on:
+  push:
+    branches:
+      - "feat/context-registry-runtime"
+    paths:
+      - ".github/workflows/_tmp-context-runtime-build.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/context-registry-runtime
+      - name: Apply guarded integration patch
+        run: python scripts/_tmp_context_runtime_patch.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,mcp]"
+          pip install -e ./sdk/python
+      - name: Run Python tests
+        run: python -m pytest -q
+      - name: Refresh OpenAPI
+        run: python examples/export_openapi.py
+      - name: Lint Python
+        run: |
+          pip install ruff==0.16.6
+          ruff check agent_plane tests
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: console/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+      - name: Build console
+        working-directory: console
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+      - name: Commit implementation and generated artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add agent_plane console docs/openapi.json
+          git commit -m "feat: connect context registry to runtime" || exit 0
+          git push origin HEAD:feat/context-registry-runtime
