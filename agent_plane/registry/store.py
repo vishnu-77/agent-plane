@@ -807,6 +807,32 @@ class _RegistryOps:
             "unowned_definitions": unowned_definitions,
         }
 
+    # -- enforcement coverage (Phase 22) --------------------------------------- #
+    def enforcement_coverage(self, tenant: str | None = None) -> dict[str, Any]:
+        """Never claim Agent Plane governs an agent entirely when bypass
+        paths exist - this reuses INTEGRATION_CATALOG's already-curated,
+        per-connector enforcement/observation levels (the same ones
+        /v1/auth/exchange and /v1/events/action's `binding` field already
+        derive from) rather than inventing a second, speculative coverage
+        taxonomy. 'full' = a real chokepoint (the gateway/proxy holds the
+        credential, a deny means the call never happens); 'partial' = a
+        pre-tool hook can block most calls but not every shape; 'advisory'
+        = reported, never enforced - a deny is a recommendation the
+        integration's own code chooses whether to honor."""
+        from agent_plane.accounts.models import INTEGRATION_CATALOG
+        agents = self._all_agents(tenant)
+        by_tier: dict[str, int] = {}
+        per_agent = []
+        for a in agents:
+            catalog = INTEGRATION_CATALOG.get(a.framework or "custom", INTEGRATION_CATALOG["custom"])
+            tier = catalog["enforcement"]
+            by_tier[tier] = by_tier.get(tier, 0) + 1
+            per_agent.append({
+                "agent": a.id, "integration": a.framework, "observation": catalog["observation"],
+                "enforcement": tier, "enforcement_note": catalog.get("enforcement_note"),
+            })
+        return {"agents": len(agents), "by_enforcement_tier": by_tier, "per_agent": per_agent}
+
     def tasks(self, tenant: str | None = None) -> list[TaskRecord]:
         return self._all_tasks(tenant)
 
@@ -936,6 +962,7 @@ class _RegistryOps:
 
 for _name in ("observe", "register_task", "attach_lease", "agents", "agent", "definitions", "definition",
               "upsert_definition", "principals", "principal", "upsert_principal", "ownership_summary",
+              "enforcement_coverage",
               "tasks", "task", "sessions",
               "session", "resources", "set_quarantine", "is_quarantined", "set_lifecycle_revoked",
               "set_session_pause",

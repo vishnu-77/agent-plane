@@ -18,6 +18,7 @@ decision path - it is the explanation of decisions already made.
     GET  /v1/principals?tenant=              registry-persisted PrincipalIdentity projections
     GET  /v1/principals/{id}
     GET  /v1/ownership?tenant=               orphaned/unowned/inactive agents (Phase 8)
+    GET  /v1/enforcement-coverage?tenant=    binding/partial/advisory per agent (Phase 22)
     GET  /v1/sessions?tenant=&agent=         one agent's conversations/runs
     POST /v1/sessions/{id}/pause             hold one session's actions (operator)
     DELETE /v1/sessions/{id}/pause
@@ -308,6 +309,14 @@ async def ownership(request: Request, tenant: str | None = Query(default=None),
                     x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
     scope = _scope(request, x_admin_token, x_demo_token, tenant)
     return request.app.state.agent_registry.ownership_summary(_tenant_of(scope, tenant))
+
+
+@registry_router.get("/v1/enforcement-coverage")
+async def enforcement_coverage(request: Request, tenant: str | None = Query(default=None),
+                               x_admin_token: str | None = Header(default=None),
+                               x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
+    return request.app.state.agent_registry.enforcement_coverage(_tenant_of(scope, tenant))
 
 
 @registry_router.get("/v1/agents/{agent_id}/suggested-lease")
