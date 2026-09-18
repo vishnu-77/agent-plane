@@ -38,6 +38,7 @@ from agent_plane.demo.harness import DemoHarness
 from agent_plane.demo.router import demo_router
 from agent_plane.gateway.a2a import a2a_router
 from agent_plane.gateway.accounts_router import accounts_router
+from agent_plane.gateway.adoption import adoption_router
 from agent_plane.gateway.admin import admin_router
 from agent_plane.gateway.approvals import approvals_router
 from agent_plane.gateway.authority import authority_router
@@ -349,6 +350,7 @@ def create_app() -> FastAPI:
     app.include_router(demo_router)
     app.include_router(usage_router)
     app.include_router(admin_router)
+    app.include_router(adoption_router)
     if settings.mcp_gateway_file:
         from starlette.routing import Route
 

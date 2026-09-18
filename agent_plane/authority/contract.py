@@ -168,6 +168,12 @@ class ContractRegistry:
     def history(self, tenant: str, contract_id: str) -> list[AuthorityContract]:
         return sorted(self._versions.get((tenant, contract_id), []), key=lambda c: c.version)
 
+    def all_for_tenant(self, tenant: str) -> list[AuthorityContract]:
+        """Every version of every contract in this tenant - used for
+        cross-contract reporting (e.g. the Phase 32 adoption funnel), not
+        for enforcement, which always goes through latest()/at()."""
+        return [c for (t, _), versions in self._versions.items() if t == tenant for c in versions]
+
     def at(self, tenant: str, contract_id: str, *, as_of: datetime) -> AuthorityContract | None:
         """Which contract version was effective at a given time - the
         Phase 14 GRC answer to "which policy allowed this action on <date>"."""

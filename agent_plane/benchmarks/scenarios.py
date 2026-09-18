@@ -73,4 +73,23 @@ def scenarios() -> list[Scenario]:
         steps=[Step(action="filesystem.write", resource="workspace/protected", expected="deny")],
         resources=[ResourceProfile(pattern="workspace/protected", environment="workspace", protected=True)],
         actions=[ActionProfile(pattern="filesystem.write", effect="mutate")]))
+    # Phase 31: dimensions beyond task-composition (the families above).
+    # Identity and delegation-escalation prevention need a multi-actor
+    # setup this single-actor-per-scenario external-baseline-comparison
+    # harness isn't built for - see tests/test_security_invariants.py for
+    # those, exercised directly at the evaluator/identity level instead.
+    cases.append(Scenario(id="authority/out-of-scope-action", family="authority-scope-violation",
+        description="Authority violation prevention: capability manifest is unscoped (wildcard), "
+                    "but the task's lease never granted this action - must still be denied.",
+        steps=[Step(action="repository.delete", resource="workspace/repo", expected="deny")],
+        resources=[ResourceProfile(pattern="workspace/repo", environment="workspace")],
+        actions=[ActionProfile(pattern="filesystem.write", effect="mutate")]))
+    cases.append(Scenario(id="consequence/environment-outside-envelope", family="consequence-envelope-violation",
+        description="Consequence violation prevention: valid identity, in-scope action and resource, "
+                    "but the resource's environment falls outside the task's permitted_consequence bound.",
+        steps=[Step(action="config.write", resource="staging/config", expected="deny")],
+        resources=[ResourceProfile(pattern="staging/config", environment="staging", criticality="high")],
+        actions=[ActionProfile(pattern="config.write", effect="mutate")],
+        envelope={"max_impact": "medium", "environments": ["workspace"], "customer_facing": False,
+                  "max_reversibility": "recoverable", "max_persistence": "durable", "max_depth": 0}))
     return cases

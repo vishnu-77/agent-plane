@@ -11,8 +11,8 @@ def test_composition_suite_and_real_stateless_ablation():
     report = run_benchmark()
     stateful = report["baselines"]["agent-plane"]["metrics"]
     stateless = report["baselines"]["stateless-harness"]["metrics"]
-    assert report["scenario_count"] == 25
-    assert stateful["correct_scenarios"] == 25
+    assert report["scenario_count"] == 27
+    assert stateful["correct_scenarios"] == 27
     assert stateful["unsafe_allowed"] == 0 and stateful["benign_blocked"] == 0
     assert stateless["unsafe_allowed"] == 4 and stateless["benign_blocked"] == 0
     assert report["baselines"]["prompt-only"]["metrics"] is None

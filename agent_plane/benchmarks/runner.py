@@ -107,6 +107,16 @@ def score(rows: list[dict]) -> dict:
     }
 
 
+def score_by_family(rows: list[dict]) -> dict[str, dict]:
+    """Phase 31: violation-prevention broken out per dimension, not just an
+    aggregate rate - families already carry these labels (identity/
+    authority/consequence/task-composition violations are each their own
+    scenario family in agent_plane.benchmarks.scenarios), so this is a
+    groupby, not new scoring logic."""
+    families = sorted({r["family"] for r in rows})
+    return {family: score([r for r in rows if r["family"] == family]) for family in families}
+
+
 def run_benchmark(*, external: dict[str, ExternalConfig] | None = None,
                   cases: list[Scenario] | None = None) -> dict:
     external = external or {}
@@ -134,7 +144,7 @@ def run_benchmark(*, external: dict[str, ExternalConfig] | None = None,
                 stopped = False
                 try:
                     for number, step in enumerate(case.steps):
-                        row = {"scenario": case.id, "step": number, "expected": step.expected,
+                        row = {"scenario": case.id, "family": case.family, "step": number, "expected": step.expected,
                                "decision": None, "reason": None, "error": None,
                                "model": None, "input_tokens": None, "output_tokens": None, "tool_calls": None}
                         started = time.perf_counter()
@@ -175,6 +185,7 @@ def run_benchmark(*, external: dict[str, ExternalConfig] | None = None,
                 "label": config.label if config else baseline,
                 "implementation": "external operator-supplied adapter" if config else "AuthorityService with confirmed task state" if baseline == "agent-plane" else "AuthorityService without task state",
                 "metrics": {**score(rows), "correct_scenarios": sum(c["correct"] for c in case_results),
-                            "total_scenarios": len(cases)}, "cases": case_results, "steps": rows,
+                            "total_scenarios": len(cases)},
+                "metrics_by_family": score_by_family(rows), "cases": case_results, "steps": rows,
             }
     return report
