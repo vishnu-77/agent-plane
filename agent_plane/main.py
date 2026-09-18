@@ -26,6 +26,7 @@ from agent_plane.accounts import build_account_store
 from agent_plane.approvals.notify import ApprovalNotifier
 from agent_plane.approvals.store import build_approval_store
 from agent_plane.audit.store import build_audit_store
+from agent_plane.authority.contract import ContractRegistry
 from agent_plane.authority.service import AuthorityService
 from agent_plane.authority.store import build_lease_store
 from agent_plane.authority.templates import build_template_catalog
@@ -41,6 +42,7 @@ from agent_plane.gateway.admin import admin_router
 from agent_plane.gateway.approvals import approvals_router
 from agent_plane.gateway.authority import authority_router
 from agent_plane.gateway.broker import broker_router
+from agent_plane.gateway.contracts import contracts_router
 from agent_plane.gateway.events_router import events_router
 from agent_plane.gateway.retrieval import retrieval_router
 from agent_plane.gateway.router import router
@@ -136,6 +138,7 @@ async def lifespan(app: FastAPI):
         app.state.agent_registry = build_registry(settings)
         app.state.accounts = build_account_store(settings)
         app.state.rules = build_rule_store(settings)
+        app.state.contracts = ContractRegistry()
     except OperationalError as exc:
         raise RuntimeError(explain_connection_error(exc, settings.audit_db_url)) from None
     app.state.approval_notifier = ApprovalNotifier(
@@ -338,6 +341,7 @@ def create_app() -> FastAPI:
     app.include_router(retrieval_router)
     app.include_router(a2a_router)
     app.include_router(authority_router)
+    app.include_router(contracts_router)
     app.include_router(approvals_router)
     app.include_router(registry_router)
     app.include_router(accounts_router)
