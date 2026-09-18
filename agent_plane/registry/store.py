@@ -77,11 +77,24 @@ class TaskRecord(BaseModel):
     resources: list[str] = Field(default_factory=list)
 
 
+class CapabilityEvidence(BaseModel):
+    """Why the registry believes a declared capability exists. See
+    spec/principals.md and the identity-first roadmap's C/G/E/D model."""
+
+    capability: str
+    source: Literal["operator_declaration", "self_reported", "mcp_tool_discovery", "signed_identity_scope"]
+    observed_at: datetime
+    ref: str | None = None   # free-form provenance pointer, same convention as Origin.ref
+
+
 class AgentRecord(BaseModel):
     id: str                          # agent id as carried by the identity (subject)
     tenant: str
     application: str = "default"
     framework: str | None = None
+    # Which AgentDefinition (agent *type*, e.g. "claude-code") this instance
+    # was observed running as. Never overwritten once set - see observe().
+    definition_id: str | None = None
     status: AgentStatus = "active"
     first_seen: datetime
     last_seen: datetime
@@ -91,6 +104,7 @@ class AgentRecord(BaseModel):
     tasks: list[str] = Field(default_factory=list)
     sessions: list[str] = Field(default_factory=list)
     declared_capabilities: list[str] = Field(default_factory=list)   # identity manifest
+    capability_evidence: list[CapabilityEvidence] = Field(default_factory=list)
     requested_authority: dict[str, int] = Field(default_factory=dict) # action -> attempts
     exercised_authority: dict[str, int] = Field(default_factory=dict) # action -> allowed executions
     denied_authority: dict[str, int] = Field(default_factory=dict)    # action -> denials
@@ -101,6 +115,19 @@ class AgentRecord(BaseModel):
     quarantine_note: str | None = None
 
 
+class AgentDefinition(BaseModel):
+    """An agent *type* (e.g. "claude-code", "invoice-agent"), distinct from
+    a running instance (AgentRecord). See spec/principals.md."""
+
+    id: str
+    tenant: str
+    name: str
+    framework: str | None = None
+    owner: str | None = None
+    expected_capabilities: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
 # --------------------------------------------------------------------------- #
 # Store interface (memory)
 # --------------------------------------------------------------------------- #
@@ -109,6 +136,7 @@ class MemoryRegistry:
 
     def __init__(self) -> None:
         self._agents: dict[tuple[str, str], AgentRecord] = {}
+        self._definitions: dict[tuple[str, str], AgentDefinition] = {}
         self._tasks: dict[tuple[str, str], TaskRecord] = {}
         self._sessions: dict[tuple[str, str], SessionRecord] = {}
         self._settings: dict[str, dict[str, Any]] = {}
@@ -120,6 +148,15 @@ class MemoryRegistry:
 
     def _put_agent(self, rec: AgentRecord) -> None:
         self._agents[(rec.tenant, rec.id)] = rec
+
+    def _get_definition(self, tenant: str, definition_id: str) -> AgentDefinition | None:
+        return self._definitions.get((tenant, definition_id))
+
+    def _put_definition(self, rec: AgentDefinition) -> None:
+        self._definitions[(rec.tenant, rec.id)] = rec
+
+    def _all_definitions(self, tenant: str | None) -> list[AgentDefinition]:
+        return [d for (t, _), d in self._definitions.items() if tenant is None or t == tenant]
 
     def _get_task(self, tenant: str, task: str) -> TaskRecord | None:
         return self._tasks.get((tenant, task))
@@ -149,7 +186,7 @@ class MemoryRegistry:
         self._settings[key] = value
 
     def _delete_tenant(self, tenant: str) -> None:
-        for d in (self._agents, self._tasks, self._sessions):
+        for d in (self._agents, self._definitions, self._tasks, self._sessions):
             for key in [k for k in d if k[0] == tenant]:
                 del d[key]
 
@@ -179,6 +216,13 @@ class AgentRow(Base):
     tenant: Mapped[str] = mapped_column(String(128), primary_key=True)
     id: Mapped[str] = mapped_column(String(200), primary_key=True)
     last_seen: Mapped[datetime] = mapped_column(DateTime, index=True)
+    document: Mapped[dict] = mapped_column(JSON)
+
+
+class AgentDefinitionRow(Base):
+    __tablename__ = "registry_agent_definitions"
+    tenant: Mapped[str] = mapped_column(String(128), primary_key=True)
+    id: Mapped[str] = mapped_column(String(200), primary_key=True)
     document: Mapped[dict] = mapped_column(JSON)
 
 
@@ -304,6 +348,41 @@ class SqlRegistry:
                 row.last_seen, row.document = _naive(rec.last_seen), doc
             s.commit()
 
+    def _get_definition(self, tenant: str, definition_id: str) -> AgentDefinition | None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(AgentDefinitionRow, (tenant, definition_id))
+            return AgentDefinition.model_validate(row.document) if row else None
+        with self._session_factory() as s:
+            row = s.get(AgentDefinitionRow, (tenant, definition_id))
+            return AgentDefinition.model_validate(row.document) if row else None
+
+    def _put_definition(self, rec: AgentDefinition) -> None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(AgentDefinitionRow, (rec.tenant, rec.id))
+            doc = rec.model_dump(mode="json")
+            if row is None:
+                session.add(AgentDefinitionRow(tenant=rec.tenant, id=rec.id, document=doc))
+            else:
+                row.document = doc
+            return
+        with self._session_factory() as s:
+            row = s.get(AgentDefinitionRow, (rec.tenant, rec.id))
+            doc = rec.model_dump(mode="json")
+            if row is None:
+                s.add(AgentDefinitionRow(tenant=rec.tenant, id=rec.id, document=doc))
+            else:
+                row.document = doc
+            s.commit()
+
+    def _all_definitions(self, tenant: str | None) -> list[AgentDefinition]:
+        with self._session_factory() as s:
+            stmt = select(AgentDefinitionRow)
+            if tenant:
+                stmt = stmt.where(AgentDefinitionRow.tenant == tenant)
+            return [AgentDefinition.model_validate(r.document) for r in s.scalars(stmt).all()]
+
     def _get_task(self, tenant: str, task: str) -> TaskRecord | None:
         session = self._active_session()
         if session is not None:
@@ -397,7 +476,7 @@ class SqlRegistry:
 
     def _delete_tenant(self, tenant: str) -> None:
         with self._session_factory() as s:
-            for model in (AgentRow, TaskRow, SessionRow):
+            for model in (AgentRow, AgentDefinitionRow, TaskRow, SessionRow):
                 for row in s.scalars(select(model).where(model.tenant == tenant)).all():
                     s.delete(row)
             s.commit()
@@ -414,7 +493,7 @@ class _RegistryOps:
         self, *, tenant: str, agent: str, application: str | None, declared: list[str],
         task: str | None, action: str, resource: str, outcome: str, decision_id: str,
         context: dict[str, str] | None = None, edge: str = "authorize",
-        executed: bool | None = None,
+        executed: bool | None = None, evidence_source: str = "self_reported",
     ) -> AgentRecord:
         """Record one governed call. Idempotent per decision id is not required;
         counts are approximate telemetry, decisions are the audit chain."""
@@ -432,8 +511,18 @@ class _RegistryOps:
                 rec.framework = context["framework"]
             if context.get("parent_agent") and not rec.parent_agent:
                 rec.parent_agent = context["parent_agent"]
+            if rec.definition_id is None and context.get("framework"):
+                def_id = context["framework"]
+                rec.definition_id = def_id
+                if self._get_definition(tenant, def_id) is None:
+                    self._put_definition(AgentDefinition(id=def_id, tenant=tenant, name=def_id,
+                                                          framework=def_id, created_at=now))
             if declared:
+                new_caps = set(declared) - set(rec.declared_capabilities)
                 rec.declared_capabilities = sorted(set(rec.declared_capabilities) | set(declared))
+                for cap in sorted(new_caps):
+                    rec.capability_evidence.append(
+                        CapabilityEvidence(capability=cap, source=evidence_source, observed_at=now))
             if task:
                 rec.current_task = task
                 if task not in rec.tasks:
@@ -544,6 +633,17 @@ class _RegistryOps:
     def agent(self, tenant: str, agent: str) -> AgentRecord | None:
         return self._get_agent(tenant, agent)
 
+    def definitions(self, tenant: str | None = None) -> list[AgentDefinition]:
+        return self._all_definitions(tenant)
+
+    def definition(self, tenant: str, definition_id: str) -> AgentDefinition | None:
+        return self._get_definition(tenant, definition_id)
+
+    def upsert_definition(self, rec: AgentDefinition) -> AgentDefinition:
+        with self.transaction():
+            self._put_definition(rec)
+        return rec
+
     def tasks(self, tenant: str | None = None) -> list[TaskRecord]:
         return self._all_tasks(tenant)
 
@@ -617,12 +717,15 @@ class _RegistryOps:
     def drift(self, tenant: str, agent: str, granted_actions: list[str]) -> dict[str, Any]:
         rec = self._get_agent(tenant, agent)
         if rec is None:
-            return {"agent": agent, "declared": [], "granted": granted_actions, "observed": [], "undeclared": [], "ungranted": []}
+            return {"agent": agent, "declared": [], "granted": granted_actions, "observed": [], "undeclared": [],
+                    "ungranted": [], "unused_grants": [], "capability_outside_authority": [], "unused_authority": []}
         observed = sorted(rec.requested_authority)
         declared = rec.declared_capabilities
         def covered(action: str, grants: list[str]) -> bool:
             ns = action.split(".", 1)[0]
             return "*" in grants or action in grants or ns in grants
+        # C/G/E/D model (roadmap phase 11): capability_outside_authority = C - G,
+        # unused_authority = G - E. Exposure, not inherently a vulnerability.
         return {
             "agent": agent,
             "declared": declared,
@@ -631,6 +734,8 @@ class _RegistryOps:
             "undeclared": [a for a in observed if declared and not covered(a, declared)],
             "ungranted": [a for a in observed if a not in granted_actions],
             "unused_grants": [g for g in granted_actions if g not in observed],
+            "capability_outside_authority": [c for c in declared if not covered(c, granted_actions)],
+            "unused_authority": [g for g in granted_actions if g not in rec.exercised_authority],
         }
 
     def suggested_lease(self, tenant: str, agent: str, task: str | None = None) -> dict[str, Any]:
@@ -654,7 +759,8 @@ class _RegistryOps:
             self._delete_tenant(tenant)
 
 
-for _name in ("observe", "register_task", "attach_lease", "agents", "agent", "tasks", "task", "sessions",
+for _name in ("observe", "register_task", "attach_lease", "agents", "agent", "definitions", "definition",
+              "upsert_definition", "tasks", "task", "sessions",
               "session", "resources", "set_quarantine", "is_quarantined", "set_session_pause",
               "is_session_paused", "mode", "set_mode", "drift", "suggested_lease", "reset_tenant"):
     setattr(MemoryRegistry, _name, getattr(_RegistryOps, _name))

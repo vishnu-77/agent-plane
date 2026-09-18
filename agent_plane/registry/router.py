@@ -10,6 +10,9 @@ decision path - it is the explanation of decisions already made.
     DELETE /v1/agents/{id}/quarantine
     GET  /v1/agents/{id}/drift               declared vs granted vs observed
     GET  /v1/agents/{id}/suggested-lease     Observe -> Enforce
+    GET  /v1/agent-definitions?tenant=       agent *types*, distinct from instances
+    GET  /v1/agent-definitions/{id}
+    PUT  /v1/agent-definitions/{id}          operator-assigned definition metadata
     GET  /v1/sessions?tenant=&agent=         one agent's conversations/runs
     POST /v1/sessions/{id}/pause             hold one session's actions (operator)
     DELETE /v1/sessions/{id}/pause
@@ -32,7 +35,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from agent_plane.authority.service import TRACE_SCHEMA, lineage
 from agent_plane.gateway.authz import OperatorScope, require_admin, resolve_operator
 from agent_plane.gateway.context import resolve_request
-from agent_plane.registry.store import Origin
+from agent_plane.registry.store import AgentDefinition, Origin
 
 registry_router = APIRouter(tags=["registry"])
 
@@ -185,6 +188,54 @@ async def agent_drift(request: Request, agent_id: str, tenant: str | None = Quer
     rec = _agent_or_404(request, scope, _tenant_of(scope, tenant), agent_id)
     granted, _ = _granted_actions(request, rec.tenant, rec.id)
     return request.app.state.agent_registry.drift(rec.tenant, rec.id, granted)
+
+
+@registry_router.get("/v1/agent-definitions")
+async def list_agent_definitions(request: Request, tenant: str | None = Query(default=None),
+                                 x_admin_token: str | None = Header(default=None),
+                                 x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
+    items = [d.model_dump(mode="json")
+             for d in request.app.state.agent_registry.definitions(_tenant_of(scope, tenant))]
+    return {"definitions": items, "count": len(items)}
+
+
+@registry_router.get("/v1/agent-definitions/{definition_id}")
+async def get_agent_definition(request: Request, definition_id: str, tenant: str | None = Query(default=None),
+                               x_admin_token: str | None = Header(default=None),
+                               x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
+    registry = request.app.state.agent_registry
+    candidates = [tenant] if tenant else sorted({d.tenant for d in registry.definitions(scope.tenant)})
+    for t in candidates:
+        if not scope.allows(t):
+            continue
+        rec = registry.definition(t, definition_id)
+        if rec is not None:
+            return {"definition": rec.model_dump(mode="json"),
+                    "instances": [a.id for a in registry.agents(t) if a.definition_id == definition_id]}
+    raise HTTPException(status_code=404, detail="agent definition not found")
+
+
+@registry_router.put("/v1/agent-definitions/{definition_id}")
+async def put_agent_definition(request: Request, definition_id: str, body: dict[str, Any],
+                               tenant: str | None = Query(default=None),
+                               x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    body = body or {}
+    tenant = tenant or body.get("tenant") or "default"
+    require_admin(request, x_admin_token, tenant=tenant)
+    registry = request.app.state.agent_registry
+    existing = registry.definition(tenant, definition_id)
+    name = body.get("name") or (existing.name if existing else None) or definition_id
+    rec = AgentDefinition(
+        id=definition_id, tenant=tenant, name=name,
+        framework=body.get("framework", existing.framework if existing else None),
+        owner=body.get("owner", existing.owner if existing else None),
+        expected_capabilities=body.get("expected_capabilities", existing.expected_capabilities if existing else []),
+        created_at=existing.created_at if existing else datetime.now(UTC),
+    )
+    registry.upsert_definition(rec)
+    return {"definition": rec.model_dump(mode="json")}
 
 
 @registry_router.get("/v1/agents/{agent_id}/suggested-lease")
