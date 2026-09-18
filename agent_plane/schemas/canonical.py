@@ -65,6 +65,13 @@ class Actor(BaseModel):
     # Group/role memberships, used for document-level ACLs in RAG authorization.
     groups: list[str] = Field(default_factory=list)
 
+    @property
+    def capabilities(self) -> list[str]:
+        """Alias for ``allowed_tools`` - the capability manifest. See
+        spec/capability-authority.md. Read-only: set via ``allowed_tools=``
+        at construction, same as today."""
+        return self.allowed_tools
+
 
 class CanonicalAIRequest(BaseModel):
     request_type: str = "chat_completion"
