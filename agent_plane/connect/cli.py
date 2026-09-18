@@ -22,6 +22,7 @@ from agent_plane.connect.credentials import (
     load_credentials,
     save_credentials,
 )
+from agent_plane.connect.discover import discover
 
 TARGETS = ("claude", "codex", "cursor", "mcp", "sdk")
 KIND_OF = {"claude": "claude-code", "codex": "codex", "cursor": "cursor", "mcp": "mcp", "sdk": "custom"}
@@ -215,6 +216,26 @@ def _connect_sdk(args: argparse.Namespace) -> int:
     return 0
 
 
+def _discover(args: argparse.Namespace) -> int:
+    """Phase 16: scan this environment instead of making a developer
+    already know which integration to name. Still requires --key to
+    actually connect anything found - discovery never talks to the
+    network or needs a credential."""
+    found = discover()
+    if not found:
+        _say("", "Nothing recognized in this environment.",
+             "Connect one explicitly: agentplane connect claude --key ap_live_...", "")
+        return 1
+    _say("", "Found:", "")
+    for item in found:
+        _say(f"  [x] {item.label}  ({item.evidence})")
+    _say("", "Connect one:", "")
+    for item in found:
+        _say(f"  agentplane connect {item.target} --key ap_live_...")
+    _say("")
+    return 0
+
+
 def _status(args: argparse.Namespace) -> int:
     import httpx
 
@@ -260,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
         if target == "mcp":
             cmd.add_argument("--upstream", help="the MCP server to put agent-plane in front of")
             cmd.add_argument("--out", help="where to write the gateway mapping file")
+    sub.add_parser("discover", help="scan this environment for installed integrations")
     status = sub.add_parser("status", help="show the current connection")
     status.add_argument("--url", default=os.environ.get("AGENTPLANE_URL", DEFAULT_URL))
     disconnect = sub.add_parser("disconnect", help="forget a stored credential")
@@ -273,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
                             help="only forget the credential for this control plane")
 
     args = parser.parse_args(argv)
+    if args.target == "discover":
+        return _discover(args)
     if args.target == "status":
         return _status(args)
     if args.target == "disconnect":
