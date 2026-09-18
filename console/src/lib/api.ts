@@ -191,6 +191,17 @@ export interface Session {
   actions: number; paused: boolean; paused_by?: string | null;
 }
 
+export interface AuthorityContract {
+  contract_id: string; version: number; agent: string; tenant: string;
+  allow: string[]; ask_first: string[]; never: string[];
+  resources_allow: string[]; resources_protected: string[];
+  consequence_environments: string[] | null; max_reversibility: string | null;
+  created_by: string | null; approved_by: string | null; created_at: string;
+}
+export interface AgentContractResponse {
+  found: boolean; contract: AuthorityContract | null; fingerprint: string | null;
+}
+
 export interface Rule {
   id: string; project_id: string; name: string; enabled: boolean; source: string;
   scope: { agents: string[]; integrations: string[]; environments: string[] };
@@ -276,6 +287,8 @@ export const Api = {
     api<{ agents: Agent[]; count: number }>(`/v1/agents?${q({ tenant: project })}`, { source }),
   agent: (id: string, project: string, source: Source = "live") =>
     api<AgentDetail>(`/v1/agents/${id}?${q({ tenant: project })}`, { source }),
+  agentContract: (id: string, project: string, source: Source = "live") =>
+    api<AgentContractResponse>(`/v1/agents/${id}/contract?${q({ tenant: project })}`, { source }),
   quarantine: (id: string, project: string, on: boolean) =>
     api<{ agent: Agent }>(`/v1/agents/${id}/quarantine?${q({ tenant: project })}`, { method: on ? "POST" : "DELETE", body: on ? { note: "held from the console" } : undefined }),
   revoke: (id: string, project: string, on: boolean) =>

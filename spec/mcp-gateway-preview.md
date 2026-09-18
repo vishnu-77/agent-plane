@@ -134,6 +134,39 @@ from an upstream's tool list. The gateway has no OAuth onboarding, Agent Key
 registry, automatic client rewrite, or observe mode. Existing REST tool broker behavior remains separate; installing
 this feature does not intercept arbitrary broker, shell, or model-tool traffic.
 
+## Credential custody (Phase 21)
+
+The control plane (leases, decisions, audit) and the upstream credential
+are deliberately separable. `upstream_secret_env` (above) is read from
+the *gateway process's own* environment and never returned to the MCP
+client - the client only ever holds its Project API Key or delegation
+token, which authorizes it to *ask* the gateway to act, not to reach the
+upstream directly. This is what makes `python examples/mcp_gateway_demo.py`
+(and `tests/test_mcp_gateway_bypass.py`, which drives both paths against
+real subprocess servers) able to show the difference concretely: calling
+the mock upstream *through* the gateway with a denied action is refused
+and never dispatched; calling the same upstream *directly*, with its own
+secret, succeeds - because nothing governs that path at all.
+
+This means an operator can run the gateway process itself wherever the
+upstream credential should live - centrally, or as a local sidecar next
+to the upstream it fronts - without changing anything about how the
+control plane (leases, policy, audit) is reached. Agent Plane's control
+plane is never a vault for every user's upstream credentials; it is
+never handed one to store, only told which environment variable *on the
+gateway process* holds it.
+
+## Introspection (Phase 19)
+
+`agent_plane/mcp_control/server.py` is a separate, read-only MCP server -
+`whoami`/`authority`/`explain_decision`/`current_contract` - for an agent
+to ask *why* a decision went the way it did, distinct from this file's
+enforcement gateway. Not mounted into the main app by default; see that
+module's docstring for the mounting follow-up. Built on
+`mcp.server.mcpserver.MCPServer` (this project's real pinned SDK,
+`mcp==2.2.0` - see tests/test_mcp_control.py, which exercises it through
+the SDK's real dispatch).
+
 ## Verification
 
 ```bash

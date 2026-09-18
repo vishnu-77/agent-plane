@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Api, type AgentDetail, type Session } from "@/lib/api";
+import { Api, type AgentContractResponse, type AgentDetail, type Session } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { ago, cn, outcomeLabel, outcomeTone } from "@/lib/format";
 import { ActivityGroups, AuthoritySummary, DecisionDrawer } from "@/components/decision";
@@ -105,6 +105,7 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [contract, setContract] = useState<AgentContractResponse | null>(null);
 
   useEffect(() => {
     if (!agentId) { setDetail(null); return; }
@@ -112,6 +113,13 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
     Api.agent(agentId, projectId, source)
       .then((d) => alive && (setDetail(d), setError(null)))
       .catch((e: Error) => alive && setError(e.message));
+    return () => { alive = false; };
+  }, [agentId, projectId, source, feed.updatedAt]);
+
+  useEffect(() => {
+    if (!agentId) { setContract(null); return; }
+    let alive = true;
+    Api.agentContract(agentId, projectId, source).then((c) => alive && setContract(c)).catch(() => alive && setContract(null));
     return () => { alive = false; };
   }, [agentId, projectId, source, feed.updatedAt]);
 
@@ -212,8 +220,31 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
             </TabsContent>
 
             <TabsContent value="authority" className="space-y-4">
-              <AuthoritySummary can={can} ask={ask} never={never}
-                empty="No rules apply to this agent yet, so nothing has been granted." />
+              {contract?.found && contract.contract ? (
+                <div className="rounded border border-hairline-strong p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="eyebrow">Authority contract</div>
+                    <span className="font-mono text-2xs text-ink-2">
+                      {contract.contract.contract_id} · v{contract.contract.version}
+                    </span>
+                  </div>
+                  <div className="mt-2">
+                    <AuthoritySummary can={contract.contract.allow} ask={contract.contract.ask_first}
+                      never={contract.contract.never} />
+                  </div>
+                  {contract.contract.consequence_environments?.length ? (
+                    <p className="mt-2 text-xs text-ink-2">
+                      Consequence boundary: {contract.contract.consequence_environments.join(", ")} only
+                      {contract.contract.max_reversibility ? `, ${contract.contract.max_reversibility}` : ""}.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              <div>
+                {contract?.found ? <div className="eyebrow mb-1">Compiled (active) authority</div> : null}
+                <AuthoritySummary can={can} ask={ask} never={never}
+                  empty="No rules apply to this agent yet, so nothing has been granted." />
+              </div>
               {detail.drift.ungranted.length ? (
                 <div className="rounded border border-deny/40 bg-deny-bg p-3">
                   <div className="eyebrow text-deny">Asked for, never granted</div>
