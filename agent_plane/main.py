@@ -40,6 +40,7 @@ from agent_plane.gateway.a2a import a2a_router
 from agent_plane.gateway.accounts_router import accounts_router
 from agent_plane.gateway.adoption import adoption_router
 from agent_plane.gateway.admin import admin_router
+from agent_plane.gateway.device import DeviceCodeStore, device_router
 from agent_plane.gateway.approvals import approvals_router
 from agent_plane.gateway.authority import authority_router
 from agent_plane.gateway.broker import broker_router
@@ -140,6 +141,7 @@ async def lifespan(app: FastAPI):
         app.state.accounts = build_account_store(settings)
         app.state.rules = build_rule_store(settings)
         app.state.contracts = ContractRegistry()
+        app.state.device_codes = DeviceCodeStore()
     except OperationalError as exc:
         raise RuntimeError(explain_connection_error(exc, settings.audit_db_url)) from None
     app.state.approval_notifier = ApprovalNotifier(
@@ -351,6 +353,7 @@ def create_app() -> FastAPI:
     app.include_router(usage_router)
     app.include_router(admin_router)
     app.include_router(adoption_router)
+    app.include_router(device_router)
     if settings.mcp_gateway_file:
         from starlette.routing import Route
 
