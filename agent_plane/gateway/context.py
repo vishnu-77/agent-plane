@@ -24,6 +24,8 @@ from agent_plane.accounts.security import looks_like_api_key
 from agent_plane.config import Settings
 from agent_plane.gateway.identity import IdentityError, resolve_identity
 from agent_plane.gateway.runtime_credential import verify_runtime_credential
+from agent_plane.identity.assurance import IdentityAssurance
+from agent_plane.identity.trust import default_trust_domain_id
 from agent_plane.schemas.canonical import Actor
 
 # A connector that names no agent still needs one; the integration is the agent.
@@ -97,6 +99,13 @@ def resolve_request(
             app_id=integration,
             agent_id=agent or integration or DEFAULT_AGENT,
             allowed_tools=[c for c in capabilities if isinstance(c, str)],
+            # The project credential is authenticated, but agent/session/
+            # capabilities are self-asserted per request with no connector
+            # registration checked here - the REPORTED rung. A call that goes
+            # through /v1/auth/exchange and presents the resulting runtime
+            # credential earns CONNECTOR_AUTHENTICATED instead (see below).
+            assurance=IdentityAssurance.REPORTED,
+            trust_domain=default_trust_domain_id(project.id),
         )
         return RequestContext(actor=actor, project=project, api_key_id=key.id,
                               integration=integration, host=host, session=session,
@@ -133,9 +142,15 @@ def _try_runtime_credential(
     if claims is None:
         return None
     scope = claims.get("scope") or {}
+    tenant = claims["tenant"]
     actor = Actor(
-        user_id=claims["sub"], tenant=claims["tenant"], app_id=claims.get("integration"),
+        user_id=claims["sub"], tenant=tenant, app_id=claims.get("integration"),
         agent_id=claims["agent"], allowed_tools=list(scope.get("capabilities") or []),
+        # Presenting a runtime credential proves the caller went through
+        # /v1/auth/exchange, which registered the connector/integration -
+        # one rung above a bare per-request self-assertion.
+        assurance=IdentityAssurance.CONNECTOR_AUTHENTICATED,
+        trust_domain=default_trust_domain_id(tenant),
     )
     project = accounts.project(claims["tenant"]) if accounts is not None else None
     return RequestContext(

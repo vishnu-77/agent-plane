@@ -13,6 +13,9 @@ decision path - it is the explanation of decisions already made.
     GET  /v1/agent-definitions?tenant=       agent *types*, distinct from instances
     GET  /v1/agent-definitions/{id}
     PUT  /v1/agent-definitions/{id}          operator-assigned definition metadata
+    GET  /v1/principals?tenant=              registry-persisted PrincipalIdentity projections
+    GET  /v1/principals/{id}
+    GET  /v1/ownership?tenant=               orphaned/unowned/inactive agents (Phase 8)
     GET  /v1/sessions?tenant=&agent=         one agent's conversations/runs
     POST /v1/sessions/{id}/pause             hold one session's actions (operator)
     DELETE /v1/sessions/{id}/pause
@@ -236,6 +239,40 @@ async def put_agent_definition(request: Request, definition_id: str, body: dict[
     )
     registry.upsert_definition(rec)
     return {"definition": rec.model_dump(mode="json")}
+
+
+@registry_router.get("/v1/principals")
+async def list_principals(request: Request, tenant: str | None = Query(default=None),
+                          x_admin_token: str | None = Header(default=None),
+                          x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
+    items = [p.model_dump(mode="json")
+             for p in request.app.state.agent_registry.principals(_tenant_of(scope, tenant))]
+    return {"principals": items, "count": len(items)}
+
+
+@registry_router.get("/v1/principals/{principal_id}")
+async def get_principal(request: Request, principal_id: str, tenant: str | None = Query(default=None),
+                        x_admin_token: str | None = Header(default=None),
+                        x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
+    registry = request.app.state.agent_registry
+    candidates = [tenant] if tenant else sorted({p.tenant for p in registry.principals(scope.tenant)})
+    for t in candidates:
+        if not scope.allows(t):
+            continue
+        rec = registry.principal(t, principal_id)
+        if rec is not None:
+            return {"principal": rec.model_dump(mode="json")}
+    raise HTTPException(status_code=404, detail="principal not found")
+
+
+@registry_router.get("/v1/ownership")
+async def ownership(request: Request, tenant: str | None = Query(default=None),
+                    x_admin_token: str | None = Header(default=None),
+                    x_demo_token: str | None = Header(default=None)) -> dict[str, Any]:
+    scope = _scope(request, x_admin_token, x_demo_token, tenant)
+    return request.app.state.agent_registry.ownership_summary(_tenant_of(scope, tenant))
 
 
 @registry_router.get("/v1/agents/{agent_id}/suggested-lease")

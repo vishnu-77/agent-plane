@@ -14,6 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from agent_plane.identity.assurance import ASSURANCE_RANK
+
 
 class AuthorityLease(BaseModel):
     id: str
@@ -56,6 +58,13 @@ class AuthorityLease(BaseModel):
     #   max_reversibility: reversible|recoverable|irreversible (default irreversible)
     #   max_blast_radius: int     max resources affected incl. downstream
     permitted_consequence: dict[str, Any] = Field(default_factory=dict)
+
+    # --- identity prerequisite (0.8, see spec/identity-assurance.md) ---
+    # Unset (False/None/[]) = no requirement, so every existing lease's
+    # behavior is unchanged. Opt in per task/lease, not a global default.
+    require_established_identity: bool = False
+    min_assurance: str | None = None                       # an IdentityAssurance value
+    allowed_trust_domains: list[str] = Field(default_factory=list)  # empty = any
 
     @field_validator("expires_at")
     @classmethod
@@ -135,6 +144,17 @@ def lease_attenuation_errors(parent: AuthorityLease, child: AuthorityLease) -> l
     if granted_never:
         errors.append(f"grants actions the parent refuses outright: {granted_never}")
     errors.extend(consequence_attenuation_errors(parent.permitted_consequence, child.permitted_consequence))
+    # Identity requirements may only tighten under delegation, same as every
+    # other constraint above - a child may not quietly drop the parent's
+    # identity floor.
+    if parent.require_established_identity and not child.require_established_identity:
+        errors.append("drops require_established_identity")
+    if parent.min_assurance and ASSURANCE_RANK.get(child.min_assurance, -1) < ASSURANCE_RANK.get(parent.min_assurance, 0):
+        errors.append(f"min_assurance below parent floor ({child.min_assurance!r} < {parent.min_assurance!r})")
+    if parent.allowed_trust_domains:
+        extra_domains = [d for d in child.allowed_trust_domains if d not in parent.allowed_trust_domains]
+        if extra_domains or not child.allowed_trust_domains:
+            errors.append(f"allowed_trust_domains exceeds parent scope: {extra_domains or 'unrestricted'}")
     return errors
 
 
@@ -207,4 +227,11 @@ def parse_lease(doc: dict[str, Any]) -> AuthorityLease:
         permitted_consequence=dict(
             consequence.get("permitted") or doc.get("permitted_consequence") or {}
         ),
+        require_established_identity=bool(
+            constraints.get("require_established_identity")
+            or doc.get("require_established_identity") or False
+        ),
+        min_assurance=constraints.get("min_assurance") or doc.get("min_assurance"),
+        allowed_trust_domains=constraints.get("allowed_trust_domains")
+        or doc.get("allowed_trust_domains") or [],
     )

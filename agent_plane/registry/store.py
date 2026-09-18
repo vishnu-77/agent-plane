@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -128,6 +128,30 @@ class AgentDefinition(BaseModel):
     created_at: datetime
 
 
+class PrincipalRecord(BaseModel):
+    """Registry-persisted projection of agent_plane.identity.models.
+    PrincipalIdentity (Phase 7: a Principal-aware registry). One per
+    resolved (tenant, principal_id) - today principal_id is the same id as
+    the AgentRecord it was observed alongside, since this repository
+    resolves one principal per agent identity; a future multi-agent-per-
+    principal model would key these independently.
+
+    assurance/trust_domain reflect the most recently observed request, not
+    a lifetime high-water mark - an agent that sometimes authenticates more
+    strongly and sometimes less should show its current, not best-ever,
+    assurance.
+    """
+
+    principal_id: str
+    tenant: str
+    principal_type: str = "agent"
+    assurance: str | None = None
+    trust_domain: str | None = None
+    owner_principal: str | None = None
+    first_seen: datetime
+    last_seen: datetime
+
+
 # --------------------------------------------------------------------------- #
 # Store interface (memory)
 # --------------------------------------------------------------------------- #
@@ -137,6 +161,7 @@ class MemoryRegistry:
     def __init__(self) -> None:
         self._agents: dict[tuple[str, str], AgentRecord] = {}
         self._definitions: dict[tuple[str, str], AgentDefinition] = {}
+        self._principals: dict[tuple[str, str], PrincipalRecord] = {}
         self._tasks: dict[tuple[str, str], TaskRecord] = {}
         self._sessions: dict[tuple[str, str], SessionRecord] = {}
         self._settings: dict[str, dict[str, Any]] = {}
@@ -157,6 +182,15 @@ class MemoryRegistry:
 
     def _all_definitions(self, tenant: str | None) -> list[AgentDefinition]:
         return [d for (t, _), d in self._definitions.items() if tenant is None or t == tenant]
+
+    def _get_principal(self, tenant: str, principal_id: str) -> PrincipalRecord | None:
+        return self._principals.get((tenant, principal_id))
+
+    def _put_principal(self, rec: PrincipalRecord) -> None:
+        self._principals[(rec.tenant, rec.principal_id)] = rec
+
+    def _all_principals(self, tenant: str | None) -> list[PrincipalRecord]:
+        return [p for (t, _), p in self._principals.items() if tenant is None or t == tenant]
 
     def _get_task(self, tenant: str, task: str) -> TaskRecord | None:
         return self._tasks.get((tenant, task))
@@ -186,7 +220,7 @@ class MemoryRegistry:
         self._settings[key] = value
 
     def _delete_tenant(self, tenant: str) -> None:
-        for d in (self._agents, self._definitions, self._tasks, self._sessions):
+        for d in (self._agents, self._definitions, self._principals, self._tasks, self._sessions):
             for key in [k for k in d if k[0] == tenant]:
                 del d[key]
 
@@ -223,6 +257,13 @@ class AgentDefinitionRow(Base):
     __tablename__ = "registry_agent_definitions"
     tenant: Mapped[str] = mapped_column(String(128), primary_key=True)
     id: Mapped[str] = mapped_column(String(200), primary_key=True)
+    document: Mapped[dict] = mapped_column(JSON)
+
+
+class PrincipalRow(Base):
+    __tablename__ = "registry_principals"
+    tenant: Mapped[str] = mapped_column(String(128), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(200), primary_key=True)
     document: Mapped[dict] = mapped_column(JSON)
 
 
@@ -383,6 +424,41 @@ class SqlRegistry:
                 stmt = stmt.where(AgentDefinitionRow.tenant == tenant)
             return [AgentDefinition.model_validate(r.document) for r in s.scalars(stmt).all()]
 
+    def _get_principal(self, tenant: str, principal_id: str) -> PrincipalRecord | None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(PrincipalRow, (tenant, principal_id))
+            return PrincipalRecord.model_validate(row.document) if row else None
+        with self._session_factory() as s:
+            row = s.get(PrincipalRow, (tenant, principal_id))
+            return PrincipalRecord.model_validate(row.document) if row else None
+
+    def _put_principal(self, rec: PrincipalRecord) -> None:
+        session = self._active_session()
+        if session is not None:
+            row = session.get(PrincipalRow, (rec.tenant, rec.principal_id))
+            doc = rec.model_dump(mode="json")
+            if row is None:
+                session.add(PrincipalRow(tenant=rec.tenant, principal_id=rec.principal_id, document=doc))
+            else:
+                row.document = doc
+            return
+        with self._session_factory() as s:
+            row = s.get(PrincipalRow, (rec.tenant, rec.principal_id))
+            doc = rec.model_dump(mode="json")
+            if row is None:
+                s.add(PrincipalRow(tenant=rec.tenant, principal_id=rec.principal_id, document=doc))
+            else:
+                row.document = doc
+            s.commit()
+
+    def _all_principals(self, tenant: str | None) -> list[PrincipalRecord]:
+        with self._session_factory() as s:
+            stmt = select(PrincipalRow)
+            if tenant:
+                stmt = stmt.where(PrincipalRow.tenant == tenant)
+            return [PrincipalRecord.model_validate(r.document) for r in s.scalars(stmt).all()]
+
     def _get_task(self, tenant: str, task: str) -> TaskRecord | None:
         session = self._active_session()
         if session is not None:
@@ -476,7 +552,7 @@ class SqlRegistry:
 
     def _delete_tenant(self, tenant: str) -> None:
         with self._session_factory() as s:
-            for model in (AgentRow, AgentDefinitionRow, TaskRow, SessionRow):
+            for model in (AgentRow, AgentDefinitionRow, PrincipalRow, TaskRow, SessionRow):
                 for row in s.scalars(select(model).where(model.tenant == tenant)).all():
                     s.delete(row)
             s.commit()
@@ -494,6 +570,7 @@ class _RegistryOps:
         task: str | None, action: str, resource: str, outcome: str, decision_id: str,
         context: dict[str, str] | None = None, edge: str = "authorize",
         executed: bool | None = None, evidence_source: str = "self_reported",
+        assurance: str | None = None, trust_domain: str | None = None,
     ) -> AgentRecord:
         """Record one governed call. Idempotent per decision id is not required;
         counts are approximate telemetry, decisions are the audit chain."""
@@ -505,6 +582,18 @@ class _RegistryOps:
                 rec = AgentRecord(id=agent, tenant=tenant, application=application or "default",
                                   first_seen=now, last_seen=now)
             rec.last_seen = now
+            if assurance or trust_domain:
+                principal = self._get_principal(tenant, agent)
+                if principal is None:
+                    principal = PrincipalRecord(principal_id=agent, tenant=tenant, first_seen=now, last_seen=now)
+                principal.last_seen = now
+                # Most-recent-observation-wins, not a high-water mark - see
+                # PrincipalRecord's docstring.
+                if assurance:
+                    principal.assurance = assurance
+                if trust_domain:
+                    principal.trust_domain = trust_domain
+                self._put_principal(principal)
             if application and rec.application == "default":
                 rec.application = application
             if context.get("framework") and not rec.framework:
@@ -644,6 +733,41 @@ class _RegistryOps:
             self._put_definition(rec)
         return rec
 
+    def principals(self, tenant: str | None = None) -> list[PrincipalRecord]:
+        return self._all_principals(tenant)
+
+    def principal(self, tenant: str, principal_id: str) -> PrincipalRecord | None:
+        return self._get_principal(tenant, principal_id)
+
+    def upsert_principal(self, rec: PrincipalRecord) -> PrincipalRecord:
+        with self.transaction():
+            self._put_principal(rec)
+        return rec
+
+    # -- ownership (Phase 8) --------------------------------------------------- #
+    def ownership_summary(self, tenant: str | None = None, *, inactive_after_days: int = 7) -> dict[str, Any]:
+        """Orphaned/unowned/inactive agents, and definitions with no owner -
+        the payoff of ownership being a real field instead of tribal
+        knowledge. 'Orphaned' = no definition could be derived (observe()
+        never saw a context["framework"]); 'unowned' = has a definition, but
+        that definition has no owner set."""
+        definitions = {d.id: d for d in self._all_definitions(tenant)}
+        agents = self._all_agents(tenant)
+        cutoff = _utcnow() - timedelta(days=inactive_after_days)
+        orphaned = [a.id for a in agents if a.definition_id is None]
+        unowned = [a.id for a in agents if a.definition_id is not None
+                  and not (definitions.get(a.definition_id) and definitions[a.definition_id].owner)]
+        inactive = [a.id for a in agents
+                   if a.last_seen.replace(tzinfo=a.last_seen.tzinfo or UTC) < cutoff]
+        unowned_definitions = [d.id for d in definitions.values() if not d.owner]
+        return {
+            "agents": len(agents),
+            "orphaned_agents": orphaned,
+            "unowned_agents": unowned,
+            "inactive_agents": inactive,
+            "unowned_definitions": unowned_definitions,
+        }
+
     def tasks(self, tenant: str | None = None) -> list[TaskRecord]:
         return self._all_tasks(tenant)
 
@@ -760,7 +884,8 @@ class _RegistryOps:
 
 
 for _name in ("observe", "register_task", "attach_lease", "agents", "agent", "definitions", "definition",
-              "upsert_definition", "tasks", "task", "sessions",
+              "upsert_definition", "principals", "principal", "upsert_principal", "ownership_summary",
+              "tasks", "task", "sessions",
               "session", "resources", "set_quarantine", "is_quarantined", "set_session_pause",
               "is_session_paused", "mode", "set_mode", "drift", "suggested_lease", "reset_tenant"):
     setattr(MemoryRegistry, _name, getattr(_RegistryOps, _name))

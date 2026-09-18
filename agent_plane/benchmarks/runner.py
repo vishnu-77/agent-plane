@@ -18,6 +18,8 @@ from agent_plane.authority.service import AuthorityService
 from agent_plane.authority.store import LeaseStore
 from agent_plane.benchmarks.scenarios import Scenario, Step, scenarios
 from agent_plane.consequence.state import SqlTaskConsequenceStateStore, TaskFact
+from agent_plane.identity.assurance import IdentityAssurance
+from agent_plane.identity.trust import default_trust_domain_id
 from agent_plane.schemas.canonical import Actor
 
 BASELINES = ("prompt-only", "context-engineered", "stateless-harness", "agent-plane")
@@ -141,7 +143,8 @@ def run_benchmark(*, external: dict[str, ExternalConfig] | None = None,
                                 answer = external_decide(config, baseline_input(case, step, history, baseline))
                                 row.update(answer.model_dump())
                             else:
-                                result = service.decide(Actor(user_id="benchmark", agent_id="benchmark-agent", tenant=step.tenant, allowed_tools=["*"]),
+                                result = service.decide(Actor(user_id="benchmark", agent_id="benchmark-agent", tenant=step.tenant, allowed_tools=["*"],
+                                    assurance=IdentityAssurance.REPORTED, trust_domain=default_trust_domain_id(step.tenant)),
                                     task=step.task, action=step.action, resource=step.resource, consume=False, record=False)
                                 row.update(decision=result.outcome.value, reason=result.reason,
                                            input_tokens=0, output_tokens=0, tool_calls=0,

@@ -66,7 +66,13 @@ other edge (`GET /v1/audit`) - `evidence_id` is that record's `decision_id`.
    `ACTION_OUTSIDE_CAPABILITY_MANIFEST`
 2. No lease for `(agent, task)` → `NO_ACTIVE_LEASE`
 3. All leases for `(agent, task)` expired → `LEASE_EXPIRED`
-4. For each active lease, in order:
+4. **Identity prerequisite** (0.8, opt-in per lease - see
+   [spec/identity-assurance.md](identity-assurance.md)): if any active lease
+   sets `require_established_identity`/`min_assurance`/`allowed_trust_domains`
+   and the actor doesn't meet it → `IDENTITY_NOT_ESTABLISHED` /
+   `IDENTITY_ASSURANCE_INSUFFICIENT` / `TRUST_DOMAIN_NOT_ALLOWED`. A lease
+   that sets none of these (every lease before 0.8) is unaffected.
+5. For each active lease, in order:
    - `resource` doesn't match `resources` → skip (contributes `RESOURCE_OUTSIDE_DELEGATED_SCOPE`)
    - `resource` matches `protected_resources` → **deny immediately**, `RESOURCE_PROTECTED`
      (a protected resource can't be reached via a more permissive lease for the same task)
@@ -76,7 +82,7 @@ other edge (`GET /v1/audit`) - `evidence_id` is that record's `decision_id`.
    - `max_uses[action]` reached → skip, `ACTION_LIMIT_EXCEEDED`
    - else → `ALLOW` (`ACTION_WITHIN_TASK_AUTHORITY`), or `APPROVAL_REQUIRED`
      (`ACTION_REQUIRES_APPROVAL`) if `action` is in `require_approval`
-5. No lease matched → deny with the most specific reason seen above.
+6. No lease matched → deny with the most specific reason seen above.
 
 ## Issuing a lease
 

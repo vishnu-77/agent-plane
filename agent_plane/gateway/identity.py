@@ -18,6 +18,8 @@ import jwt
 
 from agent_plane.config import Settings
 from agent_plane.gateway.runtime_credential import TYP as RUNTIME_CREDENTIAL_TYP
+from agent_plane.identity.assurance import IdentityAssurance
+from agent_plane.identity.trust import default_trust_domain_id
 from agent_plane.schemas.canonical import Actor, DataClassification
 
 
@@ -67,15 +69,20 @@ def _resolve_claims(token: str, settings: Settings) -> Actor:
     if not user_id:
         raise IdentityError("Token missing subject (sub)")
 
+    tenant = claims.get("tenant", "default")
     return Actor(
         user_id=str(user_id),
-        tenant=claims.get("tenant", "default"),
+        tenant=tenant,
         department=claims.get("department"),
         app_id=claims.get("app_id"),
         agent_id=claims.get("agent_id"),
         clearance=_clearance(claims.get("clearance")),
         allowed_tools=claims.get("allowed_tools", []) or [],
         groups=claims.get("groups", []) or [],
+        # A bare HS256 dev-mode token: the lowest assurance rung. See
+        # spec/identity-assurance.md.
+        assurance=IdentityAssurance.REPORTED,
+        trust_domain=default_trust_domain_id(tenant),
     )
 
 
@@ -121,13 +128,18 @@ def _resolve_delegation(
 
     # The verified scope - not the agent's say-so - decides tools and clearance.
     scope = claims.get("scope") or {}
+    tenant = claims.get("tenant", "default")
     return Actor(
         user_id=str(user_id),
-        tenant=claims.get("tenant", "default"),
+        tenant=tenant,
         department=claims.get("department"),
         app_id=claims.get("app") or claims.get("app_id"),
         agent_id=claims.get("agent") or claims.get("agent_id"),
         clearance=_clearance(scope.get("clearance") or claims.get("clearance")),
         allowed_tools=scope.get("tools", []) or [],
         groups=scope.get("groups", claims.get("groups", [])) or [],
+        # A cryptographically verified, signed delegation - the strongest
+        # rung short of workload attestation. See spec/identity-assurance.md.
+        assurance=IdentityAssurance.DELEGATED_VERIFIED,
+        trust_domain=claims.get("trust_domain") or default_trust_domain_id(tenant),
     )

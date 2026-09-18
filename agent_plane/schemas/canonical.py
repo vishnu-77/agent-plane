@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agent_plane.identity.assurance import IdentityAssurance
+
 
 class DataClassification(str, Enum):
     PUBLIC = "public"
@@ -64,6 +66,13 @@ class Actor(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     # Group/role memberships, used for document-level ACLs in RAG authorization.
     groups: list[str] = Field(default_factory=list)
+    # Identity prerequisite (see spec/identity-assurance.md, spec/trust-domains.md).
+    # Optional and unset by default: only resolve_request()/resolve_identity()
+    # populate these on a real request. Left None, an evaluator identity check
+    # opted into via AuthorityLease.require_established_identity denies -
+    # every lease that doesn't opt in (the default) is unaffected.
+    assurance: IdentityAssurance | None = None
+    trust_domain: str | None = None
 
     @property
     def capabilities(self) -> list[str]:

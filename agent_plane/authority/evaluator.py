@@ -26,10 +26,19 @@ from pydantic import BaseModel
 
 from agent_plane.authority.lease import IMPACT_RANK, action_matches, resource_matches
 from agent_plane.authority.store import LeaseStore
+from agent_plane.identity.assurance import ASSURANCE_RANK
 from agent_plane.schemas.canonical import Actor, DecisionAction
 
 
 class AuthorityReason(str, Enum):
+    # Identity prerequisite (0.8, roadmap invariant 1: no established
+    # identity -> no executable authority). Opt-in per lease via
+    # require_established_identity/min_assurance/allowed_trust_domains -
+    # see spec/identity-assurance.md, spec/trust-domains.md. A lease that
+    # doesn't set these can never produce these reasons.
+    IDENTITY_NOT_ESTABLISHED = "IDENTITY_NOT_ESTABLISHED"
+    IDENTITY_ASSURANCE_INSUFFICIENT = "IDENTITY_ASSURANCE_INSUFFICIENT"
+    TRUST_DOMAIN_NOT_ALLOWED = "TRUST_DOMAIN_NOT_ALLOWED"
     ACTION_OUTSIDE_CAPABILITY_MANIFEST = "ACTION_OUTSIDE_CAPABILITY_MANIFEST"
     NO_ACTIVE_LEASE = "NO_ACTIVE_LEASE"
     LEASE_EXPIRED = "LEASE_EXPIRED"
@@ -75,10 +84,11 @@ def _capability_covers(actor: Actor, action: str) -> bool:
     """Empty grant = not scoped at the identity layer (matches the policy
     engine's ``allowed_tools`` convention) - such actors pass this gate and are
     fully decided by task authority instead."""
-    if not actor.allowed_tools:
+    capabilities = actor.capabilities
+    if not capabilities:
         return True
     namespace = action.split(".", 1)[0]
-    return "*" in actor.allowed_tools or namespace in actor.allowed_tools or action in actor.allowed_tools
+    return "*" in capabilities or namespace in capabilities or action in capabilities
 
 
 def evaluate_authority(
@@ -135,6 +145,30 @@ def _evaluate_authority(
             decision=DecisionAction.DENY, reason=AuthorityReason.LEASE_EXPIRED,
             decision_id=decision_id,
         )
+
+    # Identity prerequisite, opt-in per lease (spec/identity-assurance.md,
+    # spec/trust-domains.md). Checked across every active grant, same
+    # precedent as NEVER/protected-resources below: any lease imposing a
+    # floor the actor doesn't meet vetoes the task, regardless of whether
+    # that particular lease would otherwise have matched. A lease with none
+    # of these fields set (every lease before 0.8, and every lease that
+    # doesn't opt in) can never trigger this block.
+    for lease in active:
+        if lease.require_established_identity and actor.assurance is None:
+            return AuthorityDecision(decision=DecisionAction.DENY,
+                                     reason=AuthorityReason.IDENTITY_NOT_ESTABLISHED,
+                                     lease_id=lease.id, decision_id=decision_id)
+        if lease.min_assurance and (
+            actor.assurance is None
+            or ASSURANCE_RANK.get(actor.assurance, -1) < ASSURANCE_RANK.get(lease.min_assurance, 0)
+        ):
+            return AuthorityDecision(decision=DecisionAction.DENY,
+                                     reason=AuthorityReason.IDENTITY_ASSURANCE_INSUFFICIENT,
+                                     lease_id=lease.id, decision_id=decision_id)
+        if lease.allowed_trust_domains and actor.trust_domain not in lease.allowed_trust_domains:
+            return AuthorityDecision(decision=DecisionAction.DENY,
+                                     reason=AuthorityReason.TRUST_DOMAIN_NOT_ALLOWED,
+                                     lease_id=lease.id, decision_id=decision_id)
 
     # NEVER is an absolute refusal: checked across every active grant before
     # scope, use limits, or approval, so no other rule can grant it back.

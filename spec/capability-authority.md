@@ -29,11 +29,22 @@ instead of a field name (`allowed_tools`) that reads like a permission grant
 to someone encountering it for the first time.
 
 It does **not**:
-- rename or remove `allowed_tools` (every existing caller keeps working
-  unchanged — see PR-2 in the implementation plan for the full caller
-  audit),
-- change `_capability_covers` or any evaluator behavior,
+- rename or remove `allowed_tools` as a field, wire format, or constructor
+  kwarg — every external client and every `Actor(allowed_tools=...)`
+  construction site keeps working unchanged,
 - add a new authorization check.
+
+Update (0.8): the read site that matters most for this doc's own point —
+`agent_plane/authority/evaluator.py`'s `_capability_covers`, the capability
+gate's sole implementation — now reads `actor.capabilities` rather than
+`actor.allowed_tools`. Since the property is a pure alias this changes no
+behavior; it's the "internally migrate reads to `.capabilities`" half of
+the roadmap's Phase 1, done at the one site where it actually matters for
+readers of this doc rather than as a mechanical sweep of every read site
+(`enforcement/service.py`, `policy/engine.py`, `gateway/router.py`,
+`gateway/a2a.py` still read `allowed_tools` directly — a pure rename with
+no behavior change, safe to do opportunistically when next touching those
+files).
 
 ## Acceptance condition
 

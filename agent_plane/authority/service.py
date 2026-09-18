@@ -517,7 +517,9 @@ class AuthorityService:
         if registry is not None:
             registry.observe(tenant=actor.tenant, agent=actor.agent_id or actor.user_id, application=actor.app_id,
                              declared=list(actor.allowed_tools), task=task, action=action, resource=resource,
-                             outcome=decision.decision.value, decision_id=decision.decision_id, context=context, edge=edge)
+                             outcome=decision.decision.value, decision_id=decision.decision_id, context=context, edge=edge,
+                             assurance=actor.assurance.value if actor.assurance else None,
+                             trust_domain=actor.trust_domain)
         # Propose a task fact if this resource classifies as one - always, in
         # every mode, whatever the decision was: Observe/Govern need it to
         # reason about drift, and it costs nothing to record. Only *confirmed*

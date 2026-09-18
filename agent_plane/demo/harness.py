@@ -13,6 +13,8 @@ from typing import Any
 
 from agent_plane.authority.lease import AuthorityLease, parse_lease
 from agent_plane.demo.scenarios import DEMO_TENANT, SCENARIOS, Scenario
+from agent_plane.identity.assurance import IdentityAssurance
+from agent_plane.identity.trust import default_trust_domain_id
 from agent_plane.registry.store import Origin
 from agent_plane.schemas.canonical import Actor
 
@@ -104,7 +106,9 @@ class DemoHarness:
     # -- helpers -------------------------------------------------------------------- #
     def _actor(self, scenario: Scenario, agent: str, declared: list[str]) -> Actor:
         return Actor(user_id=scenario.created_by, tenant=DEMO_TENANT, app_id="demo-harness",
-                     agent_id=agent, allowed_tools=declared)
+                     agent_id=agent, allowed_tools=declared,
+                     assurance=IdentityAssurance.REPORTED,
+                     trust_domain=default_trust_domain_id(DEMO_TENANT))
 
     def _fresh_lease(self, scenario: Scenario, run_id: str) -> AuthorityLease:
         doc = dict(scenario.lease)
