@@ -1,7 +1,10 @@
 # Trust domains
 
-Status: terminology freeze (PR-1). Implemented in code by PR-4
-(`agent_plane/identity/trust.py`) as an additive, unwired model.
+Status: implemented (0.8). `agent_plane/identity/trust.py` defines the
+model. `AuthorityLease.allowed_trust_domains` and `Actor.trust_domain`
+(populated in `gateway/identity.py`/`gateway/context.py`) wire it into
+`agent_plane/authority/evaluator.py`'s opt-in identity gate - see
+spec/identity-assurance.md.
 
 ## Project (tenant) is not a trust domain
 

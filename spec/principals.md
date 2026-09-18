@@ -1,7 +1,11 @@
 # Principals
 
-Status: terminology freeze for the identity-first work (PR-1 of the
-identity/authority first sprint). No new enforcement behavior.
+Status: implemented (0.8). `PrincipalIdentity` (`agent_plane/identity/models.py`)
+remains a read/reporting model - the evaluator gates on `Actor.assurance`/
+`Actor.trust_domain` directly (see spec/identity-assurance.md), not on a
+`PrincipalIdentity` lookup. `PrincipalRecord` (`agent_plane/registry/store.py`)
+persists a queryable projection in the registry (`GET /v1/principals`),
+upserted from `observe()` whenever an actor carries assurance/trust_domain.
 
 ## What this is
 
