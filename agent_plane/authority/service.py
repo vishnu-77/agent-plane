@@ -200,6 +200,9 @@ def explain(outcome: DecisionAction, reason: str, *, task: str, action: str, res
         lines.append(f"The agent's identity does not even declare the capability for {action}; task authority was not consulted.")
     elif reason == AuthorityReason.AGENT_QUARANTINED.value:
         lines.append("An operator quarantined this agent. Every action is held until the quarantine is lifted.")
+    elif reason == AuthorityReason.AGENT_LIFECYCLE_REVOKED.value:
+        lines.append("An operator revoked this agent's authority outright - a deliberate, terminal hold, "
+                     "not a temporary quarantine. Nothing proceeds until an operator un-revokes it.")
     elif reason == AuthorityReason.SESSION_PAUSED.value:
         lines.append("An operator paused this session. Every action from it is held until it is resumed.")
     elif reason.startswith("APPROVAL_"):
@@ -359,7 +362,13 @@ class AuthorityService:
 
             # 1. Quarantine is absolute: it is an operator's hold on the agent.
             session_id = resolve_session_id(context, agent=subject, task=task)
-            if registry is not None and registry.is_quarantined(actor.tenant, subject):
+            if registry is not None and registry.is_lifecycle_revoked(actor.tenant, subject):
+                # Checked ahead of quarantine: revocation is the more final
+                # state (Phase 28) - if both are somehow set, the terminal
+                # one is the true explanation, not the temporary one.
+                decision = AuthorityDecision(decision=DecisionAction.QUARANTINE, reason=AuthorityReason.AGENT_LIFECYCLE_REVOKED,
+                                             decision_id=f"az_{uuid.uuid4().hex[:12]}")
+            elif registry is not None and registry.is_quarantined(actor.tenant, subject):
                 decision = AuthorityDecision(decision=DecisionAction.QUARANTINE, reason=AuthorityReason.AGENT_QUARANTINED,
                                              decision_id=f"az_{uuid.uuid4().hex[:12]}")
             # 1b. Same hold, scoped to one session rather than the whole agent.

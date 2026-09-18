@@ -142,6 +142,27 @@ def test_quarantine_holds_every_action(client):
                                                                "resource": "staging/checkout"}).status_code == 200
 
 
+def test_revocation_holds_every_action_and_is_terminal_not_temporary(client):
+    """Phase 28: revoke is a distinct, deliberate hold from quarantine -
+    same absolute-precedence enforcement, a different reason code."""
+    _lease(client)
+    ok = client.post("/v1/authorize", headers=_auth(), json={"task": "incident-1", "action": "logs.read",
+                                                             "resource": "staging/checkout"})
+    assert ok.status_code == 200
+    r = client.post("/v1/agents/inc-agent/revoke?tenant=acme", headers=ADMIN, json={"by": "operator"})
+    assert r.status_code == 200 and r.json()["agent"]["lifecycle_revoked"] is True
+    held = client.post("/v1/authorize", headers=_auth(), json={"task": "incident-1", "action": "logs.read",
+                                                               "resource": "staging/checkout"})
+    assert held.status_code == 423
+    assert held.json()["detail"]["decision"] == "quarantine"
+    assert held.json()["detail"]["reason"] == "AGENT_LIFECYCLE_REVOKED"
+    detail = client.get("/v1/agents/inc-agent?tenant=acme", headers=ADMIN).json()
+    assert detail["lifecycle_state"] == "revoked"
+    assert client.delete("/v1/agents/inc-agent/revoke?tenant=acme", headers=ADMIN).status_code == 200
+    assert client.post("/v1/authorize", headers=_auth(), json={"task": "incident-1", "action": "logs.read",
+                                                               "resource": "staging/checkout"}).status_code == 200
+
+
 # --------------------------------------------------------------------------- #
 # Session pause
 # --------------------------------------------------------------------------- #

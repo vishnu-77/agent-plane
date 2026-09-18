@@ -7,6 +7,10 @@ import { ActivityGroups, AuthoritySummary, DecisionDrawer } from "@/components/d
 import { Badge, Button, Empty, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui";
 
 const TONE_BADGE = { allow: "allow", deny: "deny", review: "approval", hold: "hold", neutral: "neutral" } as const;
+const LIFECYCLE_TONE = {
+  discovered: "neutral", identified: "neutral", owned: "neutral",
+  authorised: "ink", active: "allow", suspended: "hold", revoked: "deny",
+} as const;
 
 export function AgentsPage() {
   const { feed, project, source, refresh } = useStore();
@@ -146,6 +150,12 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
             <TabsContent value="overview" className="space-y-3">
               <dl className="grid grid-cols-[130px_1fr] gap-x-3 gap-y-1.5 text-sm">
                 <dt className="eyebrow pt-[3px]">Identity</dt><dd className="font-mono text-xs">{detail.id}</dd>
+                {detail.lifecycle_state ? (
+                  <>
+                    <dt className="eyebrow pt-[3px]">Lifecycle</dt>
+                    <dd><Badge tone={LIFECYCLE_TONE[detail.lifecycle_state]}>{detail.lifecycle_state}</Badge></dd>
+                  </>
+                ) : null}
                 <dt className="eyebrow pt-[3px]">Integration</dt><dd>{detail.framework ?? "unknown"}</dd>
                 <dt className="eyebrow pt-[3px]">Application</dt><dd>{detail.application}</dd>
                 <dt className="eyebrow pt-[3px]">Current task</dt><dd>{detail.current_task ?? "—"}</dd>
@@ -161,7 +171,7 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
                   </blockquote>
                 </div>
               ) : null}
-              <div className="flex gap-2 border-t border-hairline pt-3">
+              <div className="flex flex-wrap gap-2 border-t border-hairline pt-3">
                 {detail.status === "quarantined" ? (
                   <Button size="sm" disabled={source === "demo"}
                     onClick={async () => { await Api.quarantine(detail.id, projectId, false); await onChanged(); }}>
@@ -173,9 +183,25 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
                     Hold this agent
                   </Button>
                 )}
+                {detail.lifecycle_state === "revoked" ? (
+                  <Button size="sm" disabled={source === "demo"}
+                    onClick={async () => { await Api.revoke(detail.id, projectId, false); await onChanged(); }}>
+                    Un-revoke
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="deny" disabled={source === "demo"}
+                    onClick={async () => { await Api.revoke(detail.id, projectId, true); await onChanged(); }}>
+                    Revoke
+                  </Button>
+                )}
               </div>
               {detail.status === "quarantined" ? (
                 <p className="text-xs text-hold">Every action from this agent is refused until it is released.</p>
+              ) : null}
+              {detail.lifecycle_state === "revoked" ? (
+                <p className="text-xs text-deny">
+                  Revoked: a deliberate, terminal hold, distinct from a temporary quarantine.
+                </p>
               ) : null}
             </TabsContent>
 
@@ -202,6 +228,10 @@ function AgentDrawer({ agentId, projectId, source, onClose, onChanged }: {
                   <dt className="text-ink-2">exercised</dt><dd>{Object.entries(detail.exercised_authority).map(([a, n]) => `${a}×${n}`).join(", ") || "none"}</dd>
                   <dt className="text-ink-2">refused</dt><dd>{Object.entries(detail.denied_authority).map(([a, n]) => `${a}×${n}`).join(", ") || "none"}</dd>
                   <dt className="text-ink-2">unused grants</dt><dd>{(detail.drift.unused_grants ?? []).join(", ") || "none"}</dd>
+                  <dt className="text-ink-2" title="Capability declared but never granted (Phase 11: C - G)">capability outside authority</dt>
+                  <dd>{(detail.drift.capability_outside_authority ?? []).join(", ") || "none"}</dd>
+                  <dt className="text-ink-2" title="Granted but never exercised (Phase 11: G - E)">unused authority</dt>
+                  <dd>{(detail.drift.unused_authority ?? []).join(", ") || "none"}</dd>
                   <dt className="text-ink-2">leases</dt><dd className="break-all">{detail.leases.map((l) => String(l.id)).join(", ") || "none"}</dd>
                   <dt className="text-ink-2">delegated to</dt><dd>{detail.children.join(", ") || "none"}</dd>
                 </dl>

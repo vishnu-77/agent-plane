@@ -887,6 +887,10 @@ class _RegistryOps:
             self._put_agent(rec)
             return rec
 
+    def is_lifecycle_revoked(self, tenant: str, agent: str) -> bool:
+        rec = self._get_agent(tenant, agent)
+        return bool(rec and rec.lifecycle_revoked)
+
     # -- session pause ------------------------------------------------------------ #
     def set_session_pause(self, tenant: str, session_id: str, *, on: bool,
                           by: str = "operator") -> SessionRecord | None:
@@ -965,7 +969,7 @@ for _name in ("observe", "register_task", "attach_lease", "agents", "agent", "de
               "enforcement_coverage",
               "tasks", "task", "sessions",
               "session", "resources", "set_quarantine", "is_quarantined", "set_lifecycle_revoked",
-              "set_session_pause",
+              "is_lifecycle_revoked", "set_session_pause",
               "is_session_paused", "mode", "set_mode", "drift", "suggested_lease", "reset_tenant"):
     setattr(MemoryRegistry, _name, getattr(_RegistryOps, _name))
     setattr(SqlRegistry, _name, getattr(_RegistryOps, _name))

@@ -59,6 +59,9 @@ class AuthorityReason(str, Enum):
     AGENT_QUARANTINED = "AGENT_QUARANTINED"
     # An operator paused this one session; nothing proceeds until resumed.
     SESSION_PAUSED = "SESSION_PAUSED"
+    # Lifecycle governance (Phase 28): a deliberate, terminal hold - distinct
+    # from AGENT_QUARANTINED (a temporary hold an operator lifts).
+    AGENT_LIFECYCLE_REVOKED = "AGENT_LIFECYCLE_REVOKED"
     # Approval resume path (POST /v1/authorize with "approval": "<id>")
     ACTION_APPROVED = "ACTION_APPROVED"
     APPROVAL_PENDING = "APPROVAL_PENDING"

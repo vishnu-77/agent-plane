@@ -168,12 +168,19 @@ export interface Agent {
   last_action: { action: string; resource: string; outcome: string; decision_id: string; at: string; edge: string } | null;
   granted_authority: string[]; active_lease: string | null; leases: string[];
   quarantine_note?: string | null;
+  definition_id?: string | null;
+  capability_evidence?: Array<{ capability: string; source: string; observed_at: string; ref: string | null }>;
+  lifecycle_revoked?: boolean;
 }
 
 export interface AgentDetail extends Omit<Agent, "leases"> {
   leases: Array<Record<string, unknown>>;
   lineage: Record<string, LineageLink[]>;
-  drift: { declared: string[]; granted: string[]; observed: string[]; undeclared: string[]; ungranted: string[]; unused_grants?: string[] };
+  drift: {
+    declared: string[]; granted: string[]; observed: string[]; undeclared: string[]; ungranted: string[];
+    unused_grants?: string[]; capability_outside_authority?: string[]; unused_authority?: string[];
+  };
+  lifecycle_state?: "discovered" | "identified" | "owned" | "authorised" | "active" | "suspended" | "revoked";
   tasks_detail: Array<{ id: string; origin: Origin; decisions: Record<string, number>; observed_actions: Record<string, number>; resources: string[] }>;
   recent_decisions: Array<{ decision_id: string; decision: string; reason: string; model_requested: string; model_used: string | null; created_at: string | null }>;
   children: string[];
@@ -271,6 +278,8 @@ export const Api = {
     api<AgentDetail>(`/v1/agents/${id}?${q({ tenant: project })}`, { source }),
   quarantine: (id: string, project: string, on: boolean) =>
     api<{ agent: Agent }>(`/v1/agents/${id}/quarantine?${q({ tenant: project })}`, { method: on ? "POST" : "DELETE", body: on ? { note: "held from the console" } : undefined }),
+  revoke: (id: string, project: string, on: boolean) =>
+    api<{ agent: Agent }>(`/v1/agents/${id}/revoke?${q({ tenant: project })}`, { method: on ? "POST" : "DELETE", body: on ? { by: "console" } : undefined }),
   sessions: (project: string, agent: string, source: Source = "live") =>
     api<{ sessions: Session[]; count: number }>(`/v1/sessions?${q({ tenant: project, agent })}`, { source }),
   pauseSession: (id: string, project: string, on: boolean) =>
