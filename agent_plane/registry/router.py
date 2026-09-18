@@ -8,6 +8,8 @@ decision path - it is the explanation of decisions already made.
     GET  /v1/agents/{id}                     one agent, with drift and lineage
     POST /v1/agents/{id}/quarantine          hold every action (operator)
     DELETE /v1/agents/{id}/quarantine
+    POST /v1/agents/{id}/revoke              terminal lifecycle state (Phase 28), distinct from quarantine
+    DELETE /v1/agents/{id}/revoke
     GET  /v1/agents/{id}/drift               declared vs granted vs observed
     GET  /v1/agents/{id}/suggested-lease     Observe -> Enforce
     GET  /v1/agent-definitions?tenant=       agent *types*, distinct from instances
@@ -38,7 +40,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from agent_plane.authority.service import TRACE_SCHEMA, lineage
 from agent_plane.gateway.authz import OperatorScope, require_admin, resolve_operator
 from agent_plane.gateway.context import resolve_request
-from agent_plane.registry.store import AgentDefinition, Origin
+from agent_plane.registry.store import AgentDefinition, Origin, agent_lifecycle_state
 
 registry_router = APIRouter(tags=["registry"])
 
@@ -103,16 +105,49 @@ async def get_agent(request: Request, agent_id: str, tenant: str | None = Query(
     audit = request.app.state.audit
     decisions = [e for e in audit.query(tenant=rec.tenant, limit=500) if e.get("agent_id") == rec.id
                  and str(e.get("model_requested", "")).startswith("authorize:")][:50]
+    definition = registry.definition(rec.tenant, rec.definition_id) if rec.definition_id else None
     return {
         **rec.model_dump(mode="json"),
         "granted_authority": granted,
         "leases": leases,
         "lineage": {ls["id"]: lineage(request.app.state.leases, ls["id"]) for ls in leases},
         "drift": registry.drift(rec.tenant, rec.id, granted),
+        "lifecycle_state": agent_lifecycle_state(rec, definition, granted),
         "tasks_detail": [t.model_dump(mode="json") for t in registry.tasks(rec.tenant) if rec.id in t.agents],
         "recent_decisions": decisions,
         "children": [a.id for a in registry.agents(rec.tenant) if a.parent_agent == rec.id],
     }
+
+
+@registry_router.post("/v1/agents/{agent_id}/revoke")
+async def revoke_agent(request: Request, agent_id: str, body: dict[str, Any] | None = None,
+                       tenant: str | None = Query(default=None),
+                       x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    """Terminal lifecycle state (Phase 28) - distinct from quarantine, a
+    temporary hold an operator lifts. Revocation is deliberate and durable."""
+    body = body or {}
+    tenant = tenant or body.get("tenant") or "default"
+    require_admin(request, x_admin_token, tenant=tenant)
+    rec = request.app.state.agent_registry.set_lifecycle_revoked(tenant, agent_id, on=True, by=body.get("by") or "admin")
+    if rec is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    request.app.state.audit.record({
+        "decision_id": f"az_{agent_id[:8]}_rv", "user_id": "admin", "tenant": tenant, "agent_id": agent_id,
+        "model_requested": f"agent-admin:{agent_id}", "model_used": agent_id, "data_classification": "",
+        "decision": "quarantine", "reason": "AGENT_LIFECYCLE_REVOKED", "rules_matched": [],
+    })
+    return {"agent": rec.model_dump(mode="json")}
+
+
+@registry_router.delete("/v1/agents/{agent_id}/revoke")
+async def unrevoke_agent(request: Request, agent_id: str, tenant: str | None = Query(default=None),
+                         x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    tenant = tenant or "default"
+    require_admin(request, x_admin_token, tenant=tenant)
+    rec = request.app.state.agent_registry.set_lifecycle_revoked(tenant, agent_id, on=False)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return {"agent": rec.model_dump(mode="json")}
 
 
 @registry_router.post("/v1/agents/{agent_id}/quarantine")

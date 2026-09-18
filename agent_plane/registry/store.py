@@ -113,6 +113,11 @@ class AgentRecord(BaseModel):
     last_action: dict[str, Any] | None = None
     quarantined_by: str | None = None
     quarantine_note: str | None = None
+    # Lifecycle governance (Phase 28): distinct from quarantine (a temporary
+    # hold, may be lifted) - revocation is the terminal state, an operator's
+    # deliberate "this agent's authority is done", not "paused for review".
+    lifecycle_revoked: bool = False
+    lifecycle_revoked_by: str | None = None
 
 
 class AgentDefinition(BaseModel):
@@ -150,6 +155,40 @@ class PrincipalRecord(BaseModel):
     owner_principal: str | None = None
     first_seen: datetime
     last_seen: datetime
+
+
+AgentLifecycleState = Literal[
+    "discovered", "identified", "owned", "authorised", "active", "suspended", "revoked",
+]
+
+
+def agent_lifecycle_state(
+    rec: AgentRecord, definition: AgentDefinition | None, granted_actions: list[str],
+) -> AgentLifecycleState:
+    """Derived, not stored - computed fresh from data that's already
+    authoritative elsewhere (AgentRecord.status/lifecycle_revoked,
+    AgentDefinition.owner, the lease store's granted_actions), so it can
+    never drift out of sync with the records it summarizes.
+
+        DISCOVERED -> IDENTIFIED -> OWNED -> AUTHORISED -> ACTIVE
+                                                   |
+                                            SUSPENDED / REVOKED (any point)
+
+    See spec/principals.md and the identity-first roadmap's Phase 28.
+    """
+    if rec.lifecycle_revoked:
+        return "revoked"
+    if rec.status == "quarantined":
+        return "suspended"
+    if definition is None:
+        return "discovered"
+    if not definition.owner:
+        return "identified"
+    if not granted_actions:
+        return "owned"
+    if rec.exercised_authority:
+        return "active"
+    return "authorised"
 
 
 # --------------------------------------------------------------------------- #
@@ -810,6 +849,18 @@ class _RegistryOps:
         rec = self._get_agent(tenant, agent)
         return bool(rec and rec.status == "quarantined")
 
+    # -- lifecycle revocation (Phase 28) -------------------------------------------- #
+    def set_lifecycle_revoked(self, tenant: str, agent: str, *, on: bool,
+                              by: str = "admin") -> AgentRecord | None:
+        rec = self._get_agent(tenant, agent)
+        if rec is None:
+            return None
+        with self.transaction():
+            rec.lifecycle_revoked = on
+            rec.lifecycle_revoked_by = by if on else None
+            self._put_agent(rec)
+            return rec
+
     # -- session pause ------------------------------------------------------------ #
     def set_session_pause(self, tenant: str, session_id: str, *, on: bool,
                           by: str = "operator") -> SessionRecord | None:
@@ -886,7 +937,8 @@ class _RegistryOps:
 for _name in ("observe", "register_task", "attach_lease", "agents", "agent", "definitions", "definition",
               "upsert_definition", "principals", "principal", "upsert_principal", "ownership_summary",
               "tasks", "task", "sessions",
-              "session", "resources", "set_quarantine", "is_quarantined", "set_session_pause",
+              "session", "resources", "set_quarantine", "is_quarantined", "set_lifecycle_revoked",
+              "set_session_pause",
               "is_session_paused", "mode", "set_mode", "drift", "suggested_lease", "reset_tenant"):
     setattr(MemoryRegistry, _name, getattr(_RegistryOps, _name))
     setattr(SqlRegistry, _name, getattr(_RegistryOps, _name))
