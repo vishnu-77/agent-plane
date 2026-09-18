@@ -23,6 +23,7 @@ from agent_plane.accounts.models import Project
 from agent_plane.accounts.security import looks_like_api_key
 from agent_plane.config import Settings
 from agent_plane.gateway.identity import IdentityError, resolve_identity
+from agent_plane.gateway.runtime_credential import verify_runtime_credential
 from agent_plane.schemas.canonical import Actor
 
 # A connector that names no agent still needs one; the integration is the agent.
@@ -101,6 +102,10 @@ def resolve_request(
                               integration=integration, host=host, session=session,
                               scopes=tuple(key.scopes))
 
+    runtime_ctx = _try_runtime_credential(authorization, settings, accounts, request.app.state.revocations)
+    if runtime_ctx is not None:
+        return runtime_ctx
+
     try:
         actor = resolve_identity(authorization, settings, request.app.state.revocations)
     except IdentityError as exc:
@@ -110,3 +115,31 @@ def resolve_request(
                           integration=(body.get("integration") or request.headers.get("X-Integration") or None),
                           host=body.get("host") or request.headers.get("X-Agent-Host"),
                           session=body.get("session") or request.headers.get("X-Session-Id"))
+
+
+def _try_runtime_credential(
+    authorization: str | None, settings: Settings, accounts: Any, revoked: set[str],
+) -> RequestContext | None:
+    """A runtime credential (PR-5, minted by /v1/auth/exchange) presented as
+    a bearer token. Returns None on anything that isn't one - malformed
+    header, wrong claims, expired, revoked, feature not configured - so the
+    caller falls through to today's resolve_identity() unchanged. Carries
+    the original api_key_id/scopes through so RequestContext.requires()
+    behaves identically to the raw Project API Key it was minted from."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    claims = verify_runtime_credential(token, settings, revoked)
+    if claims is None:
+        return None
+    scope = claims.get("scope") or {}
+    actor = Actor(
+        user_id=claims["sub"], tenant=claims["tenant"], app_id=claims.get("integration"),
+        agent_id=claims["agent"], allowed_tools=list(scope.get("capabilities") or []),
+    )
+    project = accounts.project(claims["tenant"]) if accounts is not None else None
+    return RequestContext(
+        actor=actor, project=project, api_key_id=claims["sub"],
+        integration=claims.get("integration"), session=claims.get("session"),
+        scopes=tuple(scope.get("scopes") or []),
+    )

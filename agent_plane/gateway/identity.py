@@ -17,6 +17,7 @@ from __future__ import annotations
 import jwt
 
 from agent_plane.config import Settings
+from agent_plane.gateway.runtime_credential import TYP as RUNTIME_CREDENTIAL_TYP
 from agent_plane.schemas.canonical import Actor, DataClassification
 
 
@@ -100,6 +101,14 @@ def _resolve_delegation(
         claims = jwt.decode(token, public_key, algorithms=["EdDSA"], **verify_kwargs)
     except jwt.PyJWTError as exc:  # noqa: BLE001 - normalize to 401
         raise IdentityError(f"Invalid delegation: {exc}") from exc
+
+    # A runtime credential (PR-5, gateway/runtime_credential.py) is signed with
+    # the same keypair A2A uses, but is a distinct credential type scoped to
+    # /v1/auth/exchange's own claim shape - it must never be reinterpretable
+    # as a delegation token by an endpoint that calls resolve_identity()
+    # directly (e.g. POST /v1/agents/delegate).
+    if claims.get("typ") == RUNTIME_CREDENTIAL_TYP:
+        raise IdentityError("Runtime credentials cannot be used as a delegation identity")
 
     jti = claims.get("jti")
     revoked_ids = settings.revoked_jti_set | (revoked or set())

@@ -37,7 +37,9 @@ from agent_plane.accounts.security import (
 )
 from agent_plane.accounts.store import AccountError
 from agent_plane.authority.lease import action_matches
+from agent_plane.config import Settings
 from agent_plane.gateway.authz import resolve_operator
+from agent_plane.gateway.runtime_credential import mint_runtime_credential
 from agent_plane.rules import suggest_rule
 from agent_plane.rules.yaml_io import RulesYamlError, dump_rules, load_rules
 
@@ -313,7 +315,8 @@ async def exchange(request: Request, body: dict[str, Any] | None = None,
         host=ctx.host, config={"version": body.get("version")} if body.get("version") else None)
     session_id = ctx.session or f"ses_{datetime.now(UTC).timestamp():.0f}"
     catalog = INTEGRATION_CATALOG[kind]
-    return {
+    settings: Settings = request.app.state.settings
+    response = {
         "project": {"id": ctx.project.id, "name": ctx.project.name, "mode": ctx.project.mode},
         "integration": {"id": integration.id, "kind": kind,
                         "observation": catalog["observation"], "enforcement": catalog["enforcement"]},
@@ -324,6 +327,19 @@ async def exchange(request: Request, body: dict[str, Any] | None = None,
         "report_to": "/v1/events/action",
         "authorize_at": "/v1/authorize",
     }
+    # PR-5, opt-in: only present when DELEGATION_SIGNING_KEY is configured
+    # and the caller authenticated with a Project API Key (the only case
+    # /v1/auth/exchange is designed for). A caller that ignores unknown
+    # response keys (every caller today) is unaffected either way.
+    if ctx.api_key_id:
+        runtime_credential = mint_runtime_credential(
+            settings, api_key_id=ctx.api_key_id, tenant=ctx.project.id, agent=ctx.agent,
+            session=session_id, integration=kind, capabilities=ctx.actor.allowed_tools,
+            scopes=ctx.scopes,
+        )
+        if runtime_credential is not None:
+            response["runtime_credential"] = runtime_credential
+    return response
 
 
 # --------------------------------------------------------------------------- #
