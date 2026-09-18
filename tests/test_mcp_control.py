@@ -1,7 +1,7 @@
-"""Phase 19: Agent Plane Control MCP. Exercised through FastMCP's real
+"""Phase 19: Agent Plane Control MCP. Exercised through MCPServer's real
 call_tool()/list_tools() dispatch (not by calling the Python functions
-directly), so the SDK wiring itself - the thing agent_plane/gateway/mcp.py
-got wrong against this installed SDK version - is actually verified."""
+directly), so the SDK wiring itself is actually verified against this
+project's real, pinned SDK (pyproject.toml: mcp==2.2.0)."""
 from __future__ import annotations
 
 import asyncio
@@ -41,7 +41,7 @@ def test_control_server_lists_all_four_tools(tmp_path):
 def test_whoami_not_found_via_real_dispatch(tmp_path):
     mcp = build_control_server(_state(tmp_path))
     result = _run(mcp.call_tool("whoami", {"agent_id": "nobody"}))
-    assert result[1] == {"found": False}
+    assert result.structured_content == {"found": False}
 
 
 def test_whoami_finds_an_observed_agent(tmp_path):
@@ -53,7 +53,7 @@ def test_whoami_finds_an_observed_agent(tmp_path):
                                  assurance="connector_authenticated", trust_domain="tenant:default")
     mcp = build_control_server(state)
     result = _run(mcp.call_tool("whoami", {"agent_id": "claude-code"}))
-    payload = result[1]
+    payload = result.structured_content
     assert payload["found"] is True
     assert payload["assurance"] == "connector_authenticated"
     assert payload["lifecycle_state"] in ("identified", "owned", "authorised", "active")
@@ -65,13 +65,13 @@ def test_authority_reflects_granted_leases(tmp_path):
                                     resources=["r/*"], actions=["x.read"]))
     mcp = build_control_server(state)
     result = _run(mcp.call_tool("authority", {"agent_id": "agt"}))
-    assert result[1]["granted"] == ["x.read"]
+    assert result.structured_content["granted"] == ["x.read"]
 
 
 def test_explain_decision_not_found(tmp_path):
     mcp = build_control_server(_state(tmp_path))
     result = _run(mcp.call_tool("explain_decision", {"decision_id": "nope"}))
-    assert result[1] == {"found": False}
+    assert result.structured_content == {"found": False}
 
 
 def test_explain_decision_returns_the_recorded_trace(tmp_path):
@@ -84,7 +84,7 @@ def test_explain_decision_returns_the_recorded_trace(tmp_path):
     })
     mcp = build_control_server(state)
     result = _run(mcp.call_tool("explain_decision", {"decision_id": "az_test1"}))
-    payload = result[1]
+    payload = result.structured_content
     assert payload["found"] is True
     assert payload["reason"] == "ACTION_NOT_AUTHORIZED"
     assert payload["trace"]["decision"]["outcome"] == "deny"
@@ -97,7 +97,7 @@ def test_current_contract_found_by_domain_pack_naming_convention(tmp_path):
     state.contracts.upsert(contract)
     mcp = build_control_server(state)
     result = _run(mcp.call_tool("current_contract", {"agent_id": "claude-code"}))
-    payload = result[1]
+    payload = result.structured_content
     assert payload["found"] is True
     assert payload["contract"]["contract_id"] == "claude-code-software-starter"
 

@@ -1,40 +1,42 @@
 """Agent Plane Control MCP (Phase 19): an agent introspecting *itself*
 against the platform's own decisions/authority - "why couldn't I push?" ->
 "the active contract permits git.commit but requires approval for
-git.push" - not enforcement (that's agent_plane/gateway/mcp.py's job,
-unrelated to this module and currently broken against the installed SDK -
-see that file's own note).
+git.push" - not enforcement (that's agent_plane/gateway/mcp.py's job).
 
-Built on mcp.server.fastmcp.FastMCP, the SDK's high-level ergonomic API,
-confirmed to match the installed mcp package (v1.26.0) by direct
-introspection - unlike gateway/mcp.py's `from mcp import Client, types`
-and `Server(..., on_list_tools=..., on_call_tool=...)`, neither of which
-exist in this SDK version. See tests/test_mcp_control.py, which exercises
-every tool through FastMCP's real call_tool() dispatch, not by calling the
-Python functions directly, so the SDK wiring itself is verified.
+Built on mcp.server.mcpserver.MCPServer - this project's actual pinned
+dependency (pyproject.toml: mcp==2.2.0). In mcp 2.x this class was
+renamed from FastMCP (mcp.server.fastmcp.FastMCP in 1.x); the method
+surface used here (tool()/add_tool()/list_tools()/call_tool()/
+streamable_http_app()) is unchanged across the rename. See
+tests/test_mcp_control.py, which exercises every tool through
+MCPServer's real call_tool() dispatch, not by calling the Python
+functions directly, so the SDK wiring itself is verified against the
+project's real, pinned SDK version - not a different one that happened
+to be on PATH.
 
 Deliberately not mounted into the main ASGI app by default (build_control_
-server() returns the FastMCP instance; call .streamable_http_app() to get
-a mountable app). Mounting a second ASGI app with its own session-manager
-lifespan into the existing, heavily-tested FastAPI app is a distinct,
-riskier step that deserves its own dedicated verification - not something
-to fold into the already-large set of changes in this pass. Every tool
-takes its subject explicitly (agent_id/decision_id) rather than binding to
-a per-session caller identity, for the same reason: real per-caller
-identity binding over an MCP session is follow-up work, not this pass's.
+server() returns the MCPServer instance; call .streamable_http_app() to
+get a mountable app). Mounting a second ASGI app with its own
+session-manager lifespan into the existing, heavily-tested FastAPI app is
+a distinct, riskier step that deserves its own dedicated verification -
+not something to fold into the already-large set of changes in this pass.
+Every tool takes its subject explicitly (agent_id/decision_id) rather
+than binding to a per-session caller identity, for the same reason: real
+per-caller identity binding over an MCP session is follow-up work, not
+this pass's.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from agent_plane.authority.service import TRACE_SCHEMA
 from agent_plane.registry.store import agent_lifecycle_state
 
 
-def build_control_server(app_state: Any) -> FastMCP:
-    mcp = FastMCP(
+def build_control_server(app_state: Any) -> MCPServer:
+    mcp = MCPServer(
         "agent-plane-control",
         instructions="Introspect Agent Plane's own decisions and authority state for one agent.",
     )

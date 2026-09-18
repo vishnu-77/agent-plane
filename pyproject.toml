@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp==2.2.0", "jsonschema>=4.23"] # tested Streamable HTTP gateway/client
+mcp = ["mcp==2.2.0", "jsonschema>=4.23", "httpx2>=2.12"] # tested Streamable HTTP gateway/client
 delegation = ["cryptography>=42"]        # Ed25519 verified identity (IDENTITY_MODE=delegation)
 tokens = ["tiktoken>=0.7"]               # exact token counting (else a char heuristic)
 postgres = ["psycopg[binary]>=3.2"]      # Postgres audit backend
@@ -41,6 +41,7 @@ server = ["uvicorn[standard]>=0.30"]     # uvloop/httptools + --reload
 all = [
     "mcp==2.2.0",
     "jsonschema>=4.23",
+    "httpx2>=2.12",
     "cryptography>=42",
     "tiktoken>=0.7",
     "psycopg[binary]>=3.2",

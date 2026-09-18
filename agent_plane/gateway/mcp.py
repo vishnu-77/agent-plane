@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 from mcp import Client, types
 from mcp.client.streamable_http import streamable_http_client
@@ -20,7 +20,7 @@ from agent_plane.gateway.identity import IdentityError
 PROTOCOL = "2026-07-28"
 
 
-class BoundedStream(httpx.AsyncByteStream):
+class BoundedStream(httpx2.AsyncByteStream):
     def __init__(self, stream, limit):
         self.stream, self.limit = stream, limit
 
@@ -36,16 +36,16 @@ class BoundedStream(httpx.AsyncByteStream):
         await self.stream.aclose()
 
 
-class BoundedTransport(httpx.AsyncBaseTransport):
+class BoundedTransport(httpx2.AsyncBaseTransport):
     def __init__(self, limit):
-        self.inner, self.limit = httpx.AsyncHTTPTransport(retries=0), limit
+        self.inner, self.limit = httpx2.AsyncHTTPTransport(retries=0), limit
 
     async def handle_async_request(self, request):
         response = await self.inner.handle_async_request(request)
         if response.headers.get("content-encoding", "identity") != "identity":
             await response.aclose()
             raise ValueError("Compressed MCP responses are not accepted by the bounded preview")
-        return httpx.Response(response.status_code, headers=response.headers,
+        return httpx2.Response(response.status_code, headers=response.headers,
                                stream=BoundedStream(response.stream, self.limit), extensions=response.extensions)
 
     async def aclose(self):
@@ -61,7 +61,7 @@ def build_gateway(app, path):
         headers = {"Accept-Encoding": "identity"}
         if config.upstream_secret_env:
             headers["Authorization"] = "Bearer " + os.environ[config.upstream_secret_env]
-        return httpx.AsyncClient(headers=headers, timeout=config.timeout_seconds,
+        return httpx2.AsyncClient(headers=headers, timeout=config.timeout_seconds,
             trust_env=False, follow_redirects=False, transport=BoundedTransport(config.max_response_bytes))
 
     async def upstream_call(tool, arguments):
